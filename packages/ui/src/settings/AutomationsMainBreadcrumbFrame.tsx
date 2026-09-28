@@ -25,6 +25,11 @@ export function AutomationsMainBreadcrumbFrame({
   return (
     <SettingsBreadcrumbProvider onItemsChange={setItems} sectionLabel={sectionLabel}>
       <div className="flex min-h-0 flex-1 flex-col">
+        {/* Bugfix：原来整个块（拖拽区 + 面包屑）被 isDesktop 绑死，自部署浏览器形态下
+            Automations 主视图连面包屑都没有，用户无法从编辑页返回。
+            拖拽区 [app-region:drag] 确实是桌面窗口语义，但面包屑是导航语义，两者必须解耦：
+            桌面保留「拖拽区高度 + 面包屑」，浏览器只渲染面包屑。
+            详见 docs/specs/selfhost-browser-capability-gates.md。 */}
         {isDesktop ? (
           <div
             className="h-12 shrink-0 [app-region:drag]"
@@ -32,7 +37,9 @@ export function AutomationsMainBreadcrumbFrame({
           >
             <SettingsHeaderBreadcrumb ariaLabel={ariaLabel} items={items} />
           </div>
-        ) : null}
+        ) : (
+          <SettingsHeaderBreadcrumb ariaLabel={ariaLabel} items={items} />
+        )}
         {children}
       </div>
     </SettingsBreadcrumbProvider>

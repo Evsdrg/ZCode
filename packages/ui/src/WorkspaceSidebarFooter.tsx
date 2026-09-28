@@ -370,7 +370,16 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
           </DropdownMenuContent>
         </DropdownMenu>
         <div className="flex shrink-0 items-center gap-1.5">
-          {isDesktop && workspacePath ? (
+          {/* Bugfix：这里原来用 isDesktop && workspacePath 门控。isDesktop 是硬编码 prop，
+              packages/web/src/main.tsx 渲染 <Root> 时不传它，于是自部署浏览器形态
+              （zcode --web，服务端与本机同进程）下整个 Bot 配置入口不渲染。
+              但 IBotsService 已由 createLocalServices 注册，且 entry-http 未传
+              serviceAuthorityMode ⇒ isDesktopAttachedRemote 为 false ⇒
+              runStartupBackgroundTasks 为 true，telegram/weixin/feishu 长连接会启动，
+              POST /api/bots/:provider 回调也已挂载——bot 配置能力在浏览器下真实可用。
+              因此放开为仅依赖 workspacePath；远控语义的渠道入口在弹层内另行禁用。
+              详见 docs/specs/selfhost-browser-capability-gates.md。 */}
+          {workspacePath ? (
             <WorkspaceWebRemoteControlTrigger
               workspacePath={workspacePath}
               workspaceIdentity={workspaceIdentity}

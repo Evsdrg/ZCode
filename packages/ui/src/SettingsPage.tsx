@@ -1823,12 +1823,20 @@ export function SettingsPage({
                           </ServiceProvider>
                         ) : activeSection === "memory" ? (
                           <ServiceProvider services={localHostServices}>
-                            {/* Memory catalog 始终使用本地 Host，避免远程 workspace 误读本机数据。 */}
+                            {/* Memory catalog 始终使用本地 Host，避免远程 workspace 误读本机数据。
+                                Bugfix：projectMemoryViewerAvailable 原来传 Boolean(isDesktop)，
+                                自部署浏览器形态下 Memory catalog 只能看到「仅本地可用」占位。
+                                但 MemorySettingsViewer 零 platform 依赖，纯走
+                                memoryService.listProjectMemories()；而 IMemoryService 在
+                                createLocalServices（zcode --web 的服务端）与 desktop host
+                                的远程 workspace 集合里均已注册，读取的是 host 所在机器的数据，
+                                与上方「始终使用本地 Host」的语义一致。因此 viewer 不再按宿主
+                                形态门控。详见 docs/specs/selfhost-browser-capability-gates.md。 */}
                             <MemorySettingsSection
                               memoryEnabled={memoryEnabled}
                               memoryService={localHostServices.memoryService}
                               onMemoryEnabledChange={handleMemoryEnabledChange}
-                              projectMemoryViewerAvailable={Boolean(isDesktop)}
+                              projectMemoryViewerAvailable
                               workspaceDisplayNames={memoryWorkspaceDisplayNames}
                             />
                           </ServiceProvider>
