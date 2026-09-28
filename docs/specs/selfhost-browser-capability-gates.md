@@ -73,6 +73,28 @@ spawn 本机 `node server/entry-http.js` → `createLocalServices()` → `create
 7. desktop 形态行为不变：缩放子菜单、窗口控制、资源管理器、CUA、内置浏览器等桌面专属入口仍只在桌面出现。
 8. 远控通道：**不在本版本范围**。开源代码中无远控 UI 入口，本分支不新增门控；若闭源侧入口日后合入，需单独评估其在自部署形态的可见性。
 
+## 测试
+
+`packages/ui` 此前没有任何测试基建（全包 0 个 `*.test.*` / `*.spec.*`，无 runner、无 DOM 环境、
+无 `@/` 别名解析）。本次补上最小可用环境：
+
+- `packages/ui/vitest.config.ts`：`@vitejs/plugin-react` + `happy-dom` + `@/* -> ./src/*` 别名
+  （与 `packages/ui/tsconfig.json` 的 `paths` 保持一致）；
+- `packages/ui/vitest.setup.ts`：声明 React act 环境；
+- `packages/ui/package.json`：`test` / `test:watch` script。
+
+覆盖文件：
+
+| 文件 | 覆盖点 |
+| --- | --- |
+| `src/lib/settingsNavigation.test.ts` | `migration` 分区已关闭、`resolveSettingsSection` 回退 `general`、`plugins -> plugin` 历史映射保留、其余分区未被误关、既有隐藏分区未被误开 |
+| `src/settings/AutomationsMainBreadcrumbFrame.test.tsx` | 桌面保留拖拽区且面包屑在其中；浏览器不渲染拖拽区**但仍渲染面包屑**（本次修复核心）；两种形态都渲染 children |
+| `src/botsUi.test.ts` | 四个远控渠道仍是 bot provider 且已实现、未实现渠道不被伪装、region tag、`resolveBotProviderEntry` 选/建两条路径、颗粒度过滤、`buildCurrentWorkspaceId` 的 identity 优先规则 |
+
+未覆盖：`WorkspaceSidebarFooter` 的 bot 入口放开、`SettingsPage` 的 memory viewer 放开。
+这两个组件的依赖图包含 `@zcode/services` 全量装配，渲染测试需要先为 ui 包建立
+service stub 体系，超出本次范围；其行为已由上述纯逻辑测试与手工验收场景覆盖。
+
 ## 不在本次范围
 
 - `isMacDesktop` / `isWindowsDesktop` / `isLinuxDesktop` / `isDesktopRuntime` / `isDesktopAttachedRemote` 的门控未做调整。
