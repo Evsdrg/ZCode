@@ -22,7 +22,8 @@ process.env.GIT_CONFIG_KEY_1 = "core.eol";
 process.env.GIT_CONFIG_VALUE_1 = "lf";
 process.env.ZCODE_TEST_RELEASE_TARGET = process.env.ZCODE_TEST_RELEASE_TARGET ?? "darwin";
 process.env.ZCODE_TEST_RELEASE_ARCH = process.env.ZCODE_TEST_RELEASE_ARCH ?? "aarch64";
-process.env.ZCODE_TEST_CLIENT_CONFIG_PLATFORM = process.env.ZCODE_TEST_CLIENT_CONFIG_PLATFORM ?? "darwin-aarch64";
+process.env.ZCODE_TEST_CLIENT_CONFIG_PLATFORM =
+  process.env.ZCODE_TEST_CLIENT_CONFIG_PLATFORM ?? "darwin-aarch64";
 // Bugfix: 桌面端会把自定义 dataBaseDir 通过环境变量注入到 host/git 子进程。
 // 很多服务层单测只通过覆盖 HOME 来隔离临时目录；若保留该变量，路径解析会继续优先命中真实 dataBaseDir，
 // 从而导致“终端本地跑通过，但应用内 git push 触发 pre-push 时大量用例误写到同一目录”。
@@ -44,3 +45,17 @@ vi.mock("node:os", async (importOriginal) => {
     },
   };
 });
+
+// Electron 的 `<webview>` 是内置特殊标签，并不通过 customElements 注册（规范要求自定义
+// 元素名必须含连字符，define("webview") 会直接抛 SyntaxError），因此 jsdom / happy-dom 里
+// customElements.get("webview") 恒为 undefined。BrowserViewportSurface 与
+// CodingPlanEmbeddedWebviewDialog 正是用这个判据决定是否挂载 guest；测试环境必须按
+// Electron 宿主语义把 webview 视为已注册，否则这些桌面组件测试会整批因 guest 不挂载而失败。
+// 只影响 get("webview") 一个查询点，其余自定义元素行为保持原样。
+if (typeof customElements !== "undefined" && typeof customElements.get === "function") {
+  const originalGet = customElements.get.bind(customElements);
+  customElements.get = ((name: string) =>
+    name === "webview"
+      ? class WebviewStub extends HTMLElement {}
+      : originalGet(name)) as typeof customElements.get;
+}
