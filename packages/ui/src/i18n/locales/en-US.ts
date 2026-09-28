@@ -1375,6 +1375,9 @@ const enUS: Record<string, string> = {
   "settings.onboardingDescription":
     "Choose your role, interface mode, and preferences again. Use Migration settings to import data.",
   "settings.onboardingOpen": "Open onboarding",
+  "settings.webUiVersion": "Web UI version",
+  "settings.webUiVersionDescription":
+    "Version of the Web UI (browser client and HTTP service), matching the version returned by /api/server-info. The Agent backend is a separate component with its own version.",
 
   // App header
   "app.currentTheme": "Current: {theme}",
