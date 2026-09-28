@@ -78,11 +78,7 @@ const getResolvedCodeTheme = (theme?: BundledTheme): BundledTheme => {
   return "github-light";
 };
 
-const getCodeTokensCacheKey = (
-  code: string,
-  language: BundledLanguage,
-  theme: BundledTheme,
-) => {
+const getCodeTokensCacheKey = (code: string, language: BundledLanguage, theme: BundledTheme) => {
   const start = code.slice(0, 100);
   const end = code.length > 100 ? code.slice(-100) : "";
   return `${theme}:${language}:${code.length}:${start}:${end}`;
@@ -100,6 +96,13 @@ const getHighlighter = (
   const highlighterPromise = createHighlighter({
     langs: [language],
     themes: [theme],
+  }).catch((error) => {
+    // 主题/语言包是按需动态 import 的独立分包，网络抖动会导致加载失败。
+    // 失败的 Promise 若留在缓存里，之后同一个 (theme, language) 组合会一直复用
+    // 这个 rejected promise，表现为「切换主题没有任何反应」且刷新前不会自愈。
+    // 这里失败即出缓存，让后续调用可以重新尝试加载。
+    highlighterCache.delete(cacheKey);
+    throw error;
   });
 
   highlighterCache.set(cacheKey, highlighterPromise);

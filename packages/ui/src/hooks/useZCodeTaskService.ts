@@ -183,11 +183,7 @@ function readPersistedSnapshotEntry(key: string) {
   return { etag: entry.etag, snapshot: entry.snapshot };
 }
 
-function writePersistedSnapshotEntry(
-  key: string,
-  etag: string,
-  snapshot: ZCodeTaskSnapshot,
-): void {
+function writePersistedSnapshotEntry(key: string, etag: string, snapshot: ZCodeTaskSnapshot): void {
   ensurePersistedSnapshotCacheLoaded();
   const serializedSnapshot = JSON.stringify(snapshot);
   const sizeBytes = new TextEncoder().encode(serializedSnapshot).byteLength;
@@ -263,11 +259,7 @@ function createZCodeTaskServiceProxy(service: IZCodeTaskService): IZCodeTaskServ
                 snapshot: fallbackResult.snapshot,
               };
               snapshotCache.set(requestKey, nextEntry);
-              writePersistedSnapshotEntry(
-                requestKey,
-                fallbackResult.etag,
-                fallbackResult.snapshot,
-              );
+              writePersistedSnapshotEntry(requestKey, fallbackResult.etag, fallbackResult.snapshot);
             }
             return fallbackResult.snapshot;
           }
@@ -277,11 +269,7 @@ function createZCodeTaskServiceProxy(service: IZCodeTaskService): IZCodeTaskServ
               snapshot: firstResult.snapshot,
             };
             snapshotCache.set(requestKey, nextEntry);
-            writePersistedSnapshotEntry(
-              requestKey,
-              firstResult.etag,
-              firstResult.snapshot,
-            );
+            writePersistedSnapshotEntry(requestKey, firstResult.etag, firstResult.snapshot);
           } else if (!firstResult.snapshot) {
             snapshotCache.delete(requestKey);
             deletePersistedSnapshotEntry(requestKey);
@@ -306,9 +294,15 @@ export function useZCodeTaskService(
   workspaceIdentity?: string | null,
 ): IZCodeTaskService {
   // ZCode task 服务按 workspace 身份解析，保证所有 task RPC 都落到对应的 host。
-  const services = workspacePath
-    ? useWorkspaceServices(workspacePath, preferredRemoteSessionId, workspaceIdentity)
-    : useServices();
+  // 注意：三个 useXxxService 都不能把 hook 放进三元分支——workspacePath 从 undefined 变为
+  // 有值时分支切换会让 hook 数量突变，React 依赖比较读到 undefined 抛 length 错误。
+  const contextServices = useServices();
+  const workspaceServices = useWorkspaceServices(
+    workspacePath ?? null,
+    preferredRemoteSessionId,
+    workspaceIdentity,
+  );
+  const services = workspacePath ? workspaceServices : contextServices;
   const rawService = services.zcodeTaskService;
   if (!rawService || typeof rawService !== "object") {
     return rawService;

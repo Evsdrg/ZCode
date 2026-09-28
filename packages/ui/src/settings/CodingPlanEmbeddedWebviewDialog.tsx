@@ -74,6 +74,15 @@ function readCodingPlanWebviewImportMetaEnv(): CodingPlanWebviewImportMetaEnv {
     {}) as CodingPlanWebviewImportMetaEnv;
 }
 
+/**
+ * Electron 渲染进程注册了 `webview` 自定义元素；普通浏览器没有。
+ * 官网套餐页依赖 Electron webview（含 preload 凭据注入与购买完成回传），
+ * 浏览器环境下无法内嵌，降级为「前往官网购买 + 购买后刷新」。
+ */
+function supportsEmbeddedWebview(): boolean {
+  return typeof customElements !== "undefined" && Boolean(customElements.get("webview"));
+}
+
 export function CodingPlanEmbeddedWebviewDialog({
   credentialService,
   onOpenChange,
@@ -90,6 +99,8 @@ export function CodingPlanEmbeddedWebviewDialog({
   const theme = useZCodeStoreWithDefault((state) => state.theme, "zai-dark");
   const userId = useZCodeStoreWithDefault((state) => state.user?.id ?? null, null);
   const webviewRef = useRef<ElectronWebviewTag | null>(null);
+  // 宿主能力在一次挂载内不变，首帧求值即可。
+  const webviewSupported = useMemo(() => supportsEmbeddedWebview(), []);
   const onOpenResultRef = useRef(onOpenResult);
   onOpenResultRef.current = onOpenResult;
   // 当前 locale 作为 webview 语言 hint / 注入值；Locale 与 CodingPlanWebviewLocale 同构。
@@ -432,6 +443,11 @@ export function CodingPlanEmbeddedWebviewDialog({
     platform.openExternal(webviewUrl);
   }, [platform, webviewUrl]);
 
+  // 浏览器环境降级：用户在官网完成购买后点击按钮，复用购买完成回调（关闭弹窗并刷新权益）。
+  const handleBrowserFallbackDone = useCallback(() => {
+    void onPurchaseComplete?.();
+  }, [onPurchaseComplete]);
+
   if (!open) {
     return null;
   }
@@ -503,17 +519,46 @@ export function CodingPlanEmbeddedWebviewDialog({
               </div>
             </div>
           ) : null}
-          <webview
-            ref={handleWebviewRef}
-            allowpopups={"" as unknown as boolean}
-            partition="persist:zcode-coding-plan"
-            src={webviewUrl}
-            className={cn(
-              "min-h-0 flex-1 bg-background [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-              loadError && "hidden",
-            )}
-            data-testid="coding-plan-embedded-webview"
-          />
+          {webviewSupported ? (
+            <webview
+              ref={handleWebviewRef}
+              allowpopups={"" as unknown as boolean}
+              partition="persist:zcode-coding-plan"
+              src={webviewUrl}
+              className={cn(
+                "min-h-0 flex-1 bg-background [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+                loadError && "hidden",
+              )}
+              data-testid="coding-plan-embedded-webview"
+            />
+          ) : (
+            <div
+              className="flex min-h-0 flex-1 items-center justify-center"
+              data-testid="coding-plan-browser-fallback"
+            >
+              <div className="flex w-full max-w-lg flex-col items-center gap-4 rounded-xl border border-border bg-surface p-6 text-center">
+                <span className="text-ui-base text-foreground-subtle">
+                  {intl.formatMessage({
+                    id: "settings.modelProvider.codingPlan.webview.browserFallback",
+                  })}
+                </span>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <Button size="sm" onClick={handleOpenWebsite}>
+                    <ExternalLinkIcon className="size-3.5" />
+                    {intl.formatMessage({
+                      id: "settings.modelProvider.codingPlan.webview.openWebsite",
+                    })}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={handleBrowserFallbackDone}>
+                    <RefreshCwIcon className="size-3.5" />
+                    {intl.formatMessage({
+                      id: "settings.modelProvider.codingPlan.webview.browserFallbackDone",
+                    })}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
       </div>
     </section>

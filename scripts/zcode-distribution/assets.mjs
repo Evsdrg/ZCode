@@ -30,6 +30,12 @@ const runtimePackageNames = [
 ];
 
 export async function stageTuiRuntime(packageRoot) {
+  // 本地轻量发行（仅需 --web / app-server）时允许跳过 TUI 资产：
+  // sea-tui 依赖的 workspace dist 产物只在完整 CI 流水里存在。
+  if (process.env.ZCODE_DIST_SKIP_TUI === "1") {
+    console.warn("[assets] ZCODE_DIST_SKIP_TUI=1, skip TUI runtime staging");
+    return;
+  }
   const stagingDirectory = resolve(packageRoot, "../tui-staging");
   const copied = new Map();
   try {

@@ -3869,6 +3869,9 @@ const enUS: Record<string, string> = {
   "settings.modelProvider.codingPlan.webview.retry": "Retry",
   "settings.modelProvider.codingPlan.webview.loadFailed": "The plan page failed to load.",
   "settings.modelProvider.codingPlan.webview.openWebsite": "Buy on the official website",
+  "settings.modelProvider.codingPlan.webview.browserFallback":
+    'The plan page cannot be embedded in a browser. Complete the purchase on the official website, then click "I\'ve completed the purchase" to refresh.',
+  "settings.modelProvider.codingPlan.webview.browserFallbackDone": "I've completed the purchase",
   "settings.modelProvider.codingPlan.status.loginRequired": "Not signed in",
   "settings.modelProvider.codingPlan.status.disconnected": "Not connected",
   "settings.modelProvider.codingPlan.status.checking": "Checking",
