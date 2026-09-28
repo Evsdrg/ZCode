@@ -2655,6 +2655,9 @@ const zhCN: Record<string, string> = {
   "settings.modelProvider.codingPlan.webview.retry": "重试",
   "settings.modelProvider.codingPlan.webview.loadFailed": "套餐页加载失败。",
   "settings.modelProvider.codingPlan.webview.openWebsite": "前往官网购买",
+  "settings.modelProvider.codingPlan.webview.browserFallback":
+    "浏览器环境无法内嵌套餐页。请前往官网完成购买，然后点击「我已完成购买」刷新权益。",
+  "settings.modelProvider.codingPlan.webview.browserFallbackDone": "我已完成购买",
   "settings.modelProvider.codingPlan.status.loginRequired": "未登录",
   "settings.modelProvider.codingPlan.status.disconnected": "未连接",
   "settings.modelProvider.codingPlan.status.checking": "查询中",
