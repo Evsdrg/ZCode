@@ -820,6 +820,9 @@ const zhCN: Record<string, string> = {
   "settings.onboardingDescription":
     "重新选择职业、界面模式和使用偏好。数据迁移可在迁移设置中操作。",
   "settings.onboardingOpen": "打开引导",
+  "settings.webUiVersion": "Web UI 版本",
+  "settings.webUiVersionDescription":
+    "当前 Web UI（浏览器界面与 HTTP 服务）的版本，与 /api/server-info 返回的 version 一致。Agent 后端为独立组件，版本另计。",
 
   // 应用头部
   "app.currentTheme": "当前: {theme}",

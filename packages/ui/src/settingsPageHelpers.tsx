@@ -8,6 +8,8 @@ import type {
 import {
   TID_SETTINGS_ASK_USER_QUESTION_AUTO_RESOLUTION_SWITCH,
   TID_SETTINGS_NATIVE_SEARCH_SWITCH,
+  TID_SETTINGS_WEB_UI_VERSION_VALUE,
+  ZCODE_VERSION,
 } from "@zcode/shared";
 import { useState, useCallback, useEffect } from "react";
 import type { IPlatformService } from "@zcode/shared";
@@ -881,6 +883,28 @@ export function GeneralSectionContent({
             <Button type="button" size="lg" variant="outline" onClick={onOpenOnboardingDialog}>
               {intl.formatMessage({ id: "settings.onboardingOpen" })}
             </Button>
+          }
+        />
+      </SettingsGroupCard>
+
+      {/* Bugfix：自部署形态（zcode --web）下用户无法从界面得知当前版本，排障要分别登录
+          服务器与本机查进程。这里在通用分区末尾补一行只读版本号。
+          值取 ZCODE_VERSION（shared/src/version.ts，由 bundler define 注入根 package.json
+          的 version），与 GET /api/server-info 的 version 同源同值，不为它新增 RPC 或第二份真相。
+          文案必须写明「Web UI」：Agent 协议后端是官方闭源组件，版本线独立
+          （形如 v0.13.3+464dc03681ff），与 ZCODE_VERSION 不是一套，只写「版本」会误导排障。
+          详见 docs/specs/webui-version-display.md。 */}
+      <SettingsGroupCard>
+        <SettingsRow
+          label={intl.formatMessage({ id: "settings.webUiVersion" })}
+          description={intl.formatMessage({ id: "settings.webUiVersionDescription" })}
+          control={
+            <span
+              className="font-mono text-ui-base text-foreground-subtle"
+              data-testid={TID_SETTINGS_WEB_UI_VERSION_VALUE}
+            >
+              {ZCODE_VERSION}
+            </span>
           }
         />
       </SettingsGroupCard>
