@@ -11,7 +11,6 @@ import {
   isRemoteWorkspaceIdentity,
   ZCODE_AGENT_PROVIDER,
   zcodeTaskMetaSchema,
-  resolveWorkspaceKey,
   CRON_DEFAULT_GROUP_ID,
   OFF_PEAK_DEFAULT_GROUP_ID,
   type ZCodeProvider,
@@ -167,7 +166,12 @@ const WORKSPACE_BOOTSTRAP_TASK_GROUP_COLORS = [
 const logger = createServiceLogger("task-index-repo");
 
 function workspaceKey(params: { workspacePath: string; workspaceIdentity?: string }): string {
-  return resolveWorkspaceKey(params);
+  // 归一尾斜杠：'/opt/x/' 与 '/opt/x' 是同一目录，但作为 workspace_key 是两个分组，
+  // 且会让按路径回查（归档/更新/读取）静默 miss。仅限定在任务索引仓储内，
+  // 不改 @zcode/shared 的全产品 resolveWorkspaceKey（控制影响面）。
+  const identity = params.workspaceIdentity?.trim();
+  if (identity) return identity;
+  return params.workspacePath.replace(/\/+$/, "") || params.workspacePath;
 }
 
 function isTerminalTaskStatus(status: ZCodeTaskMeta["status"]): boolean {
@@ -1663,6 +1667,17 @@ export class TaskIndexRepo {
         titleOverridden: row.title_overridden === 1,
       });
     });
+  }
+
+  /** 自部署全工作区视图：列出有未删除任务的 distinct workspace_path（供跨工作区任务列表派生 scopes）。 */
+  async listDistinctWorkspacePaths(): Promise<string[]> {
+    await this.ensureReady();
+    return this.getDatabase()
+      .prepare(
+        `SELECT DISTINCT workspace_path FROM tasks WHERE deleted = 0 ORDER BY workspace_path`,
+      )
+      .all()
+      .map((row) => String((row as { workspace_path: string }).workspace_path));
   }
 
   async listTaskMetas(params: {
