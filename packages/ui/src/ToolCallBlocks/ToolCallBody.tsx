@@ -132,6 +132,11 @@ function InlineCodeContent({
   );
 }
 
+// 虚拟列表按测高缓存行高：截图 <img> 解码后从 0 撑到全高会让行高突变，
+// 用户浏览历史时表现为滚动条乱跳。按 dataURL 记住自然尺寸，重挂载时立即
+// 预留宽高比（首见仍会撑高一次，属不可避免；dataURL 相同 ⇒ 命中同一缓存）。
+const imageSizeCache = new Map<string, { width: number; height: number }>();
+
 function InlineImageContent({ preview }: { preview: ImageCodeViewerSource }) {
   const { readMediaPreview, resourceUrl } = useToolPresentationCapabilities();
   const { intl } = useZCodeIntl();
@@ -185,7 +190,26 @@ function InlineImageContent({ preview }: { preview: ImageCodeViewerSource }) {
     );
   }
 
-  return <img src={src} alt={preview.title} />;
+  const cachedSize = imageSizeCache.get(src);
+  return (
+    <img
+      src={src}
+      alt={preview.title}
+      // 上限收紧截图高度（全页截图可达数千 px）；宽高比预留减少虚拟列表测高突变。
+      className="max-h-[420px] max-w-full rounded-lg object-contain"
+      {...(cachedSize ? { width: cachedSize.width, height: cachedSize.height } : {})}
+      onLoad={(event) => {
+        const img = event.currentTarget;
+        if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+          imageSizeCache.set(img.src, {
+            width: img.naturalWidth,
+            height: img.naturalHeight,
+          });
+        }
+      }}
+    />
+  );
+>>>>>>> ea3e1799 (feat(attachments): Host 持久保存 20 MiB 以内的任意文件附件)
 }
 
 function InlinePlanResult({

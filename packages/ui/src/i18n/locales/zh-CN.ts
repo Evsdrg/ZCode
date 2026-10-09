@@ -6507,6 +6507,7 @@ const zhCN: Record<string, string> = {
   "chat.attachments.remove": "移除附件",
   "chat.attachments.maxFiles": "最多只能添加 {count} 个附件",
   "chat.attachments.maxFileSize": "附件不能超过 {sizeMb} MB",
+  "chat.attachments.arbitraryFileTooLarge": "文件附件不能超过 20 MiB（20,971,520 字节）",
   "chat.attachments.readFailed": "读取附件失败：{message}",
   "chat.attachments.missingInlineImageContent": "图片附件 {filename} 缺少文件内容，请重新添加。",
   "chat.attachments.missingInlinePdfContent": "PDF 附件 {filename} 缺少文件内容，请重新添加。",

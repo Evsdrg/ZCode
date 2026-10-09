@@ -43,6 +43,12 @@ import {
   type ComposerAttachmentUploadStatus,
 } from "@/store/composerAttachmentUploadStore.js";
 import { uploadComposerAttachment, type AttachmentPutFn } from "@/v4/composer/attachmentUpload.js";
+import {
+  ArbitraryFileTooLargeError,
+  isHostFileUploadCandidate,
+  supportsHostFileUploads,
+  uploadArbitraryFile,
+} from "./arbitraryFileUpload.js";
 
 export const COMPOSER_ATTACHMENT_UPLOAD_CONCURRENCY = 2;
 export const COMPOSER_ATTACHMENT_AUTO_RETRY_DELAY_MS = 500;
@@ -157,6 +163,7 @@ class RemoteAttachmentNotStagedError extends Error {
 
 export function isTransientAttachmentUploadError(error: unknown): boolean {
   if (isAbortError(error)) return false;
+  if (error instanceof ArbitraryFileTooLargeError) return false;
   if (error instanceof OversizedInlineVideoAttachmentError) return false;
   if (error instanceof OversizedInlinePdfAttachmentError) return false;
   if (error instanceof MissingInlinePdfContentError) return false;
@@ -375,6 +382,42 @@ export function useComposerAttachments(
           return;
         }
 
+        if (
+          isHostFileUploadCandidate(item, target) &&
+          (await supportsHostFileUploads(target.transferService))
+        ) {
+          const service = target.transferService;
+          if (!service.beginUpload || !service.uploadChunk || !service.commitUpload || !item.file) {
+            throw new Error("fault.attachment.uploadUnsupported");
+          }
+          const ref = await uploadArbitraryFile({
+            service: {
+              beginUpload: (params) => service.beginUpload!(params),
+              uploadChunk: (params) => service.uploadChunk!(params),
+              commitUpload: (operationId) => service.commitUpload!(operationId),
+            },
+            file: item.file,
+            operationId: item.operationId,
+            sessionId: target.sessionId,
+            workspacePath: target.workspacePath,
+            mime: item.mimeType,
+            signal: controller.signal,
+            onProgress(progress) {
+              if (controllersRef.current.get(controllerKey) !== controller) return;
+              updateItem(targetScopeKey, attachmentId, (current) => ({
+                ...current,
+                uploadStatus: progress.phase === "committing" ? "committing" : "uploading",
+                uploadProgress: Math.max(
+                  current.uploadProgress,
+                  progressPercent(progress.uploadedBytes, progress.totalBytes),
+                ),
+              }));
+            },
+          });
+          if (controllersRef.current.get(controllerKey) !== controller) return;
+          finishWithReady(targetScopeKey, attachmentId, ref, true);
+          return;
+        }
         const serialized = await serializeChatComposerAttachment(item);
         const ref = await uploadComposerAttachment(
           target.attachmentPut,
@@ -408,32 +451,34 @@ export function useComposerAttachments(
         if (!current) return;
         // 结构化超限错误在 UI 层按 locale 格式化（与 chatAttachments 序列化边界约定一致）。
         const message =
-          error instanceof OversizedInlineVideoAttachmentError
-            ? intl.formatMessage(
-                { id: "chat.attachments.oversizedInlineVideo" },
-                {
-                  filename: error.filename,
-                  size: formatAttachmentSize(error.sizeBytes),
-                  maxSize: formatAttachmentSize(error.maxSizeBytes),
-                },
-              )
-            : error instanceof OversizedInlinePdfAttachmentError
+          error instanceof ArbitraryFileTooLargeError
+            ? intl.formatMessage({ id: "chat.attachments.arbitraryFileTooLarge" })
+            : error instanceof OversizedInlineVideoAttachmentError
               ? intl.formatMessage(
-                  { id: "chat.attachments.oversizedInlinePdf" },
+                  { id: "chat.attachments.oversizedInlineVideo" },
                   {
                     filename: error.filename,
                     size: formatAttachmentSize(error.sizeBytes),
                     maxSize: formatAttachmentSize(error.maxSizeBytes),
                   },
                 )
-              : error instanceof MissingInlinePdfContentError
+              : error instanceof OversizedInlinePdfAttachmentError
                 ? intl.formatMessage(
-                    { id: "chat.attachments.missingInlinePdfContent" },
-                    { filename: error.filename },
+                    { id: "chat.attachments.oversizedInlinePdf" },
+                    {
+                      filename: error.filename,
+                      size: formatAttachmentSize(error.sizeBytes),
+                      maxSize: formatAttachmentSize(error.maxSizeBytes),
+                    },
                   )
-                : error instanceof Error
-                  ? error.message
-                  : String(error);
+                : error instanceof MissingInlinePdfContentError
+                  ? intl.formatMessage(
+                      { id: "chat.attachments.missingInlinePdfContent" },
+                      { filename: error.filename },
+                    )
+                  : error instanceof Error
+                    ? error.message
+                    : String(error);
         const transient = isTransientAttachmentUploadError(error);
         if (transient && current.autoRetryCount < 1) {
           updateItem(targetScopeKey, attachmentId, (item) => ({
@@ -577,6 +622,7 @@ export function useComposerAttachments(
           // 由 restartEpoch / 新 attachmentSessionId 驱动的唤醒 effect 在会话可用后统一入队。
           updateItem(targetScopeKey, item.id, (current) => ({
             ...current,
+            operationId: `attachment-${nanoid()}`,
             uploadStatus: "waitingSession",
             uploadProgress: 0,
             ...(silent
@@ -951,6 +997,7 @@ export function useComposerAttachments(
       void target?.transferService.cleanup(current.operationId).catch(() => {});
       updateItem(scopeKey, id, (item) => ({
         ...item,
+        operationId: `attachment-${nanoid()}`,
         uploadStatus: target?.sessionId ? "queued" : "waitingSession",
         uploadProgress: 0,
         uploadError: undefined,

@@ -24,6 +24,8 @@ import {
   type ChannelReplyResult,
 } from "@zcode/shared";
 import { requestPluginReferenceCatalog } from "#src/zcode-agent/pluginReferenceCatalogRequest.js";
+import { retainCommandAttachments } from "../prompt-attachment-transfer/retainCommandAttachments.js";
+import type { PromptAttachmentRetentionPort } from "../prompt-attachment-transfer/promptAttachmentTransfer.js";
 import {
   localTtftFactsSchema,
   sessionDebugSnapshotSchema,
@@ -992,6 +994,8 @@ interface CreateZCodeAgentServiceOptions extends Omit<
   ZCodeAgentProcessManagerOptions,
   "idleTimeoutMs"
 > {
+  /** Host上传文件在转发命令前持久保留，不能依赖Renderer的adopt回执。 */
+  promptAttachmentRetention?: PromptAttachmentRetentionPort;
   /** 仅供 MCP 状态探测进程使用，不能把空闲回收传给 chat。 */
   mcpStatusIdleTimeoutMs?: number;
   accountProviderConfigSource?: ProviderSource<AccountProviderConfigSnapshot>;
@@ -6188,6 +6192,9 @@ export function createZCodeAgentService(
             payload: { ...payload, browserAmbientContext },
           };
         }
+      }
+      if (options?.promptAttachmentRetention) {
+        await retainCommandAttachments(options.promptAttachmentRetention, params, envelope);
       }
       const ack: CommandAck = await client.request(V4_METHODS.command, envelope, commandAckSchema);
       // Prompt command 在 committed TurnStarted 或 committed WorkspaceHookReviewRequested

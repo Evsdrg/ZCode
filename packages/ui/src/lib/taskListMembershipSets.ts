@@ -193,8 +193,35 @@ function mergeTaskIndexItems(lists: ZCodeTaskMeta[][]): ZCodeTaskMeta[] {
   return [...itemByEntityKey.values()];
 }
 
+const inFlightMembershipFetches = new Map<string, Promise<TaskListMembershipSets>>();
+
+function membershipScopeKey(scopes: TaskListMembershipScope[]): string {
+  return scopes
+    .map((scope) => `${scope.workspacePath}\u0000${scope.workspaceIdentity ?? ""}`)
+    .join("\u0001");
+}
+
 /** 拉取服务端权威 task 行、pinned/archived id 集与其它持久元数据。 */
 export async function fetchTaskListMembershipSets(params: {
+  service: TaskListMembershipService;
+  scopes: TaskListMembershipScope[];
+}): Promise<TaskListMembershipSets> {
+  // 会话切换瞬间多个组件会并发触发同一组 scopes 的整组刷新（实测同一毫秒 7 次
+  // listTasks，每次响应都引发一轮重渲染=可见闪烁）。相同 service+scopes 的并发请求
+  // 共享同一个在途 Promise：不缓存结果（每次仍拉新），只合并并发窗口。
+  const singleFlightKey = `${membershipServiceIdOf(params.service)}::${membershipScopeKey(params.scopes)}`;
+  const inFlight = inFlightMembershipFetches.get(singleFlightKey);
+  if (inFlight) return inFlight;
+  const promise = fetchTaskListMembershipSetsInner(params);
+  inFlightMembershipFetches.set(singleFlightKey, promise);
+  void promise.then(
+    () => inFlightMembershipFetches.delete(singleFlightKey),
+    () => inFlightMembershipFetches.delete(singleFlightKey),
+  );
+  return promise;
+}
+
+async function fetchTaskListMembershipSetsInner(params: {
   service: TaskListMembershipService;
   scopes: TaskListMembershipScope[];
 }): Promise<TaskListMembershipSets> {
