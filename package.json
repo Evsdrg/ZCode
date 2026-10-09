@@ -17,6 +17,8 @@
     "dep:graph": "node scripts/dependency-graph.mjs",
     "dep:refs": "node scripts/dep-refs.mjs",
     "verify:pre-push": "pnpm run lint && pnpm run architecture:check -- --changed",
+    "publish:check": "node scripts/publication/check.mjs",
+    "publish:check:test": "node --test scripts/publication/checks.test.mjs",
     "build": "pnpm -r build",
     "build:desktop-agent:bytecode": "node scripts/build-desktop-agent-bytecode.mjs",
     "build:zcode": "node scripts/build-zcode.mjs",
