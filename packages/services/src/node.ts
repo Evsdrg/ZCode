@@ -9,7 +9,10 @@ import {
   NodeModelSelectionConfigRepository,
   PERSONAL_PROVIDER_CONFIG_FILE_NAME,
 } from "@zcode/provider-node";
-import { getAppConfigDir as resolveAppConfigDir } from "./paths.js";
+import {
+  getAppConfigDir as resolveAppConfigDir,
+  getZCodeDataRootDir as resolveDataRootDir,
+} from "./paths.js";
 import {
   buildLocalMediaPreviewUrl,
   isProviderProvisioningAccountCredentialKey,
@@ -122,6 +125,7 @@ export type {
   CuaHelperInstallerOptions,
 } from "./cua-permission-broker/index.js";
 export { createBotsService } from "./bots/botsService.js";
+export { createWebRemoteControlRelayService } from "./web-remote-control/webRemoteControlRelayService.js";
 export { createFileWatcherService } from "./fileWatcher/fileWatcherService.js";
 export { createOAuthService } from "./oauth/oauthService.js";
 export { createOAuthProviderLogoutHandler } from "./oauth/oauthProviderLogout.js";
@@ -351,6 +355,11 @@ import { createZCodeSessionService } from "./zcode-session/zcodeSessionService.j
 import { createZCodeTaskIndexSyncer } from "./zcode-agent/zcodeTaskIndexSyncer.js";
 import { TaskIndexRepo } from "./session/taskIndexRepo.js";
 import { createBotsService } from "./bots/botsService.js";
+import { createWebRemoteControlRelayService } from "./web-remote-control/webRemoteControlRelayService.js";
+import { createAllWorkspacesTaskView } from "./session/allWorkspacesTaskView.js";
+import { createLocalWindowControllerService } from "./window-controller/localWindowControllerService.js";
+import { IWindowControllerService } from "./window-controller/windowController.js";
+import { IWebRemoteControlRelayService } from "./web-remote-control/webRemoteControlRelay.js";
 import { createBotRemoteWorkspaceService } from "./bots/botRemoteWorkspaceBridge.js";
 import type { SessionMessageSendRequested } from "#src/session/sessionMailbox.js";
 import { createFileWatcherService } from "./fileWatcher/fileWatcherService.js";
@@ -1298,6 +1307,25 @@ export function createLocalServices(options: {
     Omit<CreateFeedbackServiceOptions, "apiClient" | "credentialService" | "oauthService">
   >;
   processLifecycleReporter?: RuntimeProcessLifecycleReporter;
+  /**
+   * 自部署官方中转远控（relay device 桥）。仅 server/entry-http 形态开启；
+   * desktop host 不注册（官方桌面有自己的远控实现，UI 按 accessor 可选成员隐藏入口）。
+   */
+  webRemoteControlRelay?: boolean;
+  /**
+   * 自部署全工作区任务可见性：任务列表（list/listPinned/listArchived/deleted/taskList）
+   * 忽略 workspace scope，返回本机任务索引里全部工作区的任务（含「不在项目中工作」的
+   * default 草稿工作区）。webUI 按任务自身 workspace_path 分组展示。
+   */
+  taskListAllWorkspaces?: boolean;
+  /**
+   * 自部署 server 注册本地窗口级 Controller（`IWindowControllerService`）。桌面 Host 自带，
+   * 自部署缺它会让 WebUI 的全局任务列表（useGlobalTaskList：时间线/置顶/归档/命令面板）恒空。
+   */
+  windowController?: boolean;
+  /** 自部署本机附件入站存储；desktop/远端保持已有localPath链路。 */
+  arbitraryFileUploads?: boolean;
+  arbitraryFileUploadQuota?: { readyBytes?: number; retainedBytes?: number };
   taskRuntimeReporter?: RuntimeTaskReporter;
   /** workspace 文件搜索默认使用内置过滤器；后续规则来源只需在 Host 装配时注入最终实现。 */
   workspaceFileSearchFilter?: WorkspaceFileSearchFilter;
@@ -2082,7 +2110,16 @@ export function createLocalServices(options: {
           resolveOffPeakClientConfig: () => codingPlanSubscriptionService.getOffPeakClientConfig(),
           resolveOffPeakTaskService: () => offPeakTaskServiceForAgent,
         };
+  const promptAttachmentTransferService = createLocalPromptAttachmentTransferService(
+    options?.arbitraryFileUploads
+      ? {
+          uploadRoot: join(resolveDataRootDir(), "attachments", "prompt-files"),
+          uploadQuota: options.arbitraryFileUploadQuota,
+        }
+      : undefined,
+  );
   const zcodeAgentService = createZCodeAgentService({
+    promptAttachmentRetention: promptAttachmentTransferService,
     ...(agentAccountProviderConfigSource
       ? { accountProviderConfigSource: agentAccountProviderConfigSource }
       : {}),
@@ -2596,7 +2633,7 @@ export function createLocalServices(options: {
         oauthService,
       }),
     )
-    .register(IPromptAttachmentTransferService, createLocalPromptAttachmentTransferService());
+    .register(IPromptAttachmentTransferService, promptAttachmentTransferService);
 
   // 即使初始配置关闭也必须登记 lifecycle disposer：terminal fence 需要早于任意延迟 setting/acquire
   // 恢复，不能把"当前还没有 Helper"误当成"不需要生命周期所有者"。dispose 时串行 stop host。
@@ -2653,6 +2690,49 @@ export function createLocalServices(options: {
   // 见 sharedSqliteRepos 声明处注释：登记全部 tasks-index sqlite 句柄，dispose 链统一关闭
   sqliteReposToClose.push(taskIndexRepo);
   sharedSqliteRepos.set(services, sqliteReposToClose);
+  if (options?.taskListAllWorkspaces || options?.windowController) {
+    // 控制器必须读未扩张的服务，才能保留 query 的 scope 与 total/hasMore 分页语义；
+    // 在包装成 all-workspaces 视图之前先取基准实例。
+    const baseTaskService = services.get(IZCodeTaskService);
+    if (options?.windowController) {
+      // 自部署 server 即本地 Host：补上桌面宿主才注册的窗口 Controller，让 WebUI 的
+      // 时间线/置顶/归档/命令面板等全局任务列表（useGlobalTaskList）可用。
+      services.register(
+        IWindowControllerService,
+        createLocalWindowControllerService({ taskService: baseTaskService }),
+      );
+    }
+    if (options?.taskListAllWorkspaces) {
+      // 自部署语义：server = 本机全部任务的管理面。包装任务服务的列表方法，
+      // scope 过滤替换为「任务索引里有未删除任务的全部分组」（含 default 草稿工作区），
+      // 使 WebUI 能看到「不在项目中工作」任务与全部项目任务；其余成员直通原服务。
+      services.register(
+        IZCodeTaskService,
+        createAllWorkspacesTaskView({
+          base: baseTaskService,
+          listWorkspacePaths: async () => {
+            const paths = await taskIndexRepo.listDistinctWorkspacePaths();
+            const primary =
+              (process.env["ZCODE_SERVER_WORKSPACE"]?.trim() || process.cwd()).replace(
+                /\/+$/,
+                "",
+              ) || "/";
+            return paths.includes(primary) ? paths : [primary, ...paths];
+          },
+        }),
+      );
+    }
+  }
+  if (options?.webRemoteControlRelay) {
+    // resolveServices 经 getter 注入：注册链求值期 services 常量尚未完成初始化。
+    services.register(
+      IWebRemoteControlRelayService,
+      createWebRemoteControlRelayService({
+        credentialService,
+        resolveServices: () => services,
+      }),
+    );
+  }
   return services;
 }
 
@@ -2746,6 +2826,7 @@ export function disposeServiceResources(services: ServiceCollection): void {
     services.getOptional(IBotsService),
     services.getOptional(IFileWatcherService),
     services.getOptional(IOffPeakTaskService),
+    services.getOptional(IPromptAttachmentTransferService),
   ].filter((service) => service !== undefined);
 
   for (const service of disposableServices) {
@@ -2780,6 +2861,7 @@ export async function disposeServiceResourcesAndWait(services: ServiceCollection
     services.getOptional(IBotsService),
     services.getOptional(IFileWatcherService),
     services.getOptional(IOffPeakTaskService),
+    services.getOptional(IPromptAttachmentTransferService),
   ].filter((service) => service !== undefined);
 
   for (const service of disposableServices) {
