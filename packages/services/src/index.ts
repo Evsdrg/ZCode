@@ -296,6 +296,9 @@ export { IPromptAttachmentTransferService } from "./prompt-attachment-transfer/p
 export type {
   PromptAttachmentStageParams,
   PromptAttachmentStageResult,
+  PromptAttachmentUploadBeginParams,
+  PromptAttachmentUploadBeginResult,
+  PromptAttachmentUploadPort,
   PromptAttachmentTransferPhase,
   PromptAttachmentTransferProgress,
 } from "./prompt-attachment-transfer/promptAttachmentTransfer.js";
