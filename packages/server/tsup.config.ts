@@ -46,6 +46,9 @@ export const SERVER_HTTP_EXTERNAL_DEPENDENCIES = [
   // 云内容 ZIP 解包链路引入 yauzl，其 CommonJS require("fs") 在 ESM
   // bundle 加载时崩溃；与 desktop 相同，外置后交给 Node 原生加载。
   "yauzl",
+  // Browser Use 执行器：playwright-core 体积大且含可选依赖（chromium-bidi），
+  // 内联会被 esbuild 解析失败；外置后按需动态加载（仅开启 headless 浏览器时）。
+  "playwright-core",
 ];
 
 export default defineConfig({
