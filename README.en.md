@@ -19,7 +19,7 @@ This fork improves the **self-hosted Web UI without requiring Electron**, adding
 
 - **Browser compatibility and reliability:** hook fixes, a browser fallback for plan purchases, capability gates, version display, connection heartbeat/recovery, and graceful shutdown.
 - **Task management:** local workspace and outside-project task visibility, list refresh after archiving, and selected list/image layout improvements.
-- **New capabilities:** an experimental official-relay adapter, opt-in managed Chromium, and ordinary file uploads up to 20 MiB with durable Host paths.
+- **New capabilities:** an experimental official-relay adapter, opt-in managed Chromium/Firefox with simultaneous availability and AI selection by ID, and ordinary file uploads up to 20 MiB with durable Host paths.
 - **Boundaries:** existing image/video/PDF handling is retained. Private deployment configuration, credentials, session data, and development artifacts are excluded; closed-source Agent binaries are not distributed by this fork.
 
 See the [maintenance guide](docs/maintenance/selfhost-fork.md) for classification and limitations, and the [self-hosting guide](docs/deploy/selfhost-webui.md) for deployment.

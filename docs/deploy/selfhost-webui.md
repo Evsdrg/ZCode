@@ -24,20 +24,69 @@
 
 只在部署机配置环境变量，不把真实值提交Git：
 
-| 变量                                | 用途                                 |
-| ----------------------------------- | ------------------------------------ |
-| `PORT`                              | Host监听端口，默认3030               |
-| `ZCODE_SERVER_HOST`                 | 监听地址；避免不必要的公网暴露       |
-| `ZCODE_SERVER_AUTH_TOKEN`           | Host API/WS认证令牌                  |
-| `ZCODE_SERVER_WORKSPACE`            | 初始本机工作区                       |
-| `ZCODE_WEB_STATIC_ROOT`             | 可选静态根；分离部署时不设置         |
-| `ZCODE_AGENT_SERVER_COMMAND`        | Agent启动程序                        |
-| `ZCODE_AGENT_SERVER_ARGS_JSON`      | Agent参数JSON数组                    |
-| `ZCODE_SERVER_BROWSER_USE=headless` | 显式开启托管Chromium；默认不启动     |
-| `ZCODE_SERVER_BROWSER_EXECUTABLE`   | 可选的已安装Chromium绝对路径         |
-| `ZCODE_DATA_BASE_DIR`               | 隔离数据根；其中保存`.zcode`运行状态 |
+| 变量                                       | 用途                                     |
+| ------------------------------------------ | ---------------------------------------- |
+| `PORT`                                     | Host监听端口，默认3030                   |
+| `ZCODE_SERVER_HOST`                        | 监听地址；避免不必要的公网暴露           |
+| `ZCODE_SERVER_AUTH_TOKEN`                  | Host API/WS认证令牌                      |
+| `ZCODE_SERVER_WORKSPACE`                   | 初始本机工作区                           |
+| `ZCODE_WEB_STATIC_ROOT`                    | 可选静态根；分离部署时不设置             |
+| `ZCODE_AGENT_SERVER_COMMAND`               | Agent启动程序                            |
+| `ZCODE_AGENT_SERVER_ARGS_JSON`             | Agent参数JSON数组                        |
+| `ZCODE_SERVER_BROWSER_USE=headless`        | 显式开启托管浏览器；默认不启动           |
+| `ZCODE_SERVER_BROWSER_ENGINE`              | `chromium`（默认）、`firefox` 或 `both`  |
+| `ZCODE_SERVER_BROWSER_EXECUTABLE`          | 旧单路径；双模式仅交给 Chromium          |
+| `ZCODE_SERVER_BROWSER_CHROMIUM_EXECUTABLE` | Chromium 专用绝对路径，优先于旧路径      |
+| `ZCODE_SERVER_BROWSER_FIREFOX_EXECUTABLE`  | Firefox 专用绝对路径，双模式不继承旧路径 |
+| `ZCODE_DATA_BASE_DIR`                      | 隔离数据根；其中保存`.zcode`运行状态     |
 
 `IPromptAttachmentTransferService`通用上传在entry-http启用，完整文件保存在Host数据根的`.zcode/attachments/prompt-files`，单文件<=20MiB，原始字节不写入Git。
+
+## 托管 Firefox
+
+Firefox 使用仓库锁定版本的 Playwright 配套制品，不使用普通系统 Firefox，也不接管用户 profile。先从仓库根安装对应浏览器；禁止安装过程回收其它运行中浏览器的缓存：
+
+```bash
+PLAYWRIGHT_SKIP_BROWSER_GC=1 pnpm --filter @zcode/server exec playwright-core install firefox
+```
+
+在 Host 的部署环境中配置：
+
+```bash
+ZCODE_SERVER_BROWSER_USE=headless
+ZCODE_SERVER_BROWSER_ENGINE=firefox
+```
+
+若原部署固定了 `ZCODE_SERVER_BROWSER_EXECUTABLE` 为 Chromium，必须移除该变量以使用配套默认路径，或改为已安装的 Playwright Firefox 路径。不能只改 engine 而保留 Chromium 路径。缺省 engine 仍是 Chromium；无效值拒绝启动；Firefox 缺失或启动失败不会回退另一引擎。
+
+浏览器本体不随 fork 分发，系统库依赖由部署方维护。Playwright 不正式支持的发行版可能使用 fallback 制品，应通过真实集成测试确认，不能仅凭下载成功宣称可用。
+
+```bash
+ZCODE_BROWSER_INTEGRATION=1 pnpm --filter @zcode/server test:browser
+```
+
+该测试运行 Chromium 和 Firefox；可用 `ZCODE_TEST_CHROMIUM_EXECUTABLE` / `ZCODE_TEST_FIREFOX_EXECUTABLE` 指定配套路径。另设 `ZCODE_TEST_BROWSER_CLIENT_MODULE` 为本机已安装的 Browser Use 插件 `scripts/browser-client.mjs` 绝对路径，可验收真实 SDK 的双引擎 discovery、默认/显式 ID 选择、role locator、状态隔离和截图；插件不在仓库时该项跳过。这是 SDK/Host 集成验收，不是模型驱动的闭源 Agent 端到端验收。
+
+配置在 Host 下次启动时生效。无需重新发布 WebUI；由独立终端执行 Host 重启，不让运行中的 Agent 自行重启宿主。
+
+## 双引擎与 AI 选择
+
+将 `ZCODE_SERVER_BROWSER_ENGINE` 设为 `both`，Host 同时提供两个托管引擎。为两个引擎分别配置兼容制品路径（可省略以使用配套默认路径）：
+
+```bash
+ZCODE_SERVER_BROWSER_USE=headless
+ZCODE_SERVER_BROWSER_ENGINE=both
+ZCODE_SERVER_BROWSER_CHROMIUM_EXECUTABLE=/path/to/playwright/chromium
+ZCODE_SERVER_BROWSER_FIREFOX_EXECUTABLE=/path/to/playwright/firefox
+```
+
+旧 `ZCODE_SERVER_BROWSER_EXECUTABLE` 在双模式只属于 Chromium，专用 Chromium 路径优先于它；Firefox 不继承旧路径。若旧路径之前指向 Firefox，应移除或改用专用变量。
+
+AI 在 Browser Use 初始化后先调用 `agent.browsers.list()`，只从真实返回的 ID 中选择，再调用 `agent.browsers.get(id)`；当前 ID 分别为 `server-headless-chromium`、`server-headless-firefox`。两个引擎的兼容 type 都是 `cdp`，不要用 `get("cdp")` 区分。选择后使用该 browser 的 tabs 接口，不调用会重新选择默认引擎的顶层 `agent.browsers.open()`。
+
+列表 metadata 中的 `selectionPolicy` 是模型可读建议：用户指定优先，继续任务保持原 ID，新任务未指定优先 Chromium；Firefox 专项或跨引擎验证可明确选 Firefox。它不是 SDK 内置自动决策，也不保证模型总会遵守。普通超时或 fresh kernel 不应触发换引擎；切换不共享登录/标签页，不自动重放有副作用操作。
+
+首次 discovery 会尝试启动两者以确认可用，所以双模式可能同时占用两个浏览器的资源。一侧不可用不阻断另一侧；指定不可用引擎的命令失败，不改发另一侧。运行中的 Host 不热切换配置，仍由独立终端重启后生效。
 
 ## 安全边界
 

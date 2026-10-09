@@ -37,7 +37,7 @@
 ### 新增内容
 
 - **官方relay远控模块**：`packages/services/src/web-remote-control/`；UI新增relay区块和状态hook；客户端代理仅在自部署入口暴露。设备凭据经已有Credential服务保存，默认不开远控连接。
-- **托管Chromium执行器**：`packages/server/src/browser/`；显式`ZCODE_SERVER_BROWSER_USE=headless`启用，Playwright依赖外置，不分发本地浏览器缓存。
+- **托管浏览器执行器**：`packages/server/src/browser/`；显式`ZCODE_SERVER_BROWSER_USE=headless`启用；`ZCODE_SERVER_BROWSER_ENGINE=chromium|firefox|both`选择单/双引擎，默认Chromium；双模式通过既有SDK按ID选择。使用Playwright配套制品，依赖外置，不分发本地浏览器缓存。
 - **通用文件上传store**：`packages/services/src/prompt-attachment-transfer/arbitraryFileUpload*`；Web普通文件<=20MiB完整落盘，发送前持久保留，既有媒体链路保留。
 - **自部署任务列表投影**：`allWorkspacesTaskView`与`localWindowControllerService`。
 - **测试基建和回归用例**：services/server/ui/web的Vitest配置、纯逻辑与交互测试。合成数据测试属于交付内容，不是要忽略的开发过程。
@@ -62,7 +62,7 @@
 - relay数据面是兼容适配，ACK/重放/拥塞不是官方桌面实现的完整替代；上游网页变化可能要求更新。
 - 全工作区任务服务和relay共享列表服务，但relay工作区列表只暴露可开桥的项目集合。列表外工作区任务的远控打开仍需单独校验，不声称完整覆盖。
 - 本地Controller当前是列表投影兼容层，通过失效快照触发重查，不是完整的实时Controller。没有实时overlay时持久running不解释为当前在跑；部分写方法显式unsupported。
-- Browser Use不支持Firefox；部分SDK方法首版未覆盖。只能宣称实际实现的命令面。
+- Browser Use支持托管Chromium和Playwright配套Firefox，不支持普通系统Firefox或日常profile接管；部分SDK方法未覆盖，只能宣称实际实现的命令面。Firefox的`cdp`类型是旧协议兼容分类，不代表底层使用CDP。
 - 通用文件上传仅支持自部署本机工作区；每文件20MiB、最多8个附件。已发送文件不TTL清理，默认全部文件配额2GiB，Host装配可调。
 - 未发送附件草稿存在浏览器内存，刷新后可能需重选；已发送路径跨Host重建保留。
 - 本仓库不包含公网反代/updater的源码实现；不能把部署层安全措施写成仓库自带功能。
