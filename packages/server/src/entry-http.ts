@@ -9,7 +9,8 @@ import {
   readBundledZCodeBuiltinProviderConfig,
 } from "./bundledZCodeBuiltinProviderConfig.js";
 import { createHttpServer } from "./http.js";
-import { createHeadlessChromiumExecutor } from "./browser/headlessChromiumExecutor.js";
+import { createConfiguredBrowserExecutor } from "./browser/managedBrowserRouter.js";
+import { resolveHeadlessBrowserConfig } from "./browser/headlessBrowserConfig.js";
 
 async function main(): Promise<void> {
   const zcodeBuiltinProviderConfigFilePath = await materializeBundledZCodeBuiltinProviderConfig({
@@ -20,16 +21,10 @@ async function main(): Promise<void> {
   const host = process.env["ZCODE_SERVER_HOST"]?.trim() || process.env["HOST"]?.trim() || undefined;
   const staticRoot = process.env["ZCODE_WEB_STATIC_ROOT"]?.trim() || undefined;
   const authToken = process.env["ZCODE_SERVER_AUTH_TOKEN"]?.trim() || undefined;
-  // Browser Use：自部署形态默认关闭。显式 ZCODE_SERVER_BROWSER_USE=headless 时注册托管
-  // headless Chromium 执行器，让 agent 的 interaction/browserExecute 反向请求有真实后端。
-  const browserExecutor =
-    process.env["ZCODE_SERVER_BROWSER_USE"]?.trim() === "headless"
-      ? createHeadlessChromiumExecutor({
-          // Playwright 缓存里的浏览器修订会被其它工具升/降级；显式路径固定本机
-          // 实际存在的二进制，避免版本漂移导致执行器静默失联。
-          executablePath: process.env["ZCODE_SERVER_BROWSER_EXECUTABLE"]?.trim() || undefined,
-        })
-      : undefined;
+  const browserConfig = resolveHeadlessBrowserConfig(process.env);
+  const browserExecutor = browserConfig
+    ? createConfiguredBrowserExecutor(browserConfig)
+    : undefined;
   const services = createLocalServices({
     zcodeBuiltinProviderConfigFilePath,
     providerProvisioningTargetEnabled: Boolean(authToken),
@@ -52,7 +47,7 @@ async function main(): Promise<void> {
 
   // 优雅关闭：systemd stop/restart 发 SIGTERM。此前没有任何信号处理，进程被默认
   // 处置直接终止——agent 进程树来不及 graceful+force 清理（产生孤儿 zcode-cli）、
-  // sqlite 句柄不关闭、Browser Use 的 Chromium 不回收。照 entry-stdio 的同一契约：
+  // sqlite 句柄不关闭、托管浏览器不回收。照 entry-stdio 的同一契约：
   // 先停止接新连接，再等 disposeServiceResourcesAndWait 完成异步回收，最后退出。
   let shuttingDown = false;
   const log = (...args: unknown[]) =>

@@ -8,7 +8,7 @@ import {
 } from "@zcode/shared";
 
 /**
- * 托管 headless Chromium 的会话：一个 Playwright BrowserContext + 受控 tab 注册表。
+ * 托管浏览器的会话：一个 Playwright BrowserContext + 受控 tab 注册表。
  * 语义对齐 CLI 托管后端（session.ts / snapshot.ts），但为 server 侧独立实现。
  */
 

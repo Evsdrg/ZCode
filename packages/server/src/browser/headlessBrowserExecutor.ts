@@ -1,4 +1,3 @@
-import type { Browser, BrowserContext } from "playwright-core";
 import type {
   BrowserBackendDescriptor,
   BrowserCommand,
@@ -6,7 +5,13 @@ import type {
   BrowserErrorCode,
 } from "@zcode/shared";
 import { createServiceLogger } from "@zcode/services/node";
-import { HeadlessBrowserSession } from "./headlessBrowserSession.js";
+import type { HeadlessBrowserSession } from "./headlessBrowserSession.js";
+import {
+  HeadlessBrowserRuntime,
+  ManagedBrowserUnavailableError,
+  type BrowserExecutorListInput,
+  type HeadlessBrowserRuntimeOptions,
+} from "./headlessBrowserRuntime.js";
 import { describeDisallowedBrowserUrl, isAllowedManagedBrowserUrl } from "./browserUrlPolicy.js";
 import {
   evaluateExpression,
@@ -17,24 +22,7 @@ import {
   summarizeTab,
 } from "./headlessBrowserCommands.js";
 
-/**
- * 自部署 server 的 Browser Use 执行器：托管 headless Chromium。
- *
- * 浏览器命令是反向请求（agent → interaction/browserExecute → App/Host 执行）。桌面客户端用
- * IAB 执行器；自部署没有，故这里用 playwright-core 起 headless Chromium 顶上。
- * 仅在显式开启时注册（见 entry-http 的 browserControlExecutor 注入点）。
- *
- * 安全边界对齐 CLI 托管后端（选项 a）：收紧下载/用户 tab/历史等能力；导航仅限 http(s)。
- */
-
-const MANAGED_BROWSER_ID = "server-headless-chromium";
 const NAVIGATION_TIMEOUT_MS = 15000;
-
-export interface BrowserExecutorListInput {
-  sessionId: string;
-  workspaceKey: string;
-  workspacePath: string;
-}
 
 export interface BrowserExecutorExecuteInput extends BrowserExecutorListInput {
   requestId: string;
@@ -49,17 +37,13 @@ export interface BrowserControlExecutor {
   shutdown(): Promise<void>;
 }
 
-export interface HeadlessChromiumExecutorOptions {
-  loadPlaywright?: () => Promise<typeof import("playwright-core")>;
-  executablePath?: string;
-}
-
-function createDescriptor(generation: number): BrowserBackendDescriptor {
+function createDescriptor(runtime: HeadlessBrowserRuntime): BrowserBackendDescriptor {
   return {
-    id: MANAGED_BROWSER_ID,
-    generation,
+    id: runtime.browserId,
+    generation: runtime.generation,
+    // 现有 Agent schema 只接受三种类型；Firefox 沿用兼容分类，实际驱动由 metadata 声明。
     type: "cdp",
-    name: "ZCode Server Headless Chromium",
+    name: `ZCode Server Headless ${runtime.engine === "firefox" ? "Firefox" : "Chromium"}`,
     capabilities: { browser: [], tab: [] },
     // 选项 a：沿用 CLI 托管后端的收紧项（无下载/文件选择器/用户 tab/历史/Locator.evaluate）。
     apiSupportOverrides: {
@@ -73,74 +57,40 @@ function createDescriptor(generation: number): BrowserBackendDescriptor {
       "CUAAPI.downloadMedia": false,
       "DomCUAAPI.downloadMedia": false,
     },
-    metadata: { provider: "zcode-server", launchMode: "managed", headless: "true" },
+    metadata: {
+      provider: "zcode-server",
+      engine: runtime.engine,
+      driver: "playwright",
+      launchMode: "managed",
+      headless: "true",
+    },
   };
 }
 
-export function createHeadlessChromiumExecutor(
-  options: HeadlessChromiumExecutorOptions = {},
+export function createHeadlessBrowserExecutor(
+  options: HeadlessBrowserRuntimeOptions = {},
 ): BrowserControlExecutor {
   const logger = createServiceLogger("browser-use");
-  const loadPlaywright = options.loadPlaywright ?? (() => import("playwright-core"));
-
-  let browser: Browser | undefined;
-  let launchPromise: Promise<Browser> | undefined;
-  let generation = 1;
-  const sessions = new Map<string, HeadlessBrowserSession>();
-
-  async function ensureBrowser(): Promise<Browser> {
-    if (browser && browser.isConnected()) return browser;
-    launchPromise ??= (async () => {
-      const pw = await loadPlaywright();
-      const launched = await pw.chromium.launch({
-        ...(options.executablePath ? { executablePath: options.executablePath } : {}),
-        headless: true,
-        args: ["--no-sandbox", "--disable-dev-shm-usage"],
-      });
-      browser = launched;
-      logger.info(undefined, "[browser-use] headless Chromium 已启动");
-      launched.on("disconnected", () => {
-        browser = undefined;
-        launchPromise = undefined;
-        generation += 1;
-        for (const session of sessions.values()) void session.close().catch(() => {});
-        sessions.clear();
-      });
-      return launched;
-    })();
-    try {
-      return await launchPromise;
-    } catch (error) {
-      launchPromise = undefined;
-      throw error;
-    }
-  }
-
-  async function sessionFor(sessionId: string): Promise<HeadlessBrowserSession> {
-    const existing = sessions.get(sessionId);
-    if (existing) return existing;
-    const launched = await ensureBrowser();
-    const context: BrowserContext = await launched.newContext();
-    const session = new HeadlessBrowserSession(context);
-    sessions.set(sessionId, session);
-    return session;
-  }
+  const runtime = new HeadlessBrowserRuntime(options);
 
   async function list(): Promise<BrowserBackendDescriptor[]> {
     try {
-      await ensureBrowser();
+      await runtime.ensureBrowser();
+      return [createDescriptor(runtime)];
     } catch (error) {
-      logger.warn(undefined, "[browser-use] headless Chromium 不可用", {
+      logger.warn(undefined, "[browser-use] managed browser unavailable", {
+        engine: runtime.engine,
         message: error instanceof Error ? error.message : String(error),
       });
       return [];
     }
-    return [createDescriptor(generation)];
   }
 
   async function execute(input: BrowserExecutorExecuteInput): Promise<BrowserCommandResult> {
     const startedAt = Date.now();
+    const generation = input.browserGeneration ?? runtime.generation;
     const command = input.command;
+    let session: HeadlessBrowserSession | undefined;
     const withMeta = (
       result: Omit<BrowserCommandResult, "elapsedMs" | "meta">,
     ): BrowserCommandResult => ({
@@ -148,26 +98,39 @@ export function createHeadlessChromiumExecutor(
       meta: {
         browserUse: true,
         backendType: "cdp",
-        browserId: MANAGED_BROWSER_ID,
+        browserId: runtime.browserId,
         browserGeneration: generation,
-        openTabIds: sessions.get(input.sessionId)?.tabIds ?? [],
+        openTabIds: session?.tabIds ?? [],
         ...(result.tab ? { tabId: result.tab.tabId, currentUrl: result.tab.url } : {}),
       },
       elapsedMs: Date.now() - startedAt,
     });
     const fail = (code: BrowserErrorCode, message: string): BrowserCommandResult =>
       withMeta({ ok: false, error: { code, message } });
-
-    let session: HeadlessBrowserSession;
     try {
-      session = await sessionFor(input.sessionId);
+      runtime.assertCurrent(generation, input.browserId);
+      session = await runtime.sessionFor(input, generation);
+      runtime.assertCurrent(generation, input.browserId);
     } catch (error) {
       return fail("backend_unavailable", error instanceof Error ? error.message : String(error));
     }
     try {
-      return await dispatch(session, command, withMeta, fail);
+      const result = await dispatch(session, command, withMeta, fail);
+      runtime.assertCurrent(generation, input.browserId);
+      return result;
     } catch (error) {
+      // 修复原因：Playwright 断连通常先抛 Target closed，仍需按 owner 代次判断后端失效。
+      try {
+        runtime.assertCurrent(generation, input.browserId);
+      } catch (unavailable) {
+        return fail(
+          "backend_unavailable",
+          unavailable instanceof Error ? unavailable.message : String(unavailable),
+        );
+      }
       const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof ManagedBrowserUnavailableError)
+        return fail("backend_unavailable", message);
       logger.warn(undefined, "[browser-use] 命令执行失败", { method: command.method, message });
       return fail(command.method === "snapshot" ? "ref_not_found" : "execution_error", message);
     }
@@ -280,13 +243,5 @@ export function createHeadlessChromiumExecutor(
     }
   }
 
-  async function shutdown(): Promise<void> {
-    for (const session of sessions.values()) await session.close().catch(() => {});
-    sessions.clear();
-    await browser?.close().catch(() => {});
-    browser = undefined;
-    launchPromise = undefined;
-  }
-
-  return { list, execute, shutdown };
+  return { list, execute, shutdown: () => runtime.shutdown() };
 }
