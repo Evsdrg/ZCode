@@ -74,9 +74,7 @@ export function createLocalWindowControllerService(options: {
     scopeDisposables.set(key, disposable);
   }
 
-  function liveStatusFromMeta(
-    meta: ZCodeTaskMeta,
-  ): WindowHostControllerTaskListItem["liveStatus"] {
+  function liveStatusFromMeta(meta: ZCodeTaskMeta): WindowHostControllerTaskListItem["liveStatus"] {
     // 与桌面的 liveStatusFromMeta 同口径：无实时 overlay 时，仅终态可信，running 不重解释。
     if (meta.status === "completed") return "completed";
     if (meta.status === "error") return "error";

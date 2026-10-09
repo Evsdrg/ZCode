@@ -5666,7 +5666,8 @@ const enUS: Record<string, string> = {
   "chat.attachments.remove": "Remove attachment",
   "chat.attachments.maxFiles": "You can attach up to {count} attachments",
   "chat.attachments.maxFileSize": "Attachments must be {sizeMb} MB or smaller",
-  "chat.attachments.arbitraryFileTooLarge": "File attachments must be 20 MiB (20,971,520 bytes) or smaller",
+  "chat.attachments.arbitraryFileTooLarge":
+    "File attachments must be 20 MiB (20,971,520 bytes) or smaller",
   "chat.attachments.readFailed": "Failed to read attachment: {message}",
   "chat.attachments.missingInlineImageContent":
     "Image attachment {filename} is missing its file content. Please add it again.",

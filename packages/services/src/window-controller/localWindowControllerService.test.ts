@@ -78,7 +78,9 @@ describe("createLocalWindowControllerService.listTaskList", () => {
 describe("createLocalWindowControllerService 订阅/失效帧", () => {
   it("subscribe/resync 返回合法 ACK，事件面可订阅但不自动推送", async () => {
     const service = createLocalWindowControllerService({
-      taskService: fakeTaskService({ listTaskList: async () => ({ items: [], total: 0, hasMore: false }) }),
+      taskService: fakeTaskService({
+        listTaskList: async () => ({ items: [], total: 0, hasMore: false }),
+      }),
     });
     const subscribe = await service.subscribeControllerV4({
       topic: CONTROLLER_TASKS_INDEX_TOPIC,
@@ -151,7 +153,9 @@ describe("createLocalWindowControllerService 订阅/失效帧", () => {
 
   it("deleteArchivedTasks 空批次短路；mutateTask 显式 unsupported", async () => {
     const service = createLocalWindowControllerService({
-      taskService: fakeTaskService({ listTaskList: async () => ({ items: [], total: 0, hasMore: false }) }),
+      taskService: fakeTaskService({
+        listTaskList: async () => ({ items: [], total: 0, hasMore: false }),
+      }),
     });
     await expect(
       service.deleteArchivedTasks({ address: { workspacePath: "/ws", taskId: "x" }, taskIds: [] }),

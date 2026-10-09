@@ -124,15 +124,21 @@ describe("relayBridgeChannel 多工作区开桥", () => {
     const services = new ServiceCollection();
     const { bridge, sent } = createBridge(services);
     bridge.routePayload(
-      bridgeOpen({ bridgeSessionId: "bs-z", requestId: "req-z", workspaceKey: "/workspace/project/zcode" }),
+      bridgeOpen({
+        bridgeSessionId: "bs-z",
+        requestId: "req-z",
+        workspaceKey: "/workspace/project/zcode",
+      }),
     );
     await flush();
-    const ready = sent.find((m) => (m as { zcode_type?: string }).zcode_type === "workspace-bridge-ready") as
-      | { bridge?: { workspaceKey?: string; workspacePath?: string } }
-      | undefined;
+    const ready = sent.find(
+      (m) => (m as { zcode_type?: string }).zcode_type === "workspace-bridge-ready",
+    ) as { bridge?: { workspaceKey?: string; workspacePath?: string } } | undefined;
     expect(ready?.bridge?.workspaceKey).toBe("/workspace/project/zcode");
     expect(ready?.bridge?.workspacePath).toBe("/workspace/project/zcode");
-    expect(sent.some((m) => (m as { zcode_type?: string }).zcode_type === "workspace-bridge-error")).toBe(false);
+    expect(
+      sent.some((m) => (m as { zcode_type?: string }).zcode_type === "workspace-bridge-error"),
+    ).toBe(false);
     bridge.dispose();
   });
 
@@ -143,7 +149,9 @@ describe("relayBridgeChannel 多工作区开桥", () => {
       bridgeOpen({ bridgeSessionId: "bs-x", requestId: "req-x", workspaceKey: "/not/listed" }),
     );
     await flush();
-    expect(sent.some((m) => (m as { zcode_type?: string }).zcode_type === "workspace-bridge-error")).toBe(true);
+    expect(
+      sent.some((m) => (m as { zcode_type?: string }).zcode_type === "workspace-bridge-error"),
+    ).toBe(true);
     bridge.dispose();
   });
 });

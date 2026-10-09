@@ -29,8 +29,11 @@ export interface ReconnectController {
   dispose(): void;
 }
 
-export function createReconnectController(options: ReconnectControllerOptions): ReconnectController {
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+export function createReconnectController(
+  options: ReconnectControllerOptions,
+): ReconnectController {
+  const sleep =
+    options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   let reconnecting = false;
   let disposed = false;
 

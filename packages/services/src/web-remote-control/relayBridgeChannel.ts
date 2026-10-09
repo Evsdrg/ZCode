@@ -161,9 +161,7 @@ export function createRelayBridgeChannel(options: RelayBridgeChannelOptions): Re
     };
     const requestedKey = String(message.workspaceKey ?? "");
     // 多工作区：按 key 在全量工作区列表中解析（手机端点击任意项目的任务都会开桥）。
-    const matched = requestedKey
-      ? await options.source.resolveWorkspaceByKey(requestedKey)
-      : null;
+    const matched = requestedKey ? await options.source.resolveWorkspaceByKey(requestedKey) : null;
     const echo = {
       requestId: message.requestId,
       bridgeSessionId: identity.bridgeSessionId,

@@ -17,14 +17,14 @@ spawn 本机 `node server/entry-http.js` → `createLocalServices()` → `create
 
 ## 行为规则
 
-| 能力 | desktop | 自部署浏览器 | 判定依据 |
-| --- | --- | --- | --- |
-| Bot 配置（`bots.*`，机器人管理） | 可用 | **可用** | `IBotsService` 已在 `services/src/node.ts` 注册；`entry-http.ts` 未传 `serviceAuthorityMode` ⇒ `isDesktopAttachedRemote === false` ⇒ `runStartupBackgroundTasks === true`，telegram / weixin / feishu 三个长连接 runtime 会启动；`POST /api/bots/:provider[/:botId]` 已挂载 |
-| IM 渠道入口（微信 / 飞书 / Lark / Telegram） | 可点击 | **可点击** | 产品定义：这些渠道**就是 bot**，不是远控。它们点击后打开 `BotsDialog` 并按 `entryProvider` 预选渠道，走的是 bot 配置能力 |
-| 移动端远控（直接访问 webUI 的专门通道） | 专用通道 | **不在本版本范围** | 远控与 bot 是两个概念：远控是经官方或自建方法让另一台设备直接访问 webUI；微信/飞书/TG 均属 bot。当前检出的开源代码里不存在远控 UI 入口（见下），本分支不做处理 |
-| Memory catalog viewer | 可用 | **可用** | `MemorySettingsViewer` 零 platform 依赖，纯走 `memoryService.listProjectMemories()`；`IMemoryService` 在 `services/src/node.ts` 与 `desktop/src/host/remoteWorkspaceServiceCollection.ts` 均已注册 |
-| Claude 原生历史迁移 | 可用 | **关闭（所有形态）** | 产品决策：完全不使用 Claude。设置分区整体隐藏 |
-| Automations 主视图面包屑 | 可用 | **可用** | 面包屑不依赖桌面能力；只有拖拽区 `[app-region:drag]` 需要 desktop |
+| 能力                                         | desktop  | 自部署浏览器         | 判定依据                                                                                                                                                                                                                                                                    |
+| -------------------------------------------- | -------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bot 配置（`bots.*`，机器人管理）             | 可用     | **可用**             | `IBotsService` 已在 `services/src/node.ts` 注册；`entry-http.ts` 未传 `serviceAuthorityMode` ⇒ `isDesktopAttachedRemote === false` ⇒ `runStartupBackgroundTasks === true`，telegram / weixin / feishu 三个长连接 runtime 会启动；`POST /api/bots/:provider[/:botId]` 已挂载 |
+| IM 渠道入口（微信 / 飞书 / Lark / Telegram） | 可点击   | **可点击**           | 产品定义：这些渠道**就是 bot**，不是远控。它们点击后打开 `BotsDialog` 并按 `entryProvider` 预选渠道，走的是 bot 配置能力                                                                                                                                                    |
+| 移动端远控（直接访问 webUI 的专门通道）      | 专用通道 | **不在本版本范围**   | 远控与 bot 是两个概念：远控是经官方或自建方法让另一台设备直接访问 webUI；微信/飞书/TG 均属 bot。当前检出的开源代码里不存在远控 UI 入口（见下），本分支不做处理                                                                                                              |
+| Memory catalog viewer                        | 可用     | **可用**             | `MemorySettingsViewer` 零 platform 依赖，纯走 `memoryService.listProjectMemories()`；`IMemoryService` 在 `services/src/node.ts` 与 `desktop/src/host/remoteWorkspaceServiceCollection.ts` 均已注册                                                                          |
+| Claude 原生历史迁移                          | 可用     | **关闭（所有形态）** | 产品决策：完全不使用 Claude。设置分区整体隐藏                                                                                                                                                                                                                               |
+| Automations 主视图面包屑                     | 可用     | **可用**             | 面包屑不依赖桌面能力；只有拖拽区 `[app-region:drag]` 需要 desktop                                                                                                                                                                                                           |
 
 ### 术语边界（澄清后）
 
@@ -85,11 +85,11 @@ spawn 本机 `node server/entry-http.js` → `createLocalServices()` → `create
 
 覆盖文件：
 
-| 文件 | 覆盖点 |
-| --- | --- |
-| `src/lib/settingsNavigation.test.ts` | `migration` 分区已关闭、`resolveSettingsSection` 回退 `general`、`plugins -> plugin` 历史映射保留、其余分区未被误关、既有隐藏分区未被误开 |
-| `src/settings/AutomationsMainBreadcrumbFrame.test.tsx` | 桌面保留拖拽区且面包屑在其中；浏览器不渲染拖拽区**但仍渲染面包屑**（本次修复核心）；两种形态都渲染 children |
-| `src/botsUi.test.ts` | 四个远控渠道仍是 bot provider 且已实现、未实现渠道不被伪装、region tag、`resolveBotProviderEntry` 选/建两条路径、颗粒度过滤、`buildCurrentWorkspaceId` 的 identity 优先规则 |
+| 文件                                                   | 覆盖点                                                                                                                                                                      |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lib/settingsNavigation.test.ts`                   | `migration` 分区已关闭、`resolveSettingsSection` 回退 `general`、`plugins -> plugin` 历史映射保留、其余分区未被误关、既有隐藏分区未被误开                                   |
+| `src/settings/AutomationsMainBreadcrumbFrame.test.tsx` | 桌面保留拖拽区且面包屑在其中；浏览器不渲染拖拽区**但仍渲染面包屑**（本次修复核心）；两种形态都渲染 children                                                                 |
+| `src/botsUi.test.ts`                                   | 四个远控渠道仍是 bot provider 且已实现、未实现渠道不被伪装、region tag、`resolveBotProviderEntry` 选/建两条路径、颗粒度过滤、`buildCurrentWorkspaceId` 的 identity 优先规则 |
 
 未覆盖：`WorkspaceSidebarFooter` 的 bot 入口放开、`SettingsPage` 的 memory viewer 放开。
 这两个组件的依赖图包含 `@zcode/services` 全量装配，渲染测试需要先为 ui 包建立
