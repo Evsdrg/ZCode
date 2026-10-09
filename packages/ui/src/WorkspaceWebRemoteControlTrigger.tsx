@@ -5,6 +5,8 @@ import { cn } from "@/components/lib/utils.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
+import { useWebRemoteControlRelayActive } from "@/hooks/useWebRemoteControlRelayActive.js";
+import { resolveRelayTriggerIconClass } from "@/webRemoteControlRelayUi.js";
 import { WebRemoteControlDialog } from "@/WebRemoteControlDialog.js";
 
 export function WorkspaceWebRemoteControlTrigger({
@@ -20,6 +22,8 @@ export function WorkspaceWebRemoteControlTrigger({
 }) {
   const { intl } = useZCodeIntl();
   const [webRemoteControlOpen, setWebRemoteControlOpen] = useState(false);
+  // 官方中转远控开启中：入口手机图标转橙，提示远控在线（desktop 未注册服务时恒为默认色）。
+  const relayActive = useWebRemoteControlRelayActive();
   return (
     <>
       <ControlHintTooltip
@@ -47,7 +51,7 @@ export function WorkspaceWebRemoteControlTrigger({
           )}
         >
           {/* 入口统一使用远程控制图标，具体 Bot 渠道在弹层内区分。 */}
-          <Smartphone className="size-4 text-foreground-subtle" />
+          <Smartphone className={cn("size-4", resolveRelayTriggerIconClass(relayActive))} />
           {compact ? (
             <span className="sr-only">
               {intl.formatMessage({ id: "webRemoteControl.trigger" })}

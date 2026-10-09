@@ -495,6 +495,7 @@ async function bootstrapWebApp() {
       onClose: () => {
         if (openedOnce) reconnectController.notifyClosed();
       },
+      webRemoteControlRelay: true,
     });
     openedOnce = true;
     const platform = createWebPlatform();

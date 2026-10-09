@@ -40,6 +40,7 @@ import {
   IFeedbackService,
   IPromptAttachmentTransferService,
   IWindowControllerService,
+  IWebRemoteControlRelayService,
   type IServiceAccessor,
 } from "@zcode/services";
 
@@ -92,8 +93,19 @@ export class RemoteServiceAccess implements IServiceAccessor {
   readonly settingsSyncService: ISettingsSyncService;
   readonly feedbackService: IFeedbackService;
   readonly promptAttachmentTransferService: IPromptAttachmentTransferService;
+  /**
+   * 自部署官方中转远控；仅 server（entry-http）注册该 channel。默认不创建代理，
+   * 由连接入口按形态显式开启——desktop messageport 与远端 host 连接保持 undefined，
+   * UI 依此隐藏区块（见 docs/specs/selfhost-webui-relay-remote-control.md）。
+   */
+  readonly webRemoteControlRelayService?: IWebRemoteControlRelayService;
 
-  constructor(channelClient: IChannelClient) {
+  constructor(channelClient: IChannelClient, options?: { webRemoteControlRelay?: boolean }) {
+    if (options?.webRemoteControlRelay) {
+      this.webRemoteControlRelayService = ProxyChannel.toService<IWebRemoteControlRelayService>(
+        channelClient.getChannel(IWebRemoteControlRelayService.channelName),
+      );
+    }
     this.fileService = ProxyChannel.toService<IFileService>(
       channelClient.getChannel(IFileService.channelName),
     );
