@@ -17,6 +17,7 @@
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "test": "vitest run",
+    "test:browser": "vitest run src/browser/headlessBrowser.integration.test.ts src/browser/headlessBrowserSdk.integration.test.ts src/browser/managedBrowserRouter.integration.test.ts",
     "test:watch": "vitest"
   },
   "dependencies": {
