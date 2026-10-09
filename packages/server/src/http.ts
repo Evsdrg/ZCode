@@ -43,6 +43,7 @@ import {
   type SourceServerWorkspaceIdentityMapper,
 } from "@zcode/services/node";
 import { createHostCapabilityStore } from "./hostCapability.js";
+import { startWebSocketHeartbeat } from "./webSocketHeartbeat.js";
 
 function wrapWebSocket(ws: WebSocket): ISocket {
   const onData = new Emitter<VSBuffer>();
@@ -131,7 +132,18 @@ function setupChannelServer(
     });
   }
   services.exposeOnChannelServer(server, overrides);
+  // 浏览器 /ws 是唯一没有应用层保活的长连接：空闲期（模型静默思考、长工具执行）可能被
+  // 中间有状态设备掐断，半开连接 TCP 感知不到。用 WS Ping/Pong 保活 + 判定半死连接。
+  // 只给 web-remote-replayable（浏览器）加；desktop-continuous（/ws/host）保持原行为。
+  const heartbeat =
+    clientMode === "web-remote-replayable"
+      ? startWebSocketHeartbeat({
+          socket: ws,
+          onTimeout: (idleMs) => log("ws heartbeat timeout, terminating", idleMs),
+        })
+      : undefined;
   socket.onClose(() => {
+    heartbeat?.dispose();
     peer?.dispose();
     reverseClient?.dispose();
     void connectionScope?.dispose();

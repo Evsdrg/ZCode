@@ -32,6 +32,7 @@ import {
   createAcknowledgedWebRemoteControlRelayProtocol,
 } from "@zcode/client";
 
+import { createReconnectController } from "./connectionResilience.js";
 import { WebCallbackPage } from "./auth/WebCallbackPage.js";
 import { WebLoginPage } from "./auth/WebLoginPage.js";
 import { createWebAuthService } from "./auth/webAuthService.js";
@@ -2028,6 +2029,43 @@ async function bootstrapExternalRelayWebRemoteControl(
   transport.start();
 }
 
+function WebReconnectingScreen() {
+  const zh = /^zh\b/i.test(navigator.language);
+  return (
+    <div className="h-dvh min-h-dvh w-screen bg-background text-foreground">
+      <div className="mx-auto flex h-full w-full max-w-lg items-center px-4">
+        <section className="w-full rounded-xl border border-card-border bg-card p-5">
+          <div className="flex items-center gap-3">
+            <span className="size-2 animate-pulse rounded-full bg-warning" />
+            <h1 className="text-ui-xs font-medium">
+              {zh ? "连接已断开，正在重连…" : "Connection lost, reconnecting…"}
+            </h1>
+          </div>
+          <p className="mt-2 text-ui-xs/relaxed text-foreground-subtle">
+            {zh
+              ? "网络或休眠恢复后会自动重连，请稍候。"
+              : "Will reconnect automatically once the network recovers."}
+          </p>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+/** 服务可达性探测：任意 HTTP 响应（含 401）都表示可达；仅网络错误算不可达。 */
+async function probeServerReachable(): Promise<boolean> {
+  try {
+    await fetch("/api/server-info", { cache: "no-store" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function renderWebReconnecting(): void {
+  root.render(<WebReconnectingScreen />);
+}
+
 async function bootstrapWebApp() {
   const params = new URLSearchParams(window.location.search);
   if (isWebRemoteControlRoute() || isWebRemoteControlOAuthCallback(new URL(window.location.href))) {
@@ -2064,9 +2102,22 @@ async function bootstrapWebApp() {
   }
 
   try {
-    const services = await connectViaWebSocket(bootstrap.wsUrl, {
-      onClose: () => {},
+    // 断线重连：仅在"成功打开过"之后才重连（连接前的关闭交给 bootstrap 错误页）。
+    let openedOnce = false;
+    const reconnectController = createReconnectController({
+      probe: probeServerReachable,
+      reload: () => window.location.reload(),
+      onReconnecting: () => renderWebReconnecting(),
     });
+    window.addEventListener("beforeunload", () => reconnectController.markShuttingDown(), {
+      once: true,
+    });
+    const services = await connectViaWebSocket(bootstrap.wsUrl, {
+      onClose: () => {
+        if (openedOnce) reconnectController.notifyClosed();
+      },
+    });
+    openedOnce = true;
     const platform = createWebPlatform();
     document.title = "ZCode - Web + Server";
 
