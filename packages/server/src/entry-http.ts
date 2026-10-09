@@ -1,13 +1,17 @@
 import {
   createServerHostServices,
   createTopicResourcePeers,
+  disposeServiceResourcesAndWait,
   getAppConfigDir,
 } from "@zcode/services/node";
+import { formatLogPrefix } from "@zcode/shared";
 import {
   materializeBundledZCodeBuiltinProviderConfig,
   readBundledZCodeBuiltinProviderConfig,
 } from "./bundledZCodeBuiltinProviderConfig.js";
 import { createHttpServer, resolveHttpServerId } from "./http.js";
+import { createConfiguredBrowserExecutor } from "./browser/managedBrowserRouter.js";
+import { resolveHeadlessBrowserConfig } from "./browser/headlessBrowserConfig.js";
 
 async function main(): Promise<void> {
   const zcodeBuiltinProviderConfigFilePath = await materializeBundledZCodeBuiltinProviderConfig({
@@ -18,6 +22,11 @@ async function main(): Promise<void> {
   const host = process.env["ZCODE_SERVER_HOST"]?.trim() || process.env["HOST"]?.trim() || undefined;
   const staticRoot = process.env["ZCODE_WEB_STATIC_ROOT"]?.trim() || undefined;
   const authToken = process.env["ZCODE_SERVER_AUTH_TOKEN"]?.trim() || undefined;
+  const browserConfig = resolveHeadlessBrowserConfig(process.env);
+  const browserExecutor = browserConfig
+    ? createConfiguredBrowserExecutor(browserConfig)
+    : undefined;
+  // topic resource 中继：上游在自部署入口建立 peers 并注入服务集合与 HTTP 层。
   const topicResourcePeers = createTopicResourcePeers();
   const serverId = resolveHttpServerId();
   const { services, workspaceIdentityMapper, migrationFailedPathCount } =
@@ -26,9 +35,18 @@ async function main(): Promise<void> {
       sourceServerId: serverId,
       zcodeBuiltinProviderConfigFilePath,
       providerProvisioningTargetEnabled: Boolean(authToken),
+      // 自部署形态的服务开关（fork）：relay 远控、全工作区任务视图、窗口 Controller、
+      // 附件持久上传与托管浏览器执行器。
+      selfHostOptions: {
+        webRemoteControlRelay: true,
+        taskListAllWorkspaces: true,
+        windowController: true,
+        arbitraryFileUploads: true,
+        ...(browserExecutor ? { browserControlExecutor: browserExecutor } : {}),
+      },
     });
 
-  createHttpServer(services, port, {
+  const server = createHttpServer(services, port, {
     serverId,
     workspaceIdentityMapper,
     migrationFailedPathCount,
@@ -38,6 +56,34 @@ async function main(): Promise<void> {
     ...(staticRoot ? { staticRoot, spaFallback: true } : {}),
     ...(authToken ? { authToken, authRequired: true } : {}),
   });
+
+  // 优雅关闭：systemd stop/restart 发 SIGTERM。此前没有任何信号处理，进程被默认
+  // 处置直接终止——agent 进程树来不及 graceful+force 清理（产生孤儿 zcode-cli）、
+  // sqlite 句柄不关闭、托管浏览器不回收。照 entry-stdio 的同一契约：
+  // 先停止接新连接，再等 disposeServiceResourcesAndWait 完成异步回收，最后退出。
+  let shuttingDown = false;
+  const log = (...args: unknown[]) =>
+    console.error(formatLogPrefix("zcode-server:http", process.pid), ...args);
+  const shutdown = (signal: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    log(`received ${signal}, shutting down`);
+    server.close(() => log("http server closed"));
+    // 兜底：清理超过 20s 未完成则硬退（systemd 的 SIGKILL 更晚且更粗暴）。
+    const forceTimer = setTimeout(() => {
+      log("graceful shutdown timed out, forcing exit");
+      process.exit(1);
+    }, 20_000);
+    void (async () => {
+      await disposeServiceResourcesAndWait(services);
+      await browserExecutor?.shutdown().catch(() => {});
+      clearTimeout(forceTimer);
+      log("shutdown complete");
+      process.exit(0);
+    })();
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 void main().catch((error: unknown) => {
