@@ -94,8 +94,10 @@ export default defineConfig(({ mode }) => {
       "import.meta.env.VITE_ZAI_OAUTH_ORIGIN": JSON.stringify(zaiOAuthOrigin),
     },
     build: {
-      // 生产不在浏览器产物暴露 sourceMappingURL，避免客户端侧还原业务源码。
-      sourcemap: mode === "production" ? "hidden" : true,
+      // 生产不生成 sourcemap：hidden 仍会产出 .map 文件（内嵌 sourcesContent 完整源码），
+      // 曾随部署整体上公网服务器（82MB/占部署 63%），凡过 Basic 认证者可下载还原源码。
+      // false 连文件都不生成；dev/test 构建不受影响。生产排障需要时本地临时构建。
+      sourcemap: mode === "production" ? false : true,
     },
   };
 });
