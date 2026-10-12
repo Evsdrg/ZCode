@@ -5979,6 +5979,12 @@ export function createZCodeAgentService(
       );
     },
 
+    async setClientFlowStateV4() {
+      // 浏览器自报档位必须经 connection scope 注入 connectionId；base 无 per-connection
+      // 所有权，直连（如宿主内部消费者）调用无法确定目标连接，明确拒绝而非静默作用于全局。
+      throw new Error("fault.connection.flowControlScopeRequired");
+    },
+
     async subscribeConversationV4(params: ZCodeAgentConversationSubscribeParams) {
       const subscribeStartedAt = performance.now();
       const existingClient = processManager.getExistingClient(params);

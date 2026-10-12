@@ -106,6 +106,7 @@ import type {
   V4ConversationAttachmentReadResult,
   V4ConversationAttachmentStatResult,
   V4ConnectionFlowState,
+  V4ClientFlowStateParams,
   V4ConversationFileChangesResult,
   V4ConversationFileRewindPreviewResult,
   V4ConversationPlansResult,
@@ -883,6 +884,11 @@ export interface IZCodeAgentService {
   initializeConversationV4(clientHello: ClientHello): Promise<void>;
   /** 仅供 trusted host relay/facade；terminal RPC caller 必须被 connection scope 拒绝。 */
   setConnectionFlowStateV4(params: ZCodeAgentConnectionFlowParams): Promise<void>;
+  /**
+   * 浏览器自报前台/后台投递档位（页面可见性）。只接受 saturated/drained，作用于调用者自己的
+   * 连接；connectionId 由 scope 注入，客户端无法指定。仅 connection scope 实现，base 拒绝。
+   */
+  setClientFlowStateV4(params: V4ClientFlowStateParams): Promise<void>;
   subscribeConversationV4(
     params: ZCodeAgentConversationSubscribeParams,
   ): Promise<V4ConversationSubscribeResult>;

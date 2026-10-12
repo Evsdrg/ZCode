@@ -105,6 +105,7 @@ import {
   type WebRemoteControlWorkspaceBridgeServiceRegistration,
   markWebRemoteControlBridgeTaskRead,
   markWebRemoteControlTaskRead,
+<<<<<<< HEAD
 } from "#src/web-remote-control/index.js";
 
 import {
@@ -116,6 +117,11 @@ import {
   showWebRemoteControlVersionNotice,
 } from "#src/web-remote-control/views.js";
 
+=======
+} from "./webRemoteControlTaskRead.js";
+import { createReconnectController } from "./connectionResilience.js";
+import { createClientFlowControl } from "./clientFlowControl.js";
+>>>>>>> 488f2978 (feat(ui): 页面隐藏时暂停本连接投递，复用 CLI 既有流控)
 type RootServices = Parameters<typeof Root>[0]["services"];
 type ServiceMethod = (...args: any[]) => unknown;
 
@@ -2207,6 +2213,17 @@ async function bootstrapWebApp() {
       webRemoteControlRelay: true,
     });
     openedOnce = true;
+    // 页面隐藏时暂停本连接的投递（切标签/锁屏/切后台），恢复可见时回前台档位。
+    // 只影响投递调度，不改订阅语义；失败降级为继续投递。
+    const clientFlowControl = createClientFlowControl({
+      port: services.zcodeAgentService,
+      documentTarget: document,
+      onError: (error) => {
+        console.warn("[web] 同步前台/后台投递档位失败", error);
+      },
+    });
+    clientFlowControl.sync();
+    window.addEventListener("beforeunload", () => clientFlowControl.dispose(), { once: true });
     // 自部署 server 注册 relay 服务时，把官方远控卡片接到它（同一 zcode.z.ai 中转）。
     // 桌面 host 不注册该服务，此时保持原有「只能从桌面发起」的拒绝语义。
     const platform = createWebPlatform({
