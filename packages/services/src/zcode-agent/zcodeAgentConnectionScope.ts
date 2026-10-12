@@ -8,6 +8,7 @@ import {
   clientSupportsWorkflowRunDeltas,
   conversationTopic,
   sessionsIndexTopic,
+  v4ClientFlowStateParamsSchema,
   workspaceConfigTopic,
   type ConversationTopicWireCandidate,
   type HelloMessage,
@@ -698,6 +699,13 @@ export function createZCodeAgentConnectionScope(
         );
       if (!ownsRoute) throw new Error("fault.subscription.notOwned");
       await base.setConnectionFlowStateV4(withTrustedConnection(params, forwarded));
+    },
+    async setClientFlowStateV4(params) {
+      assertOpen();
+      // 浏览器自报档位只作用于本连接：不读也不接受 connectionId，避免影响其他连接。
+      // closed 归连接所有权（socket 关闭/dispose），客户端不得上报。
+      const { state } = v4ClientFlowStateParamsSchema.parse(params);
+      await enqueueTransportFlowState(state);
     },
     async sendConversationCommandV4(params) {
       assertOpen();

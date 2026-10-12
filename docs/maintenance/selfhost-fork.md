@@ -15,6 +15,7 @@
 | 浏览器套餐页降级        | `packages/ui/src/settings/CodingPlanEmbeddedWebviewDialog.tsx`及i18n  | 不尝试在浏览器执行Electron webview/preload       |
 | WebUI版本展示           | `settingsPageHelpers.tsx`、test-ids及i18n                             | WebUI版本与Agent版本独立                         |
 | WebSocket保活、页面重连 | `server/src/webSocketHeartbeat.ts`、`web/src/connectionResilience.ts` | 仅Web replayable链路，不改Desktop continuous语义 |
+| 前台/后台投递流控       | `services/src/zcode-agent/zcodeAgentConnectionScope.ts`、`web/src/clientFlowControl.ts` | 复用CLI既有`saturated`/`drained`，只驱动不新增帧语义 |
 | HTTP入口优雅关闭        | `packages/server/src/entry-http.ts`                                   | 依赖公开的services资源释放接口                   |
 | 任务列表并发请求合并    | `packages/ui/src/lib/taskListMembershipSets.ts`                       | service实例+scope在途合并，不缓存新结果          |
 | 图片测高稳定            | `packages/ui/src/ToolCallBlocks/ToolCallBody.tsx`                     | 局部展示优化，首次解码仍可能改高度               |
@@ -40,6 +41,7 @@
 - **托管浏览器执行器**：`packages/server/src/browser/`；显式`ZCODE_SERVER_BROWSER_USE=headless`启用；`ZCODE_SERVER_BROWSER_ENGINE=chromium|firefox|both`选择单/双引擎，默认Chromium；双模式通过既有SDK按ID选择。使用Playwright配套制品，依赖外置，不分发本地浏览器缓存。
 - **通用文件上传store**：`packages/services/src/prompt-attachment-transfer/arbitraryFileUpload*`；Web普通文件<=20MiB完整落盘，发送前持久保留，既有媒体链路保留。
 - **自部署任务列表投影**：`allWorkspacesTaskView`与`localWindowControllerService`。
+- **前台/后台投递流控**：`setClientFlowStateV4`（scope 覆写）+ `web/src/clientFlowControl.ts`；页面隐藏时经CLI既有`v4/connection/flow`置`saturated`暂停打帧，可见时`drained`恢复。不改闭源CLI，不新增帧语义。
 - **测试基建和回归用例**：services/server/ui/web的Vitest配置、纯逻辑与交互测试。合成数据测试属于交付内容，不是要忽略的开发过程。
 - **产品spec、匿名化部署指南、发布检查**：保留可维护决策与验收规则，不提交实际运行日志/抓包/会话摘录。
 

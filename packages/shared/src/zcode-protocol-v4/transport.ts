@@ -404,6 +404,17 @@ export type V4ConnectionFlowParams = z.infer<typeof v4ConnectionFlowParamsSchema
 
 export const v4ConnectionFlowResultSchema = z.object({}).strict();
 
+/**
+ * 浏览器可自报的连接投递档位：只允许前台（drained）/后台（saturated）两态。
+ * `closed` 归连接所有权（socket 关闭/dispose 触发），客户端不得上报。
+ */
+export const v4ClientFlowStateParamsSchema = z
+  .object({
+    state: z.enum(["saturated", "drained"]),
+  })
+  .strict();
+export type V4ClientFlowStateParams = z.infer<typeof v4ClientFlowStateParamsSchema>;
+
 export const V4_NOTIFICATIONS = {
   // 下行帧（snapshot / deltas），params = ConversationTopicFrame。
   conversationFrame: "v4/conversation/frame",

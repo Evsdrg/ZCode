@@ -12,6 +12,7 @@ import {
 import "@zcode/ui/styles.css";
 import { connectViaWebSocket } from "@zcode/client";
 import { createReconnectController } from "./connectionResilience.js";
+import { createClientFlowControl } from "./clientFlowControl.js";
 import { WebCallbackPage } from "./auth/WebCallbackPage.js";
 import { createWebAuthService } from "./auth/webAuthService.js";
 import { WEB_ZAI_OAUTH_CONFIG, resolveWebAuthDevReturnTo } from "./auth/webZaiOAuthConfig.js";
@@ -498,6 +499,17 @@ async function bootstrapWebApp() {
       webRemoteControlRelay: true,
     });
     openedOnce = true;
+    // 页面隐藏时暂停本连接的投递（切标签/锁屏/切后台），恢复可见时回前台档位。
+    // 只影响投递调度，不改订阅语义；失败降级为继续投递。
+    const clientFlowControl = createClientFlowControl({
+      port: services.zcodeAgentService,
+      documentTarget: document,
+      onError: (error) => {
+        console.warn("[web] 同步前台/后台投递档位失败", error);
+      },
+    });
+    clientFlowControl.sync();
+    window.addEventListener("beforeunload", () => clientFlowControl.dispose(), { once: true });
     const platform = createWebPlatform();
     document.title = "ZCode - Web + Server";
 
