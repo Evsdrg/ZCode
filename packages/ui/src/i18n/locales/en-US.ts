@@ -2271,6 +2271,10 @@ const enUS: Record<string, string> = {
   "settings.toolGroupingChanges": "Group file changes",
   "settings.toolGroupingChangesDescription":
     "Group consecutive Write, Edit, and ApplyPatch calls into a Changes section.",
+  "settings.historyStepsGrouping": "Collapse history steps",
+  "settings.historyStepsGroupingDescription":
+    "Collapse consecutive tool and thinking steps in past turns into an expandable step group. The running turn always stays expanded.",
+  "chat.historySteps.collapsed": "{count} steps",
   "settings.zcodeInteractionBehavior": "Interaction behavior",
   "settings.zcodeInteractionBehaviorDescription":
     "While ZCode is running, add follow-up actions to the queue or guide them to run after the next tool call.",

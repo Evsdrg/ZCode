@@ -276,6 +276,8 @@ export const TID_CHAT_ASSISTANT_HISTORY_TRIGGER = "chat-assistant-history-trigge
 export const TID_CHAT_ASSISTANT_HISTORY_CONTENT = "chat-assistant-history-content";
 /** 独立后台结果轮的任务标题（动态后缀为 turn key） */
 export const TID_CHAT_BACKGROUND_RESULT_TITLE = "chat-background-result-title";
+/** 历史回合折叠的步骤组触发器（点击展开全部步骤）。 */
+export const TID_CHAT_HISTORY_STEPS_COLLAPSED = "chat-history-steps-collapsed";
 /** 聊天工具调用块容器（动态后缀为 toolCallId） */
 export const TID_CHAT_TOOL_CALL_BLOCK = "chat-tool-call-block";
 /** 聊天用户消息编辑按钮（动态后缀为 messageId） */

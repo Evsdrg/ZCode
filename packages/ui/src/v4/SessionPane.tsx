@@ -1369,6 +1369,7 @@ export function SessionPane({
   const toolGroupingExploreEnabled = sharedSettings?.toolGroupingExploreEnabled ?? true;
   const toolGroupingTerminalEnabled = sharedSettings?.toolGroupingTerminalEnabled ?? true;
   const toolGroupingChangesEnabled = sharedSettings?.toolGroupingChangesEnabled ?? false;
+  const historyStepsGroupingEnabled = sharedSettings?.historyStepsGroupingEnabled ?? true;
   const snapshotSessionId = snapshot?.sessionId ?? null;
   const snapshotFollowupMode = snapshot?.config.followupMode ?? null;
   const snapshotRevision = snapshot?.revision ?? null;
@@ -2178,6 +2179,7 @@ export function SessionPane({
       toolGroupingExploreEnabled,
       toolGroupingTerminalEnabled,
       toolGroupingChangesEnabled,
+      historyStepsGroupingEnabled,
       onNavigateToRow: handleNavigateToRow,
       onOpenBrowserUrl,
       onOpenAutomationsMain,
@@ -2236,6 +2238,7 @@ export function SessionPane({
       toolGroupingExploreEnabled,
       toolGroupingTerminalEnabled,
       toolGroupingChangesEnabled,
+      historyStepsGroupingEnabled,
       handleNavigateToRow,
       onOpenBrowserUrl,
       onOpenAutomationsMain,

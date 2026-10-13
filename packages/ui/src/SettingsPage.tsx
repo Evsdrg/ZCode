@@ -710,6 +710,7 @@ export function SettingsPage({
   const [toolGroupingExploreEnabled, setToolGroupingExploreEnabled] = useState(true);
   const [toolGroupingTerminalEnabled, setToolGroupingTerminalEnabled] = useState(true);
   const [toolGroupingChangesEnabled, setToolGroupingChangesEnabled] = useState(false);
+  const [historyStepsGroupingEnabled, setHistoryStepsGroupingEnabled] = useState(true);
   const [zcodeInteractionBehavior, setZCodeInteractionBehavior] =
     useState<ZCodeInteractionBehavior>("queue");
   const [defaultHomeDir, setDefaultHomeDir] = useState("");
@@ -794,6 +795,7 @@ export function SettingsPage({
         setToolGroupingExploreEnabled(settings.toolGroupingExploreEnabled ?? true);
         setToolGroupingTerminalEnabled(settings.toolGroupingTerminalEnabled ?? true);
         setToolGroupingChangesEnabled(settings.toolGroupingChangesEnabled ?? false);
+        setHistoryStepsGroupingEnabled(settings.historyStepsGroupingEnabled ?? true);
         setZCodeInteractionBehavior(settings.zcodeInteractionBehavior ?? "queue");
       })
       .catch(() => {});
@@ -827,6 +829,7 @@ export function SettingsPage({
     setToolGroupingExploreEnabled(sharedSettings.toolGroupingExploreEnabled ?? true);
     setToolGroupingTerminalEnabled(sharedSettings.toolGroupingTerminalEnabled ?? true);
     setToolGroupingChangesEnabled(sharedSettings.toolGroupingChangesEnabled ?? false);
+    setHistoryStepsGroupingEnabled(sharedSettings.historyStepsGroupingEnabled ?? true);
     setZCodeInteractionBehavior(sharedSettings.zcodeInteractionBehavior ?? "queue");
     setReceivePreviewUpdates(sharedSettings.receivePreviewUpdates ?? false);
     setAutoDownloadAndInstallUpdates(sharedSettings.autoDownloadAndInstallUpdates ?? false);
@@ -1248,6 +1251,22 @@ export function SettingsPage({
         },
       });
       setToolGroupingChangesEnabled(enabled);
+    },
+    [updateSharedSettings],
+  );
+  const handleHistoryStepsGroupingEnabledChange = useCallback(
+    async (enabled: boolean) => {
+      await runSettingsActionAsync({
+        featureId: "settings.tool_grouping",
+        action: "toggle_history_steps_grouping",
+        trigger: "switch",
+        operation: () => updateSharedSettings({ historyStepsGroupingEnabled: enabled }),
+        completed: {
+          resultSource: "shared_settings",
+          stateAfter: enabled ? "enabled" : "disabled",
+        },
+      });
+      setHistoryStepsGroupingEnabled(enabled);
     },
     [updateSharedSettings],
   );
@@ -1717,6 +1736,7 @@ export function SettingsPage({
                             toolGroupingExploreEnabled={toolGroupingExploreEnabled}
                             toolGroupingTerminalEnabled={toolGroupingTerminalEnabled}
                             toolGroupingChangesEnabled={toolGroupingChangesEnabled}
+                            historyStepsGroupingEnabled={historyStepsGroupingEnabled}
                             zcodeInteractionBehavior={zcodeInteractionBehavior}
                             askUserQuestionAutoResolutionEnabled={
                               askUserQuestionAutoResolutionEnabled
@@ -1763,6 +1783,9 @@ export function SettingsPage({
                             }
                             onToolGroupingChangesEnabledChange={
                               handleToolGroupingChangesEnabledChange
+                            }
+                            onHistoryStepsGroupingEnabledChange={
+                              handleHistoryStepsGroupingEnabledChange
                             }
                             onZCodeInteractionBehaviorChange={handleZCodeInteractionBehaviorChange}
                             onAskUserQuestionAutoResolutionEnabledChange={

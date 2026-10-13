@@ -81,6 +81,7 @@ export function GeneralSectionContent({
   toolGroupingExploreEnabled,
   toolGroupingTerminalEnabled,
   toolGroupingChangesEnabled,
+  historyStepsGroupingEnabled = true,
   zcodeInteractionBehavior,
   askUserQuestionAutoResolutionEnabled = true,
   modelIoFullRetentionEnabled = false,
@@ -105,6 +106,7 @@ export function GeneralSectionContent({
   onToolGroupingExploreEnabledChange,
   onToolGroupingTerminalEnabledChange,
   onToolGroupingChangesEnabledChange,
+  onHistoryStepsGroupingEnabledChange,
   onZCodeInteractionBehaviorChange,
   onAskUserQuestionAutoResolutionEnabledChange = async () => {},
   onModelIoFullRetentionEnabledChange = async () => {},
@@ -144,6 +146,7 @@ export function GeneralSectionContent({
   toolGroupingExploreEnabled: boolean;
   toolGroupingTerminalEnabled: boolean;
   toolGroupingChangesEnabled: boolean;
+  historyStepsGroupingEnabled?: boolean;
   zcodeInteractionBehavior: ZCodeInteractionBehavior;
   askUserQuestionAutoResolutionEnabled?: boolean;
   modelIoFullRetentionEnabled?: boolean;
@@ -168,6 +171,7 @@ export function GeneralSectionContent({
   onToolGroupingExploreEnabledChange: (enabled: boolean) => Promise<void>;
   onToolGroupingTerminalEnabledChange: (enabled: boolean) => Promise<void>;
   onToolGroupingChangesEnabledChange: (enabled: boolean) => Promise<void>;
+  onHistoryStepsGroupingEnabledChange: (enabled: boolean) => Promise<void>;
   onZCodeInteractionBehaviorChange: (behavior: ZCodeInteractionBehavior) => Promise<void>;
   onAskUserQuestionAutoResolutionEnabledChange?: (enabled: boolean) => Promise<void>;
   onModelIoFullRetentionEnabledChange?: (enabled: boolean) => Promise<void>;
@@ -805,6 +809,21 @@ export function GeneralSectionContent({
               checked={toolGroupingChangesEnabled}
               onCheckedChange={(checked) => {
                 void onToolGroupingChangesEnabledChange(checked);
+              }}
+            />
+          }
+        />
+        <SettingsRow
+          label={intl.formatMessage({ id: "settings.historyStepsGrouping" })}
+          description={intl.formatMessage({
+            id: "settings.historyStepsGroupingDescription",
+          })}
+          control={
+            <Switch
+              aria-label={intl.formatMessage({ id: "settings.historyStepsGrouping" })}
+              checked={historyStepsGroupingEnabled}
+              onCheckedChange={(checked) => {
+                void onHistoryStepsGroupingEnabledChange(checked);
               }}
             />
           }

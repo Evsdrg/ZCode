@@ -305,6 +305,11 @@ export interface AppSettings {
   toolGroupingTerminalEnabled?: boolean;
   /** 是否把连续的 Write/Edit/ApplyPatch 工具调用聚合成 Changes。 */
   toolGroupingChangesEnabled?: boolean;
+  /**
+   * 是否把历史回合（非运行中、非最后一段）里连续的工具/思考步骤聚合成可展开的步骤组。
+   * 只影响历史展示，不改变数据、会话查找或滚动锚定语义。
+   */
+  historyStepsGroupingEnabled?: boolean;
   /** ZCode 运行中继续输入时，是排队到下一轮，还是引导到下一次工具调用后运行 */
   zcodeInteractionBehavior?: ZCodeInteractionBehavior;
   /** Agent 提问五分钟无人回答时是否允许自动继续；缺失按开启兼容旧配置。 */
