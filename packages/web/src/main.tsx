@@ -105,7 +105,6 @@ import {
   type WebRemoteControlWorkspaceBridgeServiceRegistration,
   markWebRemoteControlBridgeTaskRead,
   markWebRemoteControlTaskRead,
-<<<<<<< HEAD
 } from "#src/web-remote-control/index.js";
 
 import {
@@ -116,12 +115,7 @@ import {
   resolveWebRemoteControlScreenLocale,
   showWebRemoteControlVersionNotice,
 } from "#src/web-remote-control/views.js";
-
-=======
-} from "./webRemoteControlTaskRead.js";
-import { createReconnectController } from "./connectionResilience.js";
 import { createClientFlowControl } from "./clientFlowControl.js";
->>>>>>> 488f2978 (feat(ui): 页面隐藏时暂停本连接投递，复用 CLI 既有流控)
 type RootServices = Parameters<typeof Root>[0]["services"];
 type ServiceMethod = (...args: any[]) => unknown;
 

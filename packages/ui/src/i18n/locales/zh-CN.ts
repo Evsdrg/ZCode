@@ -3049,6 +3049,10 @@ const zhCN: Record<string, string> = {
   "settings.toolGroupingChanges": "分组文件更改",
   "settings.toolGroupingChangesDescription":
     "将连续的 Write、Edit 和 ApplyPatch 调用聚合为 Changes 分组。",
+  "settings.historyStepsGrouping": "折叠历史步骤",
+  "settings.historyStepsGroupingDescription":
+    "将历史回合中连续的工具与思考步骤折叠为可展开的步骤组；运行中的回合始终展开。",
+  "chat.historySteps.collapsed": "{count} 个步骤",
   "settings.zcodeInteractionBehavior": "交互行为",
   "settings.zcodeInteractionBehaviorDescription":
     "在 ZCode 运行时将后续操作加入队列，或引导至下一轮工具调用后运行。",

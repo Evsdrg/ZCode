@@ -18,6 +18,7 @@ import {
   TID_CHAT_ASSISTANT_HISTORY_CONTENT,
   TID_CHAT_ASSISTANT_HISTORY_TRIGGER,
   TID_CHAT_BACKGROUND_RESULT_TITLE,
+  TID_CHAT_HISTORY_STEPS_COLLAPSED,
   TID_CHAT_LOADING,
   TID_V4_ROW,
   testId,
@@ -78,6 +79,7 @@ import {
   ENABLE_TERMINAL_TOOL_CALL_GROUPING,
   type ConversationAssistantWorkRenderItem,
 } from "@/v4/conversationAssistantWorkItems.js";
+import { planHistoryStepCollapse } from "@/v4/historyStepSegments.js";
 import type { ConversationCuaGroupEvent } from "@/v4/conversationCuaGroups.js";
 import { ConversationAgentToolCallRow } from "@/v4/ConversationAgentToolCallRow.js";
 import { ConversationFileSummaryPanel } from "@/v4/ConversationFileSummaryPanel.js";
@@ -392,6 +394,7 @@ function ConversationAssistantWorkItems({
   stageTailIsRunning = false,
   assistantCodeCommentProjectionEnabled = false,
   historyContainer,
+  historyStepsGroupingEnabled = false,
 }: {
   rows: readonly AssistantWorkRow[];
   context: ConversationRowRenderContext;
@@ -402,6 +405,8 @@ function ConversationAssistantWorkItems({
     chunkKey: string;
     open: boolean;
   };
+  /** 历史回合步骤聚合：仅对非运行中的历史段启用，运行中/最后一段保持逐项。 */
+  historyStepsGroupingEnabled?: boolean;
 }) {
   const showReasoning = context.messageStreamShowReasoning === true;
   const firstReasoningRowId = context.messageStreamFirstReasoningRowId;
@@ -446,24 +451,29 @@ function ConversationAssistantWorkItems({
 
   // 连续工作项（工具/explore/reasoning）统一 gap-4 组容器（对齐旧版 tool-call-group），
   // 取代继承父级 gap-5/gap-2 + 每行 py-2 的双重且不一致的间距。
+  const renderItem = (item: ConversationAssistantWorkRenderItem) =>
+    item.kind === "row" ? (
+      <ConversationTurnRow
+        key={item.key}
+        row={item.row}
+        context={context}
+        hideAssistantActions={item.row.kind === "assistantText"}
+        assistantCodeCommentProjectionEnabled={assistantCodeCommentProjectionEnabled}
+      />
+    ) : item.kind === "agentToolCall" ? (
+      <ConversationAgentToolCallRow key={item.key} item={item} context={context} />
+    ) : item.kind === "exploreGroup" ? (
+      <ConversationExploreGroupRow key={item.key} item={item} context={context} />
+    ) : (
+      <ConversationToolGroupRow key={item.key} item={item} context={context} />
+    );
+
   const content = (
     <div className="flex flex-col gap-4">
-      {items.map((item) =>
-        item.kind === "row" ? (
-          <ConversationTurnRow
-            key={item.key}
-            row={item.row}
-            context={context}
-            hideAssistantActions={item.row.kind === "assistantText"}
-            assistantCodeCommentProjectionEnabled={assistantCodeCommentProjectionEnabled}
-          />
-        ) : item.kind === "agentToolCall" ? (
-          <ConversationAgentToolCallRow key={item.key} item={item} context={context} />
-        ) : item.kind === "exploreGroup" ? (
-          <ConversationExploreGroupRow key={item.key} item={item} context={context} />
-        ) : (
-          <ConversationToolGroupRow key={item.key} item={item} context={context} />
-        ),
+      {historyStepsGroupingEnabled ? (
+        <HistoryStepsSection items={items} renderItem={renderItem} />
+      ) : (
+        items.map((item) => renderItem(item))
       )}
     </div>
   );
@@ -480,6 +490,73 @@ function ConversationAssistantWorkItems({
       <div className="pt-5">{content}</div>
     </CollapsibleContent>
   );
+}
+
+/**
+ * 历史回合步骤聚合外壳。
+ *
+ * 折叠态只渲染助手文字行 + 一个"N 个步骤"触发器；展开态渲染原始全序，
+ * 与关闭该特性时逐项一致。折叠不改变数据，会话查找只索引文字行，不受影响。
+ */
+function HistoryStepsSection({
+  items,
+  renderItem,
+}: {
+  items: readonly ConversationAssistantWorkRenderItem[];
+  renderItem: (item: ConversationAssistantWorkRenderItem) => ReactNode;
+}) {
+  const { intl } = useZCodeIntl();
+  const isTextItem = useCallback(
+    (item: ConversationAssistantWorkRenderItem) =>
+      item.kind === "row" && item.row.kind === "assistantText",
+    [],
+  );
+  const plan = useMemo(
+    () => planHistoryStepCollapse(items, (item) => !isTextItem(item)),
+    [items, isTextItem],
+  );
+  const [open, setOpen] = useState(false);
+
+  if (plan.kind === "unchanged") {
+    return <>{items.map((item) => renderItem(item))}</>;
+  }
+
+  if (open) {
+    return <>{items.map((item) => renderItem(item))}</>;
+  }
+
+  // 折叠态：文字行逐项 + 步骤组触发器，按原始顺序插入。
+  const collapsedLabel = intl.formatMessage(
+    { id: "chat.historySteps.collapsed" },
+    { count: String(plan.collapsedCount) },
+  );
+  const nodes: ReactNode[] = [];
+  let inserted = false;
+  for (const item of items) {
+    if (!isTextItem(item)) {
+      if (!inserted) {
+        inserted = true;
+        nodes.push(
+          <button
+            key="history-steps-collapsed"
+            type="button"
+            data-testid={TID_CHAT_HISTORY_STEPS_COLLAPSED}
+            onClick={() => setOpen(true)}
+            className="group/tool-summary inline-flex max-w-full cursor-pointer items-center gap-2 self-start text-left text-ui-base text-foreground-subtlest transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-input-border-focused"
+          >
+            <span>{collapsedLabel}</span>
+            <ChevronRightIcon
+              aria-hidden
+              className="size-4 shrink-0 text-foreground-subtlest opacity-70 transition-transform group-hover/tool-summary:opacity-100"
+            />
+          </button>,
+        );
+      }
+      continue;
+    }
+    nodes.push(renderItem(item));
+  }
+  return <>{nodes}</>;
 }
 
 function resolveCronAutomationTurnCards(
@@ -854,6 +931,9 @@ function ConversationWorkSegmentFlow({
               context={context}
               stageTailIsRunning={stageTailIsRunning}
               assistantCodeCommentProjectionEnabled={assistantCodeCommentProjectionEnabled}
+              historyStepsGroupingEnabled={
+                context.historyStepsGroupingEnabled === true && !stageTailIsRunning
+              }
             />
           );
         }
@@ -1204,6 +1284,9 @@ function ConversationBackgroundResultWork({
             rows={unit.assistantHistoryRows}
             context={context}
             assistantCodeCommentProjectionEnabled={assistantCodeCommentProjectionEnabled}
+            historyStepsGroupingEnabled={
+              context.historyStepsGroupingEnabled === true && !unit.isRunning
+            }
           />
         </div>
       ) : null}
@@ -1227,6 +1310,9 @@ function ConversationBackgroundResultWork({
           rows={unit.assistantFollowingRows}
           context={context}
           assistantCodeCommentProjectionEnabled={assistantCodeCommentProjectionEnabled}
+          historyStepsGroupingEnabled={
+            context.historyStepsGroupingEnabled === true && !unit.isRunning
+          }
         />
       ) : null}
       <TurnChatLoadingSlot apiRetry={apiRetry} eligible={showLoading} />

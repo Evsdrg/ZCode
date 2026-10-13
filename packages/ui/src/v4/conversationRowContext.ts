@@ -71,6 +71,8 @@ export interface ConversationRowRenderContext {
   toolGroupingTerminalEnabled?: boolean;
   /** 常规设置：是否聚合连续的文件写入工具。 */
   toolGroupingChangesEnabled?: boolean;
+  /** 常规设置：是否折叠历史回合中连续的工具/思考步骤。 */
+  historyStepsGroupingEnabled?: boolean;
   /**
    * Tier 1 fork 跳转：把当前 pane 切到目标会话（forkNotice → 父会话，复用 onSessionCreated
    * 原地切换）。rowId 预留 Tier 2 精确滚动——当前 forkNotice.parentRowId 恒为 0 占位、暂忽略。
