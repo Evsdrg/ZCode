@@ -72,7 +72,6 @@ import {
   anchorActionAfterContentChange,
   historyPrefetchTriggerPx,
   initialFollowing,
-  isAtBottom,
   prependScrollAdjustment,
   prependVirtualAnchorAdjustment,
   reconcileFollowingForContentAnchor,
@@ -86,6 +85,10 @@ import {
   type PrependVirtualAnchor,
   type TimelineUserScrollIntent,
 } from "@/v4/timelineScrollAnchor.js";
+import {
+  applyMessageLayerMaskStyle,
+  computeMessageLayerMask as computeMessageLayerMaskPure,
+} from "@/v4/messageLayerMask.js";
 import { useConversationTimelineFind } from "@/v4/useConversationTimelineFind.js";
 import { ConversationSelectionTooltip } from "@/v4/ConversationSelectionTooltip.js";
 import type { ConversationSelectionReference } from "@/lib/conversationSelectionReference.js";
@@ -96,8 +99,6 @@ const EMPTY_PENDING_GUIDES: readonly QueueItem[] = [];
 
 const ROW_OVERSCAN = 8;
 const RUNNING_WORK_DURATION_TICK_MS = 1000;
-const COMPOSER_MESSAGE_MASK_FADE_PX = 24;
-const COMPOSER_MESSAGE_MASK_TRANSPARENT_HEIGHT_PX = 96;
 const USER_SCROLL_INTENT_TTL_MS = 1200;
 const LAYOUT_SCROLL_GUARD_MS = 250;
 const CONTENT_WIDTH_RESIZE_SETTLE_MS = 120;
@@ -874,46 +875,36 @@ function ConversationTimelineImpl({
     }
   }, []);
 
-  const syncMessageLayerMask = useCallback((element: HTMLDivElement) => {
-    const messageLayer = messageLayerRef.current;
-    if (!messageLayer) return;
-
-    if (
-      isAtBottom({
+  const syncMessageLayerMask = useCallback(
+    (element: HTMLDivElement) => {
+      const messageLayer = messageLayerRef.current;
+      if (!messageLayer) return;
+      // 先读后写：读取与写样式分离，避免写后立刻读触发强制同步布局。
+      const style = computeMessageLayerMaskPure({
         scrollTop: element.scrollTop,
         viewportHeight: element.clientHeight,
         contentHeight: element.scrollHeight,
-      })
-    ) {
-      // 贴底时消息已经位于正常文档流末尾，不会经过 sticky composer；
-      // 继续保留 mask 会无意义地淡出最后一条消息，只有离底滚动时才需要遮罩。
-      messageLayer.style.maskImage = "none";
-      messageLayer.style.webkitMaskImage = "none";
-      return;
-    }
-
-    const viewportHeight = element.clientHeight;
-    const transparentStart = Math.max(
-      0,
-      viewportHeight - COMPOSER_MESSAGE_MASK_TRANSPARENT_HEIGHT_PX,
-    );
-    const opaqueEnd = Math.max(0, transparentStart - COMPOSER_MESSAGE_MASK_FADE_PX);
-    const viewportTopInLayer = Math.max(0, element.scrollTop - messageLayer.offsetTop);
-    const maskImage = `linear-gradient(to bottom, black 0, black ${opaqueEnd}px, transparent ${transparentStart}px, transparent 100%)`;
-
-    // dock 的透明 padding 能保留分屏 focus ring，但消息会从留白透出；
-    // mask 必须随 scroll viewport 对齐且只裁消息层，不能裁掉 sticky composer 与按钮。
-    messageLayer.style.maskImage = maskImage;
-    messageLayer.style.webkitMaskImage = maskImage;
-    messageLayer.style.maskPosition = `0 ${viewportTopInLayer}px`;
-    messageLayer.style.webkitMaskPosition = `0 ${viewportTopInLayer}px`;
-    messageLayer.style.maskSize = `100% ${viewportHeight}px`;
-    messageLayer.style.webkitMaskSize = `100% ${viewportHeight}px`;
-  }, []);
+        messageLayerOffsetTop: messageLayer.offsetTop,
+      });
+      applyMessageLayerMaskStyle(messageLayer.style, style);
+    },
+    [],
+  );
 
   const syncTurnNavigatorViewport = useCallback(
     (element: HTMLDivElement) => {
-      syncMessageLayerMask(element);
+      // 读阶段先行：先把所有布局读取做完，再写 mask 样式。
+      // 旧实现先写 mask 再读 rect，每次调用都强制一次同步重排（layout thrashing）。
+      const scrollTop = element.scrollTop;
+      const viewportHeight = element.clientHeight;
+      const contentHeight = element.scrollHeight;
+      const messageLayer = messageLayerRef.current;
+      const maskStyle = computeMessageLayerMaskPure({
+        scrollTop,
+        viewportHeight,
+        contentHeight,
+        messageLayerOffsetTop: messageLayer?.offsetTop ?? 0,
+      });
       const viewportRect = element.getBoundingClientRect();
       const queryPositions: ConversationTurnNavigatorQueryPosition[] = [];
       for (const rowElement of element.querySelectorAll<HTMLElement>("[data-row-id]")) {
@@ -922,19 +913,22 @@ function ConversationTimelineImpl({
           continue;
         }
         const rowRect = rowElement.getBoundingClientRect();
-        const start = element.scrollTop + rowRect.top - viewportRect.top;
+        const start = scrollTop + rowRect.top - viewportRect.top;
         queryPositions.push({ rowId, start, end: start + rowRect.height });
       }
+      const activeQueryRowId = resolveConversationTurnNavigatorActiveQueryRowId({
+        positions: queryPositions,
+        scrollOffsetPx: scrollTop,
+        viewportHeightPx: viewportHeight,
+      });
+      // 布局读取全部完成后才写样式。
+      if (messageLayer) applyMessageLayerMaskStyle(messageLayer.style, maskStyle);
       const nextViewport = {
-        scrollOffsetPx: element.scrollTop,
-        viewportHeightPx: element.clientHeight,
+        scrollOffsetPx: scrollTop,
+        viewportHeightPx: viewportHeight,
         // turn 级 active 只能命中同 turn 的第一条 query。这里从已挂载
         // 的稳定 row anchor 推导当前 query；虚拟 turn 尚未挂载时组件再回退 unit。
-        activeQueryRowId: resolveConversationTurnNavigatorActiveQueryRowId({
-          positions: queryPositions,
-          scrollOffsetPx: element.scrollTop,
-          viewportHeightPx: element.clientHeight,
-        }),
+        activeQueryRowId,
       };
       setTurnNavigatorViewport((current) =>
         current.scrollOffsetPx === nextViewport.scrollOffsetPx &&
@@ -944,7 +938,7 @@ function ConversationTimelineImpl({
           : nextViewport,
       );
     },
-    [syncMessageLayerMask],
+    [],
   );
 
   useLayoutEffect(() => {
