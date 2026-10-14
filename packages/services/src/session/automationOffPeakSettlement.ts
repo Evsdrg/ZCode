@@ -1,10 +1,18 @@
-import type { OffPeakTaskRepo } from "@zcode/services/node";
-import type { MainToSchedulerMessage } from "./schedulerProtocol.js";
+// 闲时任务派发结果结算（纯逻辑，repo 端口注入）。
+// 桌面 scheduler 与自部署 server 共用；失败分类语义必须一致（transient 才允许回 queued）。
+import type { OffPeakTaskRepo } from "./offPeakTaskRepo.js";
 
 const OFF_PEAK_DISPATCH_RETRY_BASE_MS = 30_000;
 const OFF_PEAK_DISPATCH_RETRY_CAP_MS = 15 * 60_000;
 
-type OffPeakDispatchResult = Extract<MainToSchedulerMessage, { type: "offpeak-dispatch-result" }>;
+export interface OffPeakDispatchResult {
+  offPeakTaskId: string;
+  ok: boolean;
+  conversationId?: string;
+  sessionId?: string;
+  error?: string;
+  failureKind?: "transient" | "permanent";
+}
 
 type OffPeakDispatchSettlementRepo = Pick<
   OffPeakTaskRepo,
