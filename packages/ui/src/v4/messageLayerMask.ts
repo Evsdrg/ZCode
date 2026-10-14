@@ -75,7 +75,10 @@ export function applyMessageLayerMaskStyle(
   if (style.maskPosition !== undefined && target.maskPosition !== style.maskPosition) {
     target.maskPosition = style.maskPosition;
   }
-  if (style.webkitMaskPosition !== undefined && target.webkitMaskPosition !== style.webkitMaskPosition) {
+  if (
+    style.webkitMaskPosition !== undefined &&
+    target.webkitMaskPosition !== style.webkitMaskPosition
+  ) {
     target.webkitMaskPosition = style.webkitMaskPosition;
   }
   if (style.maskSize !== undefined && target.maskSize !== style.maskSize) {

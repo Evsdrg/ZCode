@@ -875,71 +875,65 @@ function ConversationTimelineImpl({
     }
   }, []);
 
-  const syncMessageLayerMask = useCallback(
-    (element: HTMLDivElement) => {
-      const messageLayer = messageLayerRef.current;
-      if (!messageLayer) return;
-      // 先读后写：读取与写样式分离，避免写后立刻读触发强制同步布局。
-      const style = computeMessageLayerMaskPure({
-        scrollTop: element.scrollTop,
-        viewportHeight: element.clientHeight,
-        contentHeight: element.scrollHeight,
-        messageLayerOffsetTop: messageLayer.offsetTop,
-      });
-      applyMessageLayerMaskStyle(messageLayer.style, style);
-    },
-    [],
-  );
+  const syncMessageLayerMask = useCallback((element: HTMLDivElement) => {
+    const messageLayer = messageLayerRef.current;
+    if (!messageLayer) return;
+    // 先读后写：读取与写样式分离，避免写后立刻读触发强制同步布局。
+    const style = computeMessageLayerMaskPure({
+      scrollTop: element.scrollTop,
+      viewportHeight: element.clientHeight,
+      contentHeight: element.scrollHeight,
+      messageLayerOffsetTop: messageLayer.offsetTop,
+    });
+    applyMessageLayerMaskStyle(messageLayer.style, style);
+  }, []);
 
-  const syncTurnNavigatorViewport = useCallback(
-    (element: HTMLDivElement) => {
-      // 读阶段先行：先把所有布局读取做完，再写 mask 样式。
-      // 旧实现先写 mask 再读 rect，每次调用都强制一次同步重排（layout thrashing）。
-      const scrollTop = element.scrollTop;
-      const viewportHeight = element.clientHeight;
-      const contentHeight = element.scrollHeight;
-      const messageLayer = messageLayerRef.current;
-      const maskStyle = computeMessageLayerMaskPure({
-        scrollTop,
-        viewportHeight,
-        contentHeight,
-        messageLayerOffsetTop: messageLayer?.offsetTop ?? 0,
-      });
-      const viewportRect = element.getBoundingClientRect();
-      const queryPositions: ConversationTurnNavigatorQueryPosition[] = [];
-      for (const rowElement of element.querySelectorAll<HTMLElement>("[data-row-id]")) {
-        const rowId = Number(rowElement.dataset.rowId);
-        if (!Number.isSafeInteger(rowId) || !turnNavigatorQueryRowIdsRef.current.has(rowId)) {
-          continue;
-        }
-        const rowRect = rowElement.getBoundingClientRect();
-        const start = scrollTop + rowRect.top - viewportRect.top;
-        queryPositions.push({ rowId, start, end: start + rowRect.height });
+  const syncTurnNavigatorViewport = useCallback((element: HTMLDivElement) => {
+    // 读阶段先行：先把所有布局读取做完，再写 mask 样式。
+    // 旧实现先写 mask 再读 rect，每次调用都强制一次同步重排（layout thrashing）。
+    const scrollTop = element.scrollTop;
+    const viewportHeight = element.clientHeight;
+    const contentHeight = element.scrollHeight;
+    const messageLayer = messageLayerRef.current;
+    const maskStyle = computeMessageLayerMaskPure({
+      scrollTop,
+      viewportHeight,
+      contentHeight,
+      messageLayerOffsetTop: messageLayer?.offsetTop ?? 0,
+    });
+    const viewportRect = element.getBoundingClientRect();
+    const queryPositions: ConversationTurnNavigatorQueryPosition[] = [];
+    for (const rowElement of element.querySelectorAll<HTMLElement>("[data-row-id]")) {
+      const rowId = Number(rowElement.dataset.rowId);
+      if (!Number.isSafeInteger(rowId) || !turnNavigatorQueryRowIdsRef.current.has(rowId)) {
+        continue;
       }
-      const activeQueryRowId = resolveConversationTurnNavigatorActiveQueryRowId({
-        positions: queryPositions,
-        scrollOffsetPx: scrollTop,
-        viewportHeightPx: viewportHeight,
-      });
-      // 布局读取全部完成后才写样式。
-      if (messageLayer) applyMessageLayerMaskStyle(messageLayer.style, maskStyle);
-      const nextViewport = {
-        scrollOffsetPx: scrollTop,
-        viewportHeightPx: viewportHeight,
-        // turn 级 active 只能命中同 turn 的第一条 query。这里从已挂载
-        // 的稳定 row anchor 推导当前 query；虚拟 turn 尚未挂载时组件再回退 unit。
-        activeQueryRowId,
-      };
-      setTurnNavigatorViewport((current) =>
-        current.scrollOffsetPx === nextViewport.scrollOffsetPx &&
-        current.viewportHeightPx === nextViewport.viewportHeightPx &&
-        current.activeQueryRowId === nextViewport.activeQueryRowId
-          ? current
-          : nextViewport,
-      );
-    },
-    [],
-  );
+      const rowRect = rowElement.getBoundingClientRect();
+      const start = scrollTop + rowRect.top - viewportRect.top;
+      queryPositions.push({ rowId, start, end: start + rowRect.height });
+    }
+    const activeQueryRowId = resolveConversationTurnNavigatorActiveQueryRowId({
+      positions: queryPositions,
+      scrollOffsetPx: scrollTop,
+      viewportHeightPx: viewportHeight,
+    });
+    // 布局读取全部完成后才写样式。
+    if (messageLayer) applyMessageLayerMaskStyle(messageLayer.style, maskStyle);
+    const nextViewport = {
+      scrollOffsetPx: scrollTop,
+      viewportHeightPx: viewportHeight,
+      // turn 级 active 只能命中同 turn 的第一条 query。这里从已挂载
+      // 的稳定 row anchor 推导当前 query；虚拟 turn 尚未挂载时组件再回退 unit。
+      activeQueryRowId,
+    };
+    setTurnNavigatorViewport((current) =>
+      current.scrollOffsetPx === nextViewport.scrollOffsetPx &&
+      current.viewportHeightPx === nextViewport.viewportHeightPx &&
+      current.activeQueryRowId === nextViewport.activeQueryRowId
+        ? current
+        : nextViewport,
+    );
+  }, []);
 
   useLayoutEffect(() => {
     const scrollElement = scrollRef.current;

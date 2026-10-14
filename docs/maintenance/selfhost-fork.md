@@ -8,19 +8,19 @@
 
 ### 适合独立补丁的小修复
 
-| 改动                    | 当前源码落点                                                          | 移植边界                                         |
-| ----------------------- | --------------------------------------------------------------------- | ------------------------------------------------ |
-| React条件hook修复       | `packages/ui/src/hooks/useZCode{Agent,Session,Task}Service.ts`        | 无条件调用hook，保留workspace身份路由            |
-| 高亮加载失败重试        | `packages/ui/src/lib/shikiHighlighter.ts`                             | rejected promise不永久留缓存                     |
-| 浏览器套餐页降级        | `packages/ui/src/settings/CodingPlanEmbeddedWebviewDialog.tsx`及i18n  | 不尝试在浏览器执行Electron webview/preload       |
-| WebUI版本展示           | `settingsPageHelpers.tsx`、test-ids及i18n                             | WebUI版本与Agent版本独立                         |
-| WebSocket保活、页面重连 | `server/src/webSocketHeartbeat.ts`、`web/src/connectionResilience.ts` | 仅Web replayable链路，不改Desktop continuous语义 |
+| 改动                    | 当前源码落点                                                                            | 移植边界                                             |
+| ----------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| React条件hook修复       | `packages/ui/src/hooks/useZCode{Agent,Session,Task}Service.ts`                          | 无条件调用hook，保留workspace身份路由                |
+| 高亮加载失败重试        | `packages/ui/src/lib/shikiHighlighter.ts`                                               | rejected promise不永久留缓存                         |
+| 浏览器套餐页降级        | `packages/ui/src/settings/CodingPlanEmbeddedWebviewDialog.tsx`及i18n                    | 不尝试在浏览器执行Electron webview/preload           |
+| WebUI版本展示           | `settingsPageHelpers.tsx`、test-ids及i18n                                               | WebUI版本与Agent版本独立                             |
+| WebSocket保活、页面重连 | `server/src/webSocketHeartbeat.ts`、`web/src/connectionResilience.ts`                   | 仅Web replayable链路，不改Desktop continuous语义     |
 | 前台/后台投递流控       | `services/src/zcode-agent/zcodeAgentConnectionScope.ts`、`web/src/clientFlowControl.ts` | 复用CLI既有`saturated`/`drained`，只驱动不新增帧语义 |
-| HTTP入口优雅关闭        | `packages/server/src/entry-http.ts`                                   | 依赖公开的services资源释放接口                   |
-| 任务列表并发请求合并    | `packages/ui/src/lib/taskListMembershipSets.ts`                       | service实例+scope在途合并，不缓存新结果          |
-| 图片测高稳定            | `packages/ui/src/ToolCallBlocks/ToolCallBody.tsx`                     | 局部展示优化，首次解码仍可能改高度               |
-| 生产sourcemap关闭       | `packages/web/vite.config.ts`                                         | 只影响生产静态构建                               |
-| 轻量发行跳过TUI资产     | `scripts/zcode-distribution/assets.mjs`                               | 显式`ZCODE_DIST_SKIP_TUI=1`，完整发行不传        |
+| HTTP入口优雅关闭        | `packages/server/src/entry-http.ts`                                                     | 依赖公开的services资源释放接口                       |
+| 任务列表并发请求合并    | `packages/ui/src/lib/taskListMembershipSets.ts`                                         | service实例+scope在途合并，不缓存新结果              |
+| 图片测高稳定            | `packages/ui/src/ToolCallBlocks/ToolCallBody.tsx`                                       | 局部展示优化，首次解码仍可能改高度                   |
+| 生产sourcemap关闭       | `packages/web/vite.config.ts`                                                           | 只影响生产静态构建                                   |
+| 轻量发行跳过TUI资产     | `scripts/zcode-distribution/assets.mjs`                                                 | 显式`ZCODE_DIST_SKIP_TUI=1`，完整发行不传            |
 
 这些提交可单独导出审查；涉及测试/依赖的补丁需带同组文件，不只复制一段diff。
 

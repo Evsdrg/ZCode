@@ -89,7 +89,9 @@ describe("setClientFlowStateV4（浏览器自报档位）", () => {
     const scope = createScope(base);
     await handshakeAndSubscribe(scope.service);
 
-    await expect(scope.service.setClientFlowStateV4({ state: "closed" } as never)).rejects.toThrow();
+    await expect(
+      scope.service.setClientFlowStateV4({ state: "closed" } as never),
+    ).rejects.toThrow();
     await expect(scope.service.setClientFlowStateV4({ state: "bogus" } as never)).rejects.toThrow();
     expect(flowCalls).toEqual([]);
     await scope.dispose();

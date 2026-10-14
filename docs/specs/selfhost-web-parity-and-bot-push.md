@@ -15,6 +15,7 @@
 但设置页「任务通知」开关照常显示可点。
 
 修复：
+
 - 新增 `packages/web/src/webTaskNotification.ts` 纯模块封装展示逻辑（可单测）。
 - `IPlatformService` 增加可选 `requestNotificationPermission()`；Web 实现，桌面端无需实现。
 - 设置页开启「任务通知」时（天然用户手势）调用 `requestNotificationPermission`。

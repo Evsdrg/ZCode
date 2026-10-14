@@ -13,10 +13,7 @@ import "@zcode/ui/styles.css";
 import { connectViaWebSocket } from "@zcode/client";
 import { createReconnectController } from "./connectionResilience.js";
 import { createClientFlowControl } from "./clientFlowControl.js";
-import {
-  createWebTaskNotificationState,
-  showWebTaskNotification,
-} from "./webTaskNotification.js";
+import { createWebTaskNotificationState, showWebTaskNotification } from "./webTaskNotification.js";
 import { WebCallbackPage } from "./auth/WebCallbackPage.js";
 import { createWebAuthService } from "./auth/webAuthService.js";
 import { WEB_ZAI_OAUTH_CONFIG, resolveWebAuthDevReturnTo } from "./auth/webZaiOAuthConfig.js";
@@ -274,7 +271,8 @@ function createWebPlatform(): IPlatformService {
     showTaskNotification: (payload) => {
       showWebTaskNotification(
         {
-          notification: typeof window.Notification === "undefined" ? undefined : window.Notification,
+          notification:
+            typeof window.Notification === "undefined" ? undefined : window.Notification,
           hasFocus: () => document.hasFocus(),
           onShown: () => {
             void playTaskNotificationSound();

@@ -89,7 +89,10 @@ describe("applyMessageLayerMaskStyle", () => {
   });
 
   it("贴底态不写对齐/尺寸字段", () => {
-    const { style, writes } = createStyleDouble({ maskImage: "linear-gradient(x)", webkitMaskImage: "linear-gradient(x)" });
+    const { style, writes } = createStyleDouble({
+      maskImage: "linear-gradient(x)",
+      webkitMaskImage: "linear-gradient(x)",
+    });
     applyMessageLayerMaskStyle(style, { maskImage: "none", webkitMaskImage: "none" });
     expect(writes).toEqual(["maskImage", "webkitMaskImage"]);
   });
@@ -105,7 +108,14 @@ describe("applyMessageLayerMaskStyle", () => {
       webkitMaskSize: "100% 600px",
     });
     expect(writes.sort()).toEqual(
-      ["maskImage", "maskPosition", "maskSize", "webkitMaskImage", "webkitMaskPosition", "webkitMaskSize"].sort(),
+      [
+        "maskImage",
+        "maskPosition",
+        "maskSize",
+        "webkitMaskImage",
+        "webkitMaskPosition",
+        "webkitMaskSize",
+      ].sort(),
     );
   });
 });
