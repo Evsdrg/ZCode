@@ -1851,7 +1851,14 @@ export function SettingsPage({
                                     action: "toggle_notification",
                                     trigger: "switch",
                                   },
-                                  operation: () => setNotificationEnabled(enabled),
+                                  operation: () => {
+                                  // 浏览器端在用户开启通知（天然手势）时请求系统通知权限，
+                                  // 否则权限停留在 default，任务通知永不触发。桌面端无此方法。
+                                  if (enabled) {
+                                    void platform.requestNotificationPermission?.();
+                                  }
+                                  setNotificationEnabled(enabled);
+                                },
                                   completed: {
                                     resultSource: "local_commit",
                                     stateAfter: enabled ? "enabled" : "disabled",

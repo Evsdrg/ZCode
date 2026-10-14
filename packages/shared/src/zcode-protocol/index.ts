@@ -1700,6 +1700,11 @@ export const zcodeToolUpdatedEventPayloadSchema = z.discriminatedUnion("kind", [
     .extend({
       kind: z.literal("started"),
       startedAt: protocolInstantSchema,
+      // CLI 在 handler 动手前发布本次调用的副作用能力，供订阅者在首个字节落盘前判断
+      // 「是否要写」。strict schema 缺声明会把整条 tool.updated 判为无效并丢弃，
+      // 使工具卡片状态停在旧值。
+      readOnly: z.boolean().optional(),
+      sideEffectScope: z.enum(["none", "workspace", "git"]).optional(),
     })
     .strict(),
   zcodeToolCallBasePayloadSchema

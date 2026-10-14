@@ -116,6 +116,7 @@ import {
   showWebRemoteControlVersionNotice,
 } from "#src/web-remote-control/views.js";
 import { createClientFlowControl } from "./clientFlowControl.js";
+import { createWebTaskNotificationState, showWebTaskNotification } from "./webTaskNotification.js";
 type RootServices = Parameters<typeof Root>[0]["services"];
 type ServiceMethod = (...args: any[]) => unknown;
 
@@ -523,6 +524,8 @@ function createWebPlatform(options?: {
   // 桌面端按窗口持有 target；这里按「最后一次 start 收到的 context」记录，
   // getStatus 用它投影，语义与桌面按窗口一致（自部署是 server 级单实例）。
   let webRemoteControlTarget: WebRemoteControlContext | null = null;
+  // 跨调用的通知权限请求状态：避免每次任务通知都重复请求权限。
+  const webTaskNotificationState = createWebTaskNotificationState();
 
   return {
     canSelectFilePath: false,
@@ -674,25 +677,30 @@ function createWebPlatform(options?: {
     },
     reportArmsCustomEvent: () => Promise.resolve(),
     showTaskNotification: (payload) => {
-      if (document.hasFocus()) {
-        return;
-      }
-
-      if (
-        typeof window.Notification === "undefined" ||
-        window.Notification.permission !== "granted"
-      ) {
-        return;
-      }
-
+      showWebTaskNotification(
+        {
+          notification:
+            typeof window.Notification === "undefined" ? undefined : window.Notification,
+          hasFocus: () => document.hasFocus(),
+          onShown: () => {
+            void playTaskNotificationSound();
+          },
+        },
+        payload,
+        webTaskNotificationState,
+      );
+    },
+    requestNotificationPermission: async () => {
+      const Ctor = typeof window.Notification === "undefined" ? undefined : window.Notification;
+      if (!Ctor) return false;
+      if (Ctor.permission === "granted") return true;
+      if (Ctor.permission === "denied") return false;
       try {
-        new window.Notification(payload.title, {
-          body: payload.body,
-          silent: true,
-        });
-        void playTaskNotificationSound();
+        // 必须在用户手势中调用（如设置页开启通知开关），否则浏览器会忽略请求。
+        const result = await Ctor.requestPermission();
+        return result === "granted";
       } catch {
-        // 浏览器通知不可用时静默忽略，避免打断主流程
+        return false;
       }
     },
     // Web 端不需要跨窗口 tab 管理
