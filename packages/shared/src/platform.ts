@@ -696,6 +696,12 @@ export interface IPlatformService {
   /** 触发任务状态对应的系统通知，由宿主环境决定是否真正展示 */
   showTaskNotification(payload: TaskNotificationPayload): void;
 
+  /**
+   * 请求系统通知权限。浏览器端需要在用户手势中调用（如开启通知开关时）；
+   * 桌面端通知权限由系统设置管理，无需请求，可不实现。
+   */
+  requestNotificationPermission?(): Promise<boolean>;
+
   /** 通过宿主环境统一上报 UI 侧 telemetry 事件 */
   reportTelemetryEvent(payload: RendererTelemetryEventPayload): Promise<void>;
 

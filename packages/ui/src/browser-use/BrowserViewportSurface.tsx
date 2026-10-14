@@ -22,6 +22,14 @@ import {
   type BrowserState,
 } from "@/embeddedBrowserHelpers.js";
 
+/**
+ * 内嵌浏览器宿主是否注册了 Electron 的 `<webview>` 自定义元素。
+ * 浏览器（含自部署 WebUI）中该元素不存在，挂载会静默失效。
+ */
+function isWebviewElementAvailable(): boolean {
+  return typeof customElements !== "undefined" && Boolean(customElements.get("webview"));
+}
+
 export function BrowserViewportSurface({
   browserRegionRef,
   browserState,
@@ -64,6 +72,9 @@ export function BrowserViewportSurface({
   viewportZoom: BrowserViewportZoom;
 }): React.JSX.Element {
   const { guestFailure } = browserState;
+  // Electron 的 `<webview>` 标签只在内嵌浏览器宿主中存在；普通浏览器里它是未知元素，
+  // 挂载后既不加载也不报错，只会留下无效节点。缺标签时不渲染 guest，避免静默失效。
+  const webviewAvailable = isWebviewElementAvailable();
   // guest 进程级失败优先于 load error：前者连画面都没有，后者只是这次导航被拒。
   const loadError = !guestFailure && browserState.errorMessage ? browserState.errorMessage : null;
   // 自然 viewport 没有 metrics 固定逻辑尺寸，临时 responsive frame 不代表 guest 可以扩张。
@@ -142,7 +153,7 @@ export function BrowserViewportSurface({
             新建 human tab 与 about:blank guest 同帧挂载时，Electron 的独立合成面
             可能先于宿主隐藏样式绘制白色首帧。因此只在确认导航后创建 human guest；
             已创建的 guest 仍保持稳定挂载。 */}
-        {shouldMountWebview ? (
+        {shouldMountWebview && webviewAvailable ? (
           <webview
             key={`webview:${webviewGeneration}`}
             ref={handleWebviewRef}

@@ -1182,6 +1182,10 @@ export const zcodeTurnStartedEventPayloadSchema = z
     originMeta: jsonObjectSchema.optional(),
     // runtime 会透传后台唤醒来源，strict schema 必须同步声明以免丢弃整条事件。
     backgroundSource: z.enum(["bash", "subagent"]).optional(),
+    // Agent runtime 在 hooks/持久化之后才发布 turn.started，因此随事件透传执行入口的
+    // 单调 epoch 毫秒，供 TTFT 观测使用。与 backgroundSource 同理：strict schema 缺声明
+    // 会把整条 turn.started 判为无效并丢弃，导致该会话后续事件链断裂。
+    executionStartedAt: z.number().optional(),
     attachments: z.array(jsonObjectSchema).optional(),
   })
   .strict();
@@ -1340,6 +1344,11 @@ export const zcodeToolUpdatedEventPayloadSchema = z.discriminatedUnion("kind", [
     .extend({
       kind: z.literal("started"),
       startedAt: protocolInstantSchema,
+      // CLI 在 handler 动手前发布本次调用的副作用能力，供订阅者在首个字节落盘前判断
+      // 「是否要写」。strict schema 缺声明会把整条 tool.updated 判为无效并丢弃，
+      // 使工具卡片状态停在旧值。
+      readOnly: z.boolean().optional(),
+      sideEffectScope: z.enum(["none", "workspace", "git"]).optional(),
     })
     .strict(),
   zcodeToolCallBasePayloadSchema

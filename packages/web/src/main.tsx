@@ -13,6 +13,10 @@ import "@zcode/ui/styles.css";
 import { connectViaWebSocket } from "@zcode/client";
 import { createReconnectController } from "./connectionResilience.js";
 import { createClientFlowControl } from "./clientFlowControl.js";
+import {
+  createWebTaskNotificationState,
+  showWebTaskNotification,
+} from "./webTaskNotification.js";
 import { WebCallbackPage } from "./auth/WebCallbackPage.js";
 import { createWebAuthService } from "./auth/webAuthService.js";
 import { WEB_ZAI_OAUTH_CONFIG, resolveWebAuthDevReturnTo } from "./auth/webZaiOAuthConfig.js";
@@ -190,6 +194,8 @@ async function renderConversationSharePage(): Promise<void> {
 }
 
 function createWebPlatform(): IPlatformService {
+  // 跨调用的通知权限请求状态：避免每次任务通知都重复请求权限。
+  const webTaskNotificationState = createWebTaskNotificationState();
   return {
     canSelectFilePath: false,
     // Web 端无法打开系统目录选择框
@@ -266,25 +272,29 @@ function createWebPlatform(): IPlatformService {
     reportTelemetryEvent: async () => {},
     reportArmsCustomEvent: () => Promise.resolve(),
     showTaskNotification: (payload) => {
-      if (document.hasFocus()) {
-        return;
-      }
-
-      if (
-        typeof window.Notification === "undefined" ||
-        window.Notification.permission !== "granted"
-      ) {
-        return;
-      }
-
+      showWebTaskNotification(
+        {
+          notification: typeof window.Notification === "undefined" ? undefined : window.Notification,
+          hasFocus: () => document.hasFocus(),
+          onShown: () => {
+            void playTaskNotificationSound();
+          },
+        },
+        payload,
+        webTaskNotificationState,
+      );
+    },
+    requestNotificationPermission: async () => {
+      const Ctor = typeof window.Notification === "undefined" ? undefined : window.Notification;
+      if (!Ctor) return false;
+      if (Ctor.permission === "granted") return true;
+      if (Ctor.permission === "denied") return false;
       try {
-        new window.Notification(payload.title, {
-          body: payload.body,
-          silent: true,
-        });
-        void playTaskNotificationSound();
+        // 必须在用户手势中调用（如设置页开启通知开关），否则浏览器会忽略请求。
+        const result = await Ctor.requestPermission();
+        return result === "granted";
       } catch {
-        // 浏览器通知不可用时静默忽略，避免打断主流程
+        return false;
       }
     },
     // Web 端不需要跨窗口 tab 管理
