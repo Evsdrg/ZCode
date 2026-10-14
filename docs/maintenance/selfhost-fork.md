@@ -21,6 +21,10 @@
 | 图片测高稳定            | `packages/ui/src/ToolCallBlocks/ToolCallBody.tsx`                                       | 局部展示优化，首次解码仍可能改高度                   |
 | 生产sourcemap关闭       | `packages/web/vite.config.ts`                                                           | 只影响生产静态构建                                   |
 | 轻量发行跳过TUI资产     | `scripts/zcode-distribution/assets.mjs`                                                 | 显式`ZCODE_DIST_SKIP_TUI=1`，完整发行不传            |
+| 时间线布局抖动修复      | `packages/ui/src/v4/messageLayerMask.ts`、`ConversationTimeline.tsx`                    | 只重排mask计算的读写顺序，不改滚动锚定状态机         |
+| 协议事件字段兼容        | `packages/shared/src/zcode-protocol/index.ts`及services兼容测试                         | 只补齐闭源CLI新增的可选字段，不放松既有必填校验      |
+| Web通知权限申请         | `packages/web/src/webTaskNotification.ts`、`shared/src/platform.ts`                     | 平台能力走`IPlatformService`可选方法，桌面不接线     |
+| webview可用性判定       | `packages/ui/src/browser-use/BrowserViewportSurface.tsx`                                | 浏览器无`webview`元素时降级，不启用Electron专有路径  |
 
 这些提交可单独导出审查；涉及测试/依赖的补丁需带同组文件，不只复制一段diff。
 
@@ -33,6 +37,7 @@
 | 全工作区任务视图与本地Controller    | 涉及持久任务身份、分页、失效通知和分组；上游变更时必须重新审查                   |
 | taskIndexRepo尾斜杠key归一          | 持久化兼容边界，不应在发布时额外脚本偷偷改数据库                                 |
 | 附件传输接口与发送前持久保留        | 有崩溃窗口、所有权和引用恢复契约，需要源码、spec、测试共同维护                   |
+| 定时/闲时任务调度下沉               | 桌面与 server 共用同一调度核心，跨包契约与派发顺序必须一致维护                   |
 | 依赖清单与pnpm-lock.yaml            | 保留正常包管理链路，不打node_modules或压缩bundle补丁                             |
 
 ### 新增内容
@@ -42,10 +47,23 @@
 - **通用文件上传store**：`packages/services/src/prompt-attachment-transfer/arbitraryFileUpload*`；Web普通文件<=20MiB完整落盘，发送前持久保留，既有媒体链路保留。
 - **自部署任务列表投影**：`allWorkspacesTaskView`与`localWindowControllerService`。
 - **前台/后台投递流控**：`setClientFlowStateV4`（scope 覆写）+ `web/src/clientFlowControl.ts`；页面隐藏时经CLI既有`v4/connection/flow`置`saturated`暂停打帧，可见时`drained`恢复。不改闭源CLI，不新增帧语义。
+- **定时/闲时任务调度**：`services/src/session/automationScheduler.ts`（桌面与 server 共用的认领/派发编排/结算核心，派发执行域以端口注入）+ `server/src/automationDispatch.ts`、`offPeakDispatch.ts`。自部署 server 本进程起调度器并注入`onAutomationManualRunRequested`，派发档位用`web-remote-replayable`；桌面 scheduler 进程改为复用同一核心。原先该链路只存在于 Electron 形态，自部署 WebUI 的自动化与「立即运行」不会执行。
+- **Web 端非 Electron 路径补齐**：通知权限经`IPlatformService`可选方法申请；`BrowserViewportSurface`按`customElements`判定`webview`可用性；任务完成回推复用已有 Bot 终态订阅。
 - **测试基建和回归用例**：services/server/ui/web的Vitest配置、纯逻辑与交互测试。合成数据测试属于交付内容，不是要忽略的开发过程。
 - **产品spec、匿名化部署指南、发布检查**：保留可维护决策与验收规则，不提交实际运行日志/抓包/会话摘录。
 
 现有`patches/`是上游的pnpm第三方依赖补丁，由`package.json#pnpm.patchedDependencies`管理，继续保留；与上表的应用源码补丁不是一回事。
+
+### 格式基线（fmt:check）
+
+仓库格式化用`oxfmt`（不是prettier），命令为`pnpm fmt:check`。上游`origin/main`自身提交了若干**不通过**`oxfmt`的文件，且上游没有CI强制这一点，因此`fmt:check`在上游就是长期失败的。本fork已把这些文件补齐格式化，`fmt:check`现全仓通过。
+
+维护注意：
+
+- 上游基线格式修正与fork自有文件的格式化分成独立提交，合并上游时可一眼分辨这层纯格式差异，不与真实改动混淆。
+- 格式化差异除空白与尾随逗号外，`oxfmt`还会插入/移除**装饰性圆括号**（如`return (expr)`、`a ? (b) : c`）与调整JSX花括号，均语义等价；验收以`typecheck`/`lint`/测试为准，不要只看`git diff -w`。
+- `oxfmt --check`全量扫描在0.41.0下有偶发假阳性；判断某文件是否真的不合格式，应逐文件`oxfmt --check <file>`复检。
+- 后续从上游同步时，新引入的上游文件可能再次带来格式债；按同样方式单独成提交补齐即可。
 
 ## 不进入公共Git的改动
 
@@ -67,7 +85,8 @@
 - Browser Use支持托管Chromium和Playwright配套Firefox，不支持普通系统Firefox或日常profile接管；部分SDK方法未覆盖，只能宣称实际实现的命令面。Firefox的`cdp`类型是旧协议兼容分类，不代表底层使用CDP。
 - 通用文件上传仅支持自部署本机工作区；每文件20MiB、最多8个附件。已发送文件不TTL清理，默认全部文件配额2GiB，Host装配可调。
 - 未发送附件草稿存在浏览器内存，刷新后可能需重选；已发送路径跨Host重建保留。
-- 本仓库不包含公网反代/updater的源码实现；不能把部署层安全措施写成仓库自带功能。
+- 定时/闲时任务调度在自部署server内是**本进程**执行：进程退出即停止轮询；在途认领靠`CLAIM_STALE`兜底回收，重启时把残留running的闲时任务置回queued。派发档位固定`web-remote-replayable`，与桌面的`desktop-continuous`不是同一投递语义。
+- 本仓库不包含公网反代/updater的源码实现；不能把部署层安全措施写成仓库自带功能。动态链路的高可用（如双路径热备）属部署方实现，不在源码内。
 
 ## 升级与补丁导出
 
@@ -83,7 +102,7 @@ mkdir -p .local/patch-exports
 git format-patch -1 <commit> --output-directory .local/patch-exports
 ```
 
-功能提交按依赖顺序排列：发布卫生、测试/依赖、浏览器兼容与版本、连接韧性、relay、浏览器执行器、任务视图、通用附件、Host装配。装配提交最后接入，独立模块提交可以先审查；应用整个功能时包含关联测试/依赖/装配。
+功能提交按依赖顺序排列：发布卫生、测试/依赖、浏览器兼容与版本、连接韧性、relay、浏览器执行器、任务视图、通用附件、Host装配、时间线性能、协议字段兼容与Web对齐、定时任务调度。装配提交最后接入，独立模块提交可以先审查；应用整个功能时包含关联测试/依赖/装配。格式化提交（上游基线、fork自有）与功能提交分离。
 
 ## 提交前检查
 
