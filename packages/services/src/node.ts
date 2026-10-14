@@ -319,6 +319,55 @@ export {
   computeRetryAt,
 } from "./session/automationRepo.js";
 export { AutomationService, InvalidCronExprError } from "./session/automationService.js";
+// 桌面 Host 与自部署 server 共用的调度核心：认领 + 派发编排 + 结算。
+// 端口注入，两边只提供各自的执行域适配；语义必须一致。
+export {
+  AutomationScheduler,
+  AUTOMATION_SCHEDULER_POLL_INTERVAL_MS,
+  AUTOMATION_SCHEDULER_MISFIRE_GRACE_MS,
+  type AutomationSchedulerDeps,
+  type AutomationSchedulerDispatchPort,
+} from "./session/automationScheduler.js";
+export type {
+  AutomationDispatchRequest,
+  AutomationDispatchResult,
+  OffPeakDispatchRequest,
+  OffPeakDispatchResultMessage,
+} from "./session/automationSchedulerTypes.js";
+// 运行生命周期 / 模型身份固定 / Bot 回推 / 闲时分支：桌面与 server 共用的纯逻辑。
+export {
+  startManualClaimHeartbeat,
+  recordCronRunOutcomeBestEffort,
+  settleManualDispatchFailureBestEffort,
+  settleCronRunTerminalOutcome,
+  settleManualClaimForDispatchResult,
+  releaseManualClaimForSettledRun,
+  type ManualClaimReleaseRepo,
+  type ManualClaimReleaseParams,
+  type CronRunLifecycleRepo,
+  type CronRunLifecycleIdentity,
+  type LogWarn as CronRunLogWarn,
+} from "./session/automationRunLifecycle.js";
+export { resolveAutomationSubmissionModelSelection } from "./session/automationSubmissionModelSelection.js";
+export {
+  watchCronRunBotDelivery,
+  type CronBotDeliveryRepo,
+  type CronBotDeliveryService,
+} from "./session/automationBotDelivery.js";
+export {
+  resolveOffPeakDispatchKind,
+  assertBoundSessionDispatchable,
+  OffPeakBoundSessionDeletedError,
+  OffPeakBoundSessionBusyError,
+  type OffPeakDispatchKind,
+} from "./session/automationOffPeakDispatchPlan.js";
+export {
+  settleOffPeakDispatchResult,
+  OFF_PEAK_DISPATCH_RETRY_BASE_MS,
+  OFF_PEAK_DISPATCH_RETRY_CAP_MS,
+  type OffPeakDispatchSettlementDeps,
+  type OffPeakDispatchResult,
+} from "./session/automationOffPeakSettlement.js";
 // 闲时任务与 automation 同库不同表；类型/常量全独立。
 export { OffPeakTaskRepo, OFF_PEAK_CLAIM_STALE_MS } from "./session/offPeakTaskRepo.js";
 // host 域终态回填 files_changed 复用现有 task diff 汇总。

@@ -1,8 +1,12 @@
 import {
+  AutomationRepo,
+  AutomationScheduler,
   createServerHostServices,
+  createServiceLogger,
   createTopicResourcePeers,
   disposeServiceResourcesAndWait,
   getAppConfigDir,
+  OffPeakTaskRepo,
 } from "@zcode/services/node";
 import { formatLogPrefix } from "@zcode/shared";
 import {
@@ -12,6 +16,7 @@ import {
 import { createHttpServer, resolveHttpServerId } from "./http.js";
 import { createConfiguredBrowserExecutor } from "./browser/managedBrowserRouter.js";
 import { resolveHeadlessBrowserConfig } from "./browser/headlessBrowserConfig.js";
+import { createServerAutomationDispatchRuntime } from "./automationDispatch.js";
 
 async function main(): Promise<void> {
   const zcodeBuiltinProviderConfigFilePath = await materializeBundledZCodeBuiltinProviderConfig({
@@ -28,6 +33,7 @@ async function main(): Promise<void> {
     : undefined;
   // topic resource 中继：上游在自部署入口建立 peers 并注入服务集合与 HTTP 层。
   const topicResourcePeers = createTopicResourcePeers();
+<<<<<<< HEAD
   const serverId = resolveHttpServerId();
   const { services, workspaceIdentityMapper, migrationFailedPathCount } =
     await createServerHostServices({
@@ -45,6 +51,59 @@ async function main(): Promise<void> {
         ...(browserExecutor ? { browserControlExecutor: browserExecutor } : {}),
       },
     });
+=======
+
+  // 定时任务 / 闲时任务调度：桌面形态由 Electron main fork 的 scheduler 进程承担；
+  // 自部署 server 没有该进程，改为在本进程内起 AutomationScheduler，并直接派发给本进程
+  // 任务域（复用与桌面同一份调度核心，见 docs/specs/selfhost-server-cron-scheduler.md）。
+  const automationRepo = new AutomationRepo();
+  const offPeakRepo = new OffPeakTaskRepo();
+  // 派发运行时依赖 ServiceCollection；它晚于 createLocalServices 返回，用前向引用在调用期解析。
+  // 「立即运行」只会发生在服务集合装配完成之后。
+  let dispatchRuntime: ReturnType<typeof createServerAutomationDispatchRuntime> | undefined;
+
+  const services = createLocalServices({
+    topicResourceRelayChannel: (request) => topicResourcePeers.getChannel(request),
+    zcodeBuiltinProviderConfigFilePath,
+    providerProvisioningTargetEnabled: Boolean(authToken),
+    webRemoteControlRelay: true,
+    // 自部署语义：WebUI 可见本机全部工作区的任务（含「不在项目中工作」），
+    // 而非仅 ZCODE_SERVER_WORKSPACE 单工作区切片。
+    taskListAllWorkspaces: true,
+    // 桌面 Host 自带窗口 Controller；自部署 server 缺它会让 WebUI 的时间线/置顶/归档/
+    // 命令面板等全局任务列表（useGlobalTaskList）恒空——侧栏「任务」分区看不到会话任务。
+    windowController: true,
+    arbitraryFileUploads: true,
+    // 「立即运行」在自部署形态下由本进程直接派发；缺失该 dispatcher 会让 runAutomationNow 抛错。
+    onAutomationManualRunRequested: (params) => {
+      if (!dispatchRuntime) {
+        return Promise.reject(new Error("Automation dispatch runtime is not initialized."));
+      }
+      return dispatchRuntime.dispatchManualRun(params);
+    },
+    ...(browserExecutor ? { browserControlExecutor: browserExecutor } : {}),
+  });
+>>>>>>> de8b8f77 (feat(scheduler): 自部署 server 接入定时/闲时任务调度)
+
+  const automationSchedulerLogger = createServiceLogger("automation-scheduler");
+  dispatchRuntime = createServerAutomationDispatchRuntime({
+    services,
+    automationRepo,
+    offPeakRepo,
+    logger: {
+      info: (message) => automationSchedulerLogger.info(undefined, message),
+      warn: (message, error) => automationSchedulerLogger.warn(undefined, message, error),
+      error: (message, error) => automationSchedulerLogger.error(undefined, message, error),
+    },
+  });
+  const automationScheduler = new AutomationScheduler({
+    automationRepo,
+    offPeakRepo,
+    recoverInterruptedOnStart: true,
+    log: (level, message) => automationSchedulerLogger[level](undefined, message),
+    dispatch: dispatchRuntime.port,
+  });
+  await automationScheduler.start();
 
   const server = createHttpServer(services, port, {
     serverId,
@@ -75,6 +134,9 @@ async function main(): Promise<void> {
       process.exit(1);
     }, 20_000);
     void (async () => {
+      // 先停调度轮询并释放本进程在途认领，避免下次启动等 CLAIM_STALE 才回收。
+      await automationScheduler.dispose();
+      dispatchRuntime?.dispose();
       await disposeServiceResourcesAndWait(services);
       await browserExecutor?.shutdown().catch(() => {});
       clearTimeout(forceTimer);
