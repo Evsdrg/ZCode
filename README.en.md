@@ -13,6 +13,18 @@
 
 ZCode is an AI coding workspace with desktop, browser, and terminal interfaces. This repository contains the clients, backend services, shared UI, and Agent CLI and runtime source code.
 
+## Purpose and Scope of This Fork
+
+This fork improves the **self-hosted Web UI without requiring Electron**, adding browser compatibility, Host capabilities, and reliability while preserving upstream desktop behavior where possible. Changes are maintained on `selfhost/maintained`; official subscription entitlements and authentication rules are not altered.
+
+- **Browser compatibility and reliability:** hook fixes, a browser fallback for plan purchases, capability gates, version display, connection heartbeat/recovery, pausing delivery while the page is hidden, and graceful shutdown; fallbacks for attachment digests, copy, and terminal paste when served over plain HTTP on a LAN.
+- **Task management:** local workspace and outside-project task visibility, list refresh after archiving, and scheduled/off-peak tasks in the self-hosted server.
+- **New capabilities:** an experimental relay adapter behind the official "connect by phone" card; opt-in managed Chromium/Firefox, available together, selected by the AI by ID, and reclaimed when idle; ordinary file uploads up to 20 MiB with durable Host paths.
+- **Performance:** timeline layout and render-volume improvements, and brotli/gzip compression of Host-served static assets.
+- **Boundaries:** existing image/video/PDF handling is retained. Private deployment configuration, credentials, session data, and development artifacts are excluded; closed-source Agent binaries are not distributed by this fork.
+
+See the [maintenance guide](docs/maintenance/selfhost-fork.md) for classification and limitations, and the [self-hosting guide](docs/deploy/selfhost-webui.md) for deployment.
+
 ## Updates
 
 - **2026-10-19**: Updated to ZCode v3.16.2.
