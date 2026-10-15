@@ -1,7 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "dist",
+    // Bugfix: outDir 不能是 dist。tsconfig.base 有 composite+declaration，`pnpm typecheck`
+    // （tsc -b，AGENTS.md 强制要求）会真的 emit，逐文件产物正好覆盖 tsup 打进同一个 dist 的
+    // bundle：entry-http.js 从 ~3.7MB 缩成 6KB、裸 import 原样保留，Node 起不来，
+    // 表现为「刚重启服务就崩」。dist-types 已被 .gitignore 覆盖，且无任何项目引用本包、
+    // 也没有消费方读这里的声明（tsup 未开 dts，clean 构建后 dist 下 0 个 .d.ts）。
+    "outDir": "dist-types",
     "rootDir": "src",
     "lib": ["ES2022"]
   },

@@ -62,6 +62,10 @@ export default defineConfig({
   },
   entry: { "entry-http": "src/entry-http.ts" },
   outDir: "dist",
+  // Bugfix: tsc -b（typecheck 即 tsc -b）的 outDir 同为 dist，会把 tsup 的 bundle 覆盖成
+  // 逐文件转译产物——entry-http.js 从 ~3.7MB 缩到 6KB 且裸 import 原样保留，Node 起不来。
+  // tsup 默认不清 outDir，残留会一直混在产物里；显式 clean 让构建前回到干净状态。
+  clean: true,
   format: "esm",
   platform: "node",
   target: "node22",

@@ -19,6 +19,8 @@ export default defineConfig({
     "server-core": "src/server-core/entry.ts",
   },
   outDir: "dist",
+  // 与 packages/server 同因：tsc -b 的 outDir 也是 dist，会把 bundle 覆盖成逐文件转译产物。
+  clean: true,
   format: ["esm"],
   platform: "node",
   target: "node22",
