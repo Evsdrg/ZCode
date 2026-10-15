@@ -15,7 +15,9 @@
     "build": "tsup && pnpm run build:remote",
     "build:remote": "tsx build-remote.ts",
     "lint": "oxlint",
-    "lint:fix": "oxlint --fix"
+    "lint:fix": "oxlint --fix",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.11",
@@ -35,6 +37,7 @@
     "hono": "^4.12.9",
     "node-forge": "^1.4.0",
     "node-pty": "^1.0.0",
+    "playwright-core": "^1.59.1",
     "proxy-from-env": "^1.1.0",
     "ssh2": "^1.17.0",
     "undici": "^6.24.1",
@@ -50,6 +53,7 @@
     "esbuild": "^0.25.0",
     "tsup": "^8.4.0",
     "tsx": "^4.19.4",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vitest": "^5.0.2"
   }
 }

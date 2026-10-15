@@ -20,7 +20,9 @@
   },
   "scripts": {
     "lint": "oxlint",
-    "lint:fix": "oxlint --fix"
+    "lint:fix": "oxlint --fix",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@aiden0z/pptx-renderer": "1.2.4",
@@ -96,15 +98,18 @@
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.19",
     "@tanstack/react-virtual": "^3.13.23",
-    "@testing-library/dom": "^10.4.1",
-    "@testing-library/react": "^16.3.2",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.1.1",
+    "happy-dom": "^20.14.5",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4.2.2",
     "typescript": "^6.0.2",
-    "unified": "^11.0.5"
+    "unified": "^11.0.5",
+    "vitest": "^5.0.2"
   },
   "peerDependencies": {
     "@tanstack/react-virtual": "^3.13.23",

@@ -2,14 +2,12 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist",
+    // 与 packages/server 同因：本包用 tsup 构建进 dist，而 tsc -b 的 outDir 也是 dist，
+    // typecheck 的逐文件产物会覆盖 bundle。改到 .gitignore 已覆盖的 dist-types。
+    "outDir": "dist-types",
     "lib": ["ES2022", "DOM"],
     "types": ["node"]
   },
   "include": ["src"],
-  "references": [
-    { "path": "../shared" },
-    { "path": "../rpc" },
-    { "path": "../services" }
-  ]
+  "references": [{ "path": "../shared" }, { "path": "../rpc" }, { "path": "../services" }]
 }

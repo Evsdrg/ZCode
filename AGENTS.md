@@ -46,6 +46,8 @@ affected 使用 Vitest 官方选择，只运行选中的根 UT；选中整个套
 - PR 描述须说明背景、设计意图与修改前后行为；包含 bugfix 时逐项说明触发场景、根因证据、修复机制及回归验证，并尽量关联已有工单链接。未确认的根因或引入提交如实标注，不根据模块或时间接近推断归因。
 - 涉及状态、时序、远端或异步同步的方案，用图展示所有者及事件顺序。
 - 必须执行 `pnpm typecheck` 和 `pnpm lint`，报告真实结果，不将已有失败写成通过。
+- `pnpm typecheck` 是 `tsc -b`，而 `tsconfig.base.json` 开了 `composite` + `declaration`，所以它会**真的 emit**。凡 `outDir` 与构建工具（tsup / vite）输出目录相同的包，类型检查都会覆盖部署产物：`packages/server` 曾因此把 `dist/entry-http.js` 从 ~3.7MB 的 bundle 覆盖成 6KB 的逐文件转译，重启即起不来。这两个包的 `outDir` 已改到 `.gitignore` 覆盖的 `dist-types`，新增 tsup/vite 包时沿用同一约定，不要写回 `dist`。
+- 改完前端或 server 层后，部署前必须重建产物：`pnpm --filter @zcode/server build`、`ZCODE_ENV=production ZCODE_PRIVATE_DEPLOYMENT=1 pnpm --filter @zcode/web build`（自部署经 HTTP 访问时必须带该编译常量，漏带不报错但上传与复制会静默失效）。判别 server 产物是否被污染：`entry-http.js` 应为数 MB 的 bundle（约 4MB），且顶层不含 `from "@zcode/services/node"` 这类裸导入；只有 6KB 就说明被 tsc 覆盖了。
 - 使用异步文件和网络 IO；跨包导入使用公开入口，遵守现有路径别名。
 - 禁止 UI 直接调用 Repo、Service 引用 Runtime 具体实现、跨域导入实现细节及循环依赖。
 
