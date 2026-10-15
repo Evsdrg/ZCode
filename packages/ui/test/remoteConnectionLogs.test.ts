@@ -175,12 +175,9 @@ describe("remote connection log merge", () => {
     expect(
       shouldAcceptRemoteConnectionRuntimeLog({ requestId: "background-request" }, "request-1"),
     ).toBe(false);
-    expect(
-      shouldAcceptRemoteConnectionRuntimeLog(
-        { requestId: "background-request" },
-        null,
-      ),
-    ).toBe(true);
+    expect(shouldAcceptRemoteConnectionRuntimeLog({ requestId: "background-request" }, null)).toBe(
+      true,
+    );
   });
 });
 
