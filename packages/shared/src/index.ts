@@ -71,7 +71,9 @@ export {
   mapZCodeEnvToArmsRumEnv,
   normalizeZCodeEnv,
   normalizeZCodeProductFlavor,
+  ZCODE_PRIVATE_DEPLOYMENT,
 } from "./env.js";
+export { DigestUnavailableError, sha256Checksum, sha256Hex } from "./browserDigest.js";
 export * from "./errors.js";
 export type { SessionCreateSource } from "./sessionCreateSource.js";
 export { resolveSafeEndpointHostname } from "./endpointHostname.js";

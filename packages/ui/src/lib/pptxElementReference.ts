@@ -1,3 +1,4 @@
+import { sha256Checksum } from "@zcode/shared";
 import type { PresentationPageElement } from "@/presentation/types.js";
 
 export const PPTX_ELEMENT_REFERENCE_ADD_TO_CHAT_EVENT = "zcode:pptx-element-reference-add-to-chat";
@@ -143,11 +144,8 @@ function createPptxElementReferenceId() {
 
 export async function sha256Fingerprint(value: ArrayBuffer | string): Promise<string> {
   const bytes = typeof value === "string" ? new TextEncoder().encode(value) : new Uint8Array(value);
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
-  const hex = [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-  return `sha256:${hex}`;
+  // 统一走 shared 摘要入口：私有部署（非安全上下文）下由门控回退到纯 JS 实现。
+  return sha256Checksum(bytes);
 }
 
 export async function createPptxElementReference(options: {

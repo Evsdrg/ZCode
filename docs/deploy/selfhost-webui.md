@@ -137,8 +137,15 @@ AI 在 Browser Use 初始化后先调用 `agent.browsers.list()`，只从真实�
 
 ```bash
 ZCODE_ENV=production pnpm --filter @zcode/server build
-ZCODE_ENV=production pnpm --filter @zcode/web build
+# 纯本地/内网部署：WebUI 以 HTTP 访问非 localhost 地址时不是浏览器安全上下文，
+# crypto.subtle 不可用会让附件上传失败。ZCODE_PRIVATE_DEPLOYMENT=1 才启用纯 JS
+# SHA-256 兜底；不加该变量则线上/公网构建不包含兜底分支（编译期摇树）。
+ZCODE_ENV=production ZCODE_PRIVATE_DEPLOYMENT=1 pnpm --filter @zcode/web build
 ```
+
+`ZCODE_PRIVATE_DEPLOYMENT` 只在构建期生效，运行时不可切换。仅当 WebUI 通过 HTTP（非
+`https`、非 `localhost`/`127.0.0.1`）访问时才需要它；用 HTTPS 或本机 localhost 访问时
+不必设置，走原生 WebCrypto。详见 `docs/specs/selfhost-private-deployment-digest-fallback.md`。
 
 同机部署可由Host服务`ZCODE_WEB_STATIC_ROOT`提供静态资源（纯本地部署即此形态，无需外层反代）。分离部署可将静态产物同步到edge-proxy的专用目录：
 

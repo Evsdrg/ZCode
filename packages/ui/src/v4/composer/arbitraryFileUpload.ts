@@ -1,4 +1,5 @@
 import type { IPromptAttachmentTransferService, PromptAttachmentUploadPort } from "@zcode/services";
+import { sha256Checksum } from "@zcode/shared";
 import type { AttachmentRef } from "@zcode/shared/zcode-protocol-v4";
 import { PROTOCOL_V4_LIMITS } from "@zcode/shared/zcode-protocol-v4";
 import type { ChatComposerAttachment } from "@/lib/chatAttachments.js";
@@ -73,9 +74,8 @@ export async function uploadArbitraryFile(input: {
   const bytes = new Uint8Array(await input.file.arrayBuffer());
   if (bytes.byteLength !== input.file.size) throw new Error("fault.attachment.fileChanged");
   input.signal?.throwIfAborted();
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const checksum = await sha256Checksum(bytes);
   input.signal?.throwIfAborted();
-  const checksum = `sha256:${Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("")}`;
   const totalChunks = Math.ceil(bytes.length / CHUNK_BYTES);
   const begin = await input.service.beginUpload({
     operationId: input.operationId,

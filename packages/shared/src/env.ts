@@ -8,6 +8,7 @@ export type ArmsRumEnv = "local" | "prod";
 // 非构建环境（如 e2e 测试的 mocha）下 define 不存在，用 typeof 检查 + fallback 避免 ReferenceError
 declare const __ZCODE_ENV__: string;
 declare const __ZCODE_PRODUCT_FLAVOR__: string;
+declare const __ZCODE_PRIVATE_DEPLOYMENT__: boolean;
 
 export function normalizeZCodeEnv(value: string | undefined): ZCodeEnv {
   return value?.trim().toLowerCase() === "production" ? "production" : "test";
@@ -16,6 +17,17 @@ export function normalizeZCodeEnv(value: string | undefined): ZCodeEnv {
 export const ZCODE_ENV = normalizeZCodeEnv(
   typeof __ZCODE_ENV__ !== "undefined" ? __ZCODE_ENV__ : undefined,
 );
+
+/**
+ * 私有（非公网）部署形态：由构建期 `ZCODE_PRIVATE_DEPLOYMENT=1` 注入。
+ * 与 `ZCODE_ENV`（后端环境）正交——线上 Web 也可能是 test 后端。
+ *
+ * 用途：浏览器安全上下文相关能力的降级门控。自部署 WebUI 常以 HTTP 访问内网/组网地址，
+ * 该地址不是安全上下文，`crypto.subtle` / `crypto.randomUUID` 不可用；此时才允许走非
+ * WebCrypto 的兜底实现。缺省（未注入）为 false，线上 Web 与桌面不包含兜底分支。
+ */
+export const ZCODE_PRIVATE_DEPLOYMENT: boolean =
+  typeof __ZCODE_PRIVATE_DEPLOYMENT__ !== "undefined" && __ZCODE_PRIVATE_DEPLOYMENT__ === true;
 
 /**
  * 身份缺省跟随后端环境（test → preview，production → production）。

@@ -1,5 +1,5 @@
 import { BufferWriter, serialize } from "@zcode/rpc";
-import { ServiceChannels } from "@zcode/shared";
+import { DigestUnavailableError, ServiceChannels, sha256Checksum } from "@zcode/shared";
 import {
   PROTOCOL_V4_LIMITS,
   type V4AttachmentBeginResult,
@@ -87,13 +87,16 @@ function encodeBase64(bytes: Uint8Array): string {
 }
 
 async function checksum(bytes: Uint8Array): Promise<string> {
-  if (!globalThis.crypto?.subtle) throw new Error("fault.attachment.checksumUnavailable");
-  // WebCrypto 的 BufferSource 要求 ArrayBuffer；复制也避免调用期间底层 view 被复用。
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", Uint8Array.from(bytes).buffer);
-  const hex = [...new Uint8Array(digest)]
-    .map((value) => value.toString(16).padStart(2, "0"))
-    .join("");
-  return `sha256:${hex}`;
+  try {
+    // 私有部署（非安全上下文）下 crypto.subtle 缺失时由 shared 门控回退到纯 JS 实现；
+    // 非私有部署仍抛 DigestUnavailableError，这里映射回原有 fault 语义保持可诊断。
+    return await sha256Checksum(bytes);
+  } catch (error) {
+    if (error instanceof DigestUnavailableError) {
+      throw new Error("fault.attachment.checksumUnavailable");
+    }
+    throw error;
+  }
 }
 
 function createUploadId(): string {
