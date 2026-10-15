@@ -42,7 +42,6 @@ const HIDDEN_SETTINGS_SECTIONS = new Set<SettingsSectionId>([
   // 工作区搜索（.zcodeignore）设置入口先隐藏：规则文件仍生效并可手动编辑，
   // 编辑页代码保留，放开时从这里移除即可。
   "workspaceFileSearch",
-  "computerUse",
   // 产品决策：完全不使用 Claude，Claude 原生历史迁移分区整体关闭。
   // 原来只由 useClaudeSessionMigration 的 isDesktop 门控（web 显示 unsupported），
   // 桌面仍会露出一个用不上的分区；这里在分区可见性的唯一所有者上一并关掉，

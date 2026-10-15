@@ -27,7 +27,7 @@ import {
 import { toast } from "@/components/ui/toast.js";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 import { usePlatform } from "@/hooks/usePlatform.js";
-import { useServices } from "@/hooks/useServices.js";
+import { useOptionalServices } from "@/hooks/useServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 import { getBotProviderRegionTagLabelId } from "@/botsUi.js";
@@ -265,7 +265,9 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
 }) {
   const platform = usePlatform();
   const confirmDialog = useConfirmDialog();
-  const { webRemoteControlRelayService } = useServices();
+  // 用 useOptionalServices 而非 useServices：relay 服务只在自部署 server 上注册，
+  // 桌面与未注册形态下没有 ServiceProvider 也要能渲染弹层（此时不显示配对卡片）。
+  const webRemoteControlRelayService = useOptionalServices()?.webRemoteControlRelayService;
   const { intl } = useZCodeIntl();
   // 自部署 server 注册 relay 服务后才显示配对卡片；桌面/未注册时保持上游布局。
   const relaySectionVisible = resolveRelaySectionVisible(webRemoteControlRelayService);

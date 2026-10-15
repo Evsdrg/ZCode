@@ -239,8 +239,9 @@ describe("WebRemoteControlTaskIndex layout", () => {
     );
 
     expect(source).toContain("shouldRetryWebRemoteControlTaskIndexLoad");
-    expect(source).toContain(
-      "}, [activeTaskId, activeWorkspaceIdentity, activeWorkspacePath, switcher]);",
+    // 依赖数组的换行随格式化变化，按标识符断言而非整行字面量。
+    expect(source).toMatch(
+      /\[activeTaskId,\s*activeWorkspaceIdentity,\s*activeWorkspacePath,\s*switcher\]/,
     );
   });
 

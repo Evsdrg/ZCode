@@ -97,8 +97,15 @@ describe("settings frame content layout", () => {
     expect(settingsPageSource).toContain("key={`skill:${settingsSectionNavigationVersion}`}");
   });
 
-  it("only exposes the Project Memory viewer from the desktop host", () => {
-    expect(settingsPageSource).toContain("projectMemoryViewerAvailable={Boolean(isDesktop)}");
+  it("exposes the Project Memory viewer regardless of host form", () => {
+    // Bugfix: projectMemoryViewerAvailable 原来传 Boolean(isDesktop)，自部署浏览器形态下
+    // Memory catalog 只能看到「仅本地可用」占位。MemorySettingsViewer 零 platform 依赖，
+    // 纯走 memoryService.listProjectMemories()，而 IMemoryService 在 zcode --web 的
+    // createLocalServices 与 desktop host 远程集合里均已注册，读的是 host 所在机器的数据，
+    // 与上方「始终使用本地 Host」语义一致。因此 viewer 不再按宿主形态门控。
+    // 详见 docs/specs/selfhost-browser-capability-gates.md。
+    expect(settingsPageSource).toMatch(/projectMemoryViewerAvailable(?!\{)/);
+    expect(settingsPageSource).not.toContain("projectMemoryViewerAvailable={Boolean(isDesktop)}");
     expect(settingsPageSource).not.toContain("projectMemoryViewerAvailable={!isWebRemoteControl}");
   });
 

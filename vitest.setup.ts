@@ -45,3 +45,17 @@ vi.mock("node:os", async (importOriginal) => {
     },
   };
 });
+
+// Electron 的 `<webview>` 是内置特殊标签，并不通过 customElements 注册（规范要求自定义
+// 元素名必须含连字符，define("webview") 会直接抛 SyntaxError），因此 jsdom / happy-dom 里
+// customElements.get("webview") 恒为 undefined。BrowserViewportSurface 与
+// CodingPlanEmbeddedWebviewDialog 正是用这个判据决定是否挂载 guest；测试环境必须按
+// Electron 宿主语义把 webview 视为已注册，否则这些桌面组件测试会整批因 guest 不挂载而失败。
+// 只影响 get("webview") 一个查询点，其余自定义元素行为保持原样。
+if (typeof customElements !== "undefined" && typeof customElements.get === "function") {
+  const originalGet = customElements.get.bind(customElements);
+  customElements.get = ((name: string) =>
+    name === "webview"
+      ? class WebviewStub extends HTMLElement {}
+      : originalGet(name)) as typeof customElements.get;
+}

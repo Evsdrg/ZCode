@@ -495,14 +495,20 @@ describe("SessionPane v4 chat layout parity", () => {
       resolve(process.cwd(), "packages/ui/src/v4/ConversationTimeline.tsx"),
       "utf8",
     );
-    expect(timelineSource).toContain("COMPOSER_MESSAGE_MASK_TRANSPARENT_HEIGHT_PX = 96");
-    expect(timelineSource).toContain("COMPOSER_MESSAGE_MASK_FADE_PX = 24");
-    expect(timelineSource).toContain("isAtBottom({");
-    expect(timelineSource).toContain('messageLayer.style.maskImage = "none"');
-    expect(timelineSource).toContain(
-      "viewportHeight - COMPOSER_MESSAGE_MASK_TRANSPARENT_HEIGHT_PX",
+    // 本 fork 把 mask 的几何常量与纯计算抽到了 messageLayerMask.ts（先读后写，消除
+    // 强制同步重排尖峰），常量与渐变断言改到该文件；这里只断言组件的调用形态。
+    const maskSource = readFileSync(
+      resolve(process.cwd(), "packages/ui/src/v4/messageLayerMask.ts"),
+      "utf8",
     );
-    expect(timelineSource).toContain("black ${opaqueEnd}px, transparent ${transparentStart}px");
+    expect(maskSource).toContain("COMPOSER_MESSAGE_MASK_TRANSPARENT_HEIGHT_PX = 96");
+    expect(maskSource).toContain("COMPOSER_MESSAGE_MASK_FADE_PX = 24");
+    expect(maskSource).toContain("isAtBottom(");
+    expect(maskSource).toContain('maskImage: "none"');
+    expect(maskSource).toContain("viewportHeight - COMPOSER_MESSAGE_MASK_TRANSPARENT_HEIGHT_PX");
+    expect(maskSource).toContain("black ${opaqueEnd}px, transparent ${transparentStart}px");
+    expect(timelineSource).toContain("computeMessageLayerMaskPure(");
+    expect(timelineSource).toContain("applyMessageLayerMaskStyle(");
     const maskSyncSource = timelineSource.slice(
       timelineSource.indexOf("const syncMessageLayerMask = useCallback"),
       timelineSource.indexOf("const syncTurnNavigatorViewport = useCallback"),

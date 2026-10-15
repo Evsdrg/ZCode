@@ -45,6 +45,11 @@ describe("settingsNavigation 分区可见性", () => {
       "commands",
       "hooks",
       "shortcuts",
+      // computerUse 上游 3.15.1 起改为可见：分区本身不依赖桌面能力，Linux/远端环境下
+      // 由 ComputerUseSection 渲染"当前环境暂不支持"提示卡，而不是让分区消失——
+      // 直接 return null 会让设置页只剩标题，被误认为加载失败。
+      // 自部署浏览器不传 isDesktop，showComputerUse 为 false，分区依旧不出现。
+      "computerUse",
     ];
     for (const section of stillEnabled) {
       expect(isSettingsSectionEnabled(section), `${section} 应保持启用`).toBe(true);
@@ -56,6 +61,5 @@ describe("settingsNavigation 分区可见性", () => {
     expect(isSettingsSectionEnabled("automations")).toBe(false);
     expect(isSettingsSectionEnabled("plugins")).toBe(false);
     expect(isSettingsSectionEnabled("workspaceFileSearch")).toBe(false);
-    expect(isSettingsSectionEnabled("computerUse")).toBe(false);
   });
 });

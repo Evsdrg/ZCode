@@ -12,6 +12,7 @@
     "docs/knip/docs/licenses/**",
     "docs/electron/docs/**",
     "docs/webdriverio/docs/**",
-    "docs/knip/docs/**"
+    "docs/knip/docs/**",
+    "docs/testing/conversation-session-docker-automation-plan.md"
   ]
 }

@@ -98,5 +98,13 @@ service stub 体系，超出本次范围；其行为已由上述纯逻辑测试�
 ## 不在本次范围
 
 - `isMacDesktop` / `isWindowsDesktop` / `isLinuxDesktop` / `isDesktopRuntime` / `isDesktopAttachedRemote` 的门控未做调整。
-- CUA、BrowserView、全局快捷键、桌面更新等确属桌面专属的门控保持原状。
+- CUA 的**能力判定**（哪些平台真的能跑电脑控制）保持原状：只有 macOS 与 Windows 本地桌面可用，Linux、远端 workspace、普通 Web 与手机远控均不可用。本 fork 不新增也不放宽这层判定。
 - `packages/services/src/plugins/pluginsService.ts` 已 retired（`capability.supported: false`），而 `CONTEXT.md` 仍描述完整插件商店词汇表——属既有文档偏离，另行处理。
+
+## 后续修正（上游 3.15.1 合并时）
+
+`computerUse` 设置分区原在 `HIDDEN_SETTINGS_SECTIONS` 中（继承自上游 3.14.3，非本 fork 的产品决策），合并上游 3.15.1 时采纳了上游的改动：**移出隐藏列表**。分区可见性与能力判定是两件事：
+
+- 分区可见性：所有桌面形态（含 Linux）都显示该分区；不可用环境由 `ComputerUseSection` 渲染「当前环境暂不支持」提示卡并区分 Linux 与远端文案，而不是让分区消失——直接不渲染会让设置页只剩标题，被误认为加载失败。
+- 能力判定：仍只有 macOS / Windows 本地桌面为 `supported: true`，见 `resolveComputerUseAvailability`。macOS 另有版本地板 12.0 与 TCC 双权限（Accessibility / Screen Recording）；Windows 只复用 zcode-cua 插件总开关，不读 TCC 与 Helper 状态。
+- 自部署浏览器不传 `isDesktop`，`showComputerUse` 为 false，该分区在 WebUI 里依旧不出现，本次改动对自部署形态零影响。

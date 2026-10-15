@@ -65,6 +65,18 @@
 - `oxfmt --check`全量扫描在0.41.0下有偶发假阳性；判断某文件是否真的不合格式，应逐文件`oxfmt --check <file>`复检。
 - 后续从上游同步时，新引入的上游文件可能再次带来格式债；按同样方式单独成提交补齐即可。
 
+`.oxfmtrc.json` 的 `ignorePatterns` 里有两类**不能格式化**的路径，新增条目前先确认属于哪类：
+
+| 类别                     | 路径                                                                     | 理由                                                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| 第三方文档镜像           | `docs/electron/docs/**`、`docs/webdriverio/docs/**`、`docs/knip/docs/**` | 仓库内明确标注「不属于 ZCode workspace」的上游快照，逐字节保留，不改写                                                      |
+| 机器维护的 Markdown 表格 | `docs/testing/conversation-session-docker-automation-plan.md`            | `admit-conversation-e2e-docker.mjs` 按「表头分隔行紧邻 end marker」的契约插入行；`oxfmt` 会填充分隔行并插入空行，把表格打断 |
+
+## 测试环境与入口
+
+- 根 `vitest.config.ts` 的 `unit` project include `packages/*/test/**/*.test.ts`，cwd 是仓库根。上游 3.15.1 起新增的 `packages/ui/test/**` 用 `resolve("packages/ui/src/...")` 读源码文本，**只在仓库根作 cwd 时解析正确**；因此 `packages/ui/vitest.config.ts` 的 include 保持只含 `src/**`，不要把 `test/**` 也加进去，否则 `pnpm --filter @zcode/ui test` 会以 `packages/ui` 为 cwd 全部 ENOENT。
+- 根 `vitest.setup.ts` 与 `packages/ui/vitest.setup.ts` 都把 `customElements.get("webview")` 桩成已注册：Electron 的 `<webview>` 是内置特殊标签，规范要求自定义元素名含连字符，`define("webview")` 会抛 `SyntaxError`，jsdom/happy-dom 里该查询恒为 undefined，而 `BrowserViewportSurface` 与 `CodingPlanEmbeddedWebviewDialog` 正是用它决定是否挂载 guest。
+
 ## 不进入公共Git的改动
 
 以下是外部部署状态，不是本fork的源码功能：

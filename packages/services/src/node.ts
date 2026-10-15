@@ -301,6 +301,9 @@ export {
   settleManualDispatchFailureBestEffort,
   settleCronRunTerminalOutcome,
   settleManualClaimForDispatchResult,
+  releaseManualClaimForSettledRun,
+  type ManualClaimReleaseRepo,
+  type ManualClaimReleaseParams,
   type CronRunLifecycleRepo,
   type CronRunLifecycleIdentity,
   type LogWarn as CronRunLogWarn,
@@ -314,9 +317,15 @@ export {
 export {
   resolveOffPeakDispatchKind,
   assertBoundSessionDispatchable,
+  OffPeakBoundSessionDeletedError,
+  OffPeakBoundSessionBusyError,
+  type OffPeakDispatchKind,
 } from "./session/automationOffPeakDispatchPlan.js";
 export {
   settleOffPeakDispatchResult,
+  OFF_PEAK_DISPATCH_RETRY_BASE_MS,
+  OFF_PEAK_DISPATCH_RETRY_CAP_MS,
+  type OffPeakDispatchSettlementDeps,
   type OffPeakDispatchResult,
 } from "./session/automationOffPeakSettlement.js";
 // 闲时任务与 automation 同库不同表；类型/常量全独立。
