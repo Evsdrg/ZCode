@@ -43,6 +43,7 @@ import type {
   V4ConversationFileChangesResult,
 } from "@zcode/shared/zcode-protocol-v4";
 import { logger } from "@/logger.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import {
   getConversationShareErrorDetails,
   resolveConversationShareFallbackIssueCode,
@@ -4175,8 +4176,8 @@ export function SessionPane({
   ]);
 
   const handleCopyPublishedShare = useCallback(() => {
-    if (!publishedShareUrl || !navigator.clipboard?.writeText) return;
-    void navigator.clipboard.writeText(publishedShareUrl).then(
+    if (!publishedShareUrl) return;
+    void writeClipboardText(publishedShareUrl).then(
       () => toast(intl.formatMessage({ id: "conversationShare.copySucceeded" })),
       () => toast(intl.formatMessage({ id: "conversationShare.copyFailed" })),
     );
@@ -4190,11 +4191,11 @@ export function SessionPane({
 
   const handleCopyShareRequestId = useCallback(() => {
     const requestId = shareError?.requestId;
-    if (!requestId || !navigator.clipboard?.writeText) {
+    if (!requestId) {
       toast(intl.formatMessage({ id: "conversationShare.copyFailed" }));
       return;
     }
-    void navigator.clipboard.writeText(requestId).then(
+    void writeClipboardText(requestId).then(
       () => toast(intl.formatMessage({ id: "conversationShare.copySucceeded" })),
       () => toast(intl.formatMessage({ id: "conversationShare.copyFailed" })),
     );

@@ -8,6 +8,7 @@ import type { ILink, ILinkHandler, ITheme, IWindowsPty } from "@xterm/xterm";
 import type { IServiceAccessor } from "@zcode/services";
 import type { IDisposable } from "@zcode/rpc";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { logger } from "@/logger.js";
 import {
   ContextMenu,
@@ -449,7 +450,7 @@ export function TerminalSession({
         if (!(e.metaKey || e.ctrlKey)) return true;
         const key = e.key.toLowerCase();
         if (key === "c" && term.hasSelection()) {
-          void navigator.clipboard.writeText(term.getSelection()).catch((err) => {
+          void writeClipboardText(term.getSelection()).catch((err) => {
             logger.warn("[Terminal] copy via shortcut failed:", err);
           });
           return false;
@@ -820,7 +821,7 @@ export function TerminalSession({
       if (!(e.metaKey || e.ctrlKey)) return true;
       const key = e.key.toLowerCase();
       if (key === "c" && term.hasSelection()) {
-        void navigator.clipboard.writeText(term.getSelection()).catch((err) => {
+        void writeClipboardText(term.getSelection()).catch((err) => {
           logger.warn("[Terminal] copy via shortcut failed:", err);
         });
         return false;
@@ -1087,7 +1088,7 @@ export function TerminalSession({
   const handleCopy = () => {
     const term = termRef.current;
     if (!term?.hasSelection()) return;
-    void navigator.clipboard.writeText(term.getSelection()).catch((err) => {
+    void writeClipboardText(term.getSelection()).catch((err) => {
       logger.warn("[Terminal] copy via context menu failed:", err);
     });
   };

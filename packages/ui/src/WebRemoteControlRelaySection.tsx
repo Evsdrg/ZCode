@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button.js";
 import { toast } from "@/components/ui/toast.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { usePlatform } from "@/hooks/usePlatform.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { logger } from "@/logger.js";
 import {
   resolveRelayPrimaryAction,
@@ -140,11 +141,7 @@ export const WebRemoteControlRelaySection = memo(function WebRemoteControlRelayS
   /** 配对链接不挑端：手机扫码与桌面浏览器直接打开是同一条 terminal 连接。 */
   const handleCopyLink = useCallback(() => {
     if (!pairingUrl) return;
-    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
-      toast(intl.formatMessage({ id: "webRemoteControl.relay.copyFailed" }));
-      return;
-    }
-    void navigator.clipboard.writeText(pairingUrl).then(
+    void writeClipboardText(pairingUrl).then(
       () => {
         setLinkCopied(true);
         if (copiedTimer.current) clearTimeout(copiedTimer.current);

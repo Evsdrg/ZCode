@@ -11,6 +11,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip.js";
 import { ToolSummaryRow, type ToolSummaryAction } from "@/ToolCallBlocks/ToolSummaryRow.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { uiMemoryDiagnosticsRegistry } from "@/lib/memoryDiagnostics.js";
 
 const toolLayoutOpenState = new Map<string, boolean>();
@@ -225,16 +226,19 @@ function ToolLayoutComponent({
       return;
     }
 
-    navigator.clipboard.writeText(statusTooltip).then(() => {
-      setIsFailureTooltipCopied(true);
-      if (failureTooltipCopyResetRef.current !== null) {
-        window.clearTimeout(failureTooltipCopyResetRef.current);
-      }
-      failureTooltipCopyResetRef.current = window.setTimeout(() => {
-        setIsFailureTooltipCopied(false);
-        failureTooltipCopyResetRef.current = null;
-      }, 1500);
-    });
+    void writeClipboardText(statusTooltip).then(
+      () => {
+        setIsFailureTooltipCopied(true);
+        if (failureTooltipCopyResetRef.current !== null) {
+          window.clearTimeout(failureTooltipCopyResetRef.current);
+        }
+        failureTooltipCopyResetRef.current = window.setTimeout(() => {
+          setIsFailureTooltipCopied(false);
+          failureTooltipCopyResetRef.current = null;
+        }, 1500);
+      },
+      () => undefined,
+    );
   };
 
   const statusWordNode =

@@ -4,6 +4,7 @@ import { usePlatform } from "@/hooks/usePlatform.js";
 import { useTaskNativeSessionLogFile } from "@/hooks/useTaskNativeSessionLogFile.js";
 import { useTaskSessionFilePath } from "@/hooks/useTaskSessionFilePath.js";
 import { useWorkspaceOpenInEditorTarget } from "@/hooks/useWorkspaceOpenInEditorTarget.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { logger } from "@/logger.js";
 
 interface TaskPathState {
@@ -62,7 +63,7 @@ export function useTaskListItemContextActions({
     }
 
     try {
-      await navigator.clipboard.writeText(value);
+      await writeClipboardText(value);
       logger.info(`[TaskListItem] ${label} 已复制: ${value}`);
     } catch (error) {
       logger.warn("[TaskListItem] 复制文本失败", {

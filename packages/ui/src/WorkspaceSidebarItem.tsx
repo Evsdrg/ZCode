@@ -72,6 +72,7 @@ import {
 import { useRemotePinnedTaskStore } from "@/store/remotePinnedTaskStore.js";
 import { useRemoteTimelineTaskStore } from "@/store/remoteTimelineTaskStore.js";
 import { logger } from "@/logger.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import {
   RemoteSyncDialogs,
   RemoteSyncMenuItems,
@@ -704,16 +705,20 @@ export const WorkspaceSidebarItem = memo(function WorkspaceSidebarItem({
       return;
     }
 
-    navigator.clipboard.writeText(remoteWorkspaceError).then(() => {
-      setIsRemoteErrorCopied(true);
-      if (remoteErrorCopyResetRef.current !== null) {
-        window.clearTimeout(remoteErrorCopyResetRef.current);
-      }
-      remoteErrorCopyResetRef.current = window.setTimeout(() => {
-        setIsRemoteErrorCopied(false);
-        remoteErrorCopyResetRef.current = null;
-      }, 1500);
-    });
+    void writeClipboardText(remoteWorkspaceError).then(
+      () => {
+        setIsRemoteErrorCopied(true);
+        if (remoteErrorCopyResetRef.current !== null) {
+          window.clearTimeout(remoteErrorCopyResetRef.current);
+        }
+        remoteErrorCopyResetRef.current = window.setTimeout(() => {
+          setIsRemoteErrorCopied(false);
+          remoteErrorCopyResetRef.current = null;
+        }, 1500);
+      },
+      // 复制失败不再展示“已复制”：失败态由文案保持原样，仅记录日志。
+      (error: unknown) => logger.warn("[WorkspaceSidebarItem] 复制远控错误失败", error),
+    );
   }, [remoteWorkspaceError]);
   const renderWorkspaceIcon = () => {
     // workspace 行之前在 hover/展开时会把目录图标切成箭头，

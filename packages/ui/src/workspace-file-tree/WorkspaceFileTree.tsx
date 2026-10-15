@@ -49,6 +49,7 @@ import {
   type WorkspaceFileTreeRow,
 } from "@/workspace-file-tree/model.js";
 import { getPathLeaf } from "@/lib/path.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { logger } from "@/logger.js";
 import { WORKSPACE_FILE_TREE_VIRTUAL_ROW_HEIGHT_PX } from "@/workspace-file-tree/constants.js";
 import { getFileManagerLabel } from "@/workspace-file-tree/helpers.js";
@@ -443,15 +444,8 @@ export function WorkspaceFileTree({
   ]);
 
   const handleCopyPath = useCallback(async () => {
-    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
-      logger.warn("[WorkspaceFileTree] 复制 workspace 路径失败", {
-        path: workspacePath,
-        error: "clipboard-unavailable",
-      });
-      return;
-    }
     try {
-      await navigator.clipboard.writeText(workspacePath);
+      await writeClipboardText(workspacePath);
       logger.info("[WorkspaceFileTree] workspace 路径已复制", {
         path: workspacePath,
       });

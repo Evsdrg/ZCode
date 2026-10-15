@@ -24,6 +24,7 @@ import type { BundledTheme } from "shiki";
 import { CodeViewer } from "@/components/ui/code-viewer.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { FileDisplayIcon, resolveFileDisplayDescriptor } from "@/lib/fileDisplay.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { isMermaidLanguage, shouldRenderMermaidCodeBlock } from "@/lib/mermaidLanguage.js";
 import {
   getCurrentMermaidDocumentVisibility,
@@ -468,14 +469,9 @@ export const CodeBlockCopyButton = ({
   const label = title ?? intl.formatMessage({ id: "codeBlock.copyCode" });
 
   const copyToClipboard = useCallback(async () => {
-    if (typeof window === "undefined" || !navigator?.clipboard?.writeText) {
-      onError?.(new Error("Clipboard API not available"));
-      return;
-    }
-
     try {
       if (!isCopied) {
-        await navigator.clipboard.writeText(code);
+        await writeClipboardText(code);
         setIsCopied(true);
         onCopy?.();
         timeoutRef.current = window.setTimeout(() => setIsCopied(false), timeout);

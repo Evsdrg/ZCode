@@ -10,6 +10,7 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import { cn } from "@/components/lib/utils.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useWorkflowRunNodeResult } from "@/hooks/useWorkflowRunNodeResult.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import {
   formatWorkspaceBytes,
   formatWorkspaceDuration,
@@ -75,10 +76,14 @@ function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const copy = useCallback(() => {
     if (text.length === 0) return;
-    void navigator.clipboard?.writeText(text).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    });
+    void writeClipboardText(text).then(
+      () => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      },
+      // 失败时不显示“已复制”，避免给出错误反馈。
+      () => undefined,
+    );
   }, [text]);
   return (
     <button

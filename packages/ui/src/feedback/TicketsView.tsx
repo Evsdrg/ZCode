@@ -9,6 +9,7 @@ import { ScrollFadeViewport } from "@/components/ui/scroll-fade-viewport.js";
 import { useFeedbackStore } from "@/feedback/feedbackStore.js";
 import { formatRelativeTime } from "@/feedback/feedbackUserView.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { getErrorMessage } from "@/lib/errorMessage.js";
 import { logger } from "@/logger.js";
 
@@ -55,15 +56,7 @@ export function TicketsView({
 
   const handleCopyTicketId = useCallback(
     (ticketId: string) => {
-      if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
-        logger.warn(formatMessage({ id: "feedback.detail.issueCopyFailed" }), {
-          issueId: ticketId,
-          reason: "clipboard-unavailable",
-        });
-        return;
-      }
-
-      void navigator.clipboard.writeText(ticketId).then(
+      void writeClipboardText(ticketId).then(
         () => {
           setCopiedTicketId(ticketId);
           if (copiedResetTimerRef.current !== null) {

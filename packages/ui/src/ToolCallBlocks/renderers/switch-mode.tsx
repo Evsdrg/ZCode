@@ -4,6 +4,7 @@ import { ToolOutput } from "@/components/ai-elements/tool.js";
 import { Button } from "@/components/ui/button.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { getToolCallErrorText } from "@/lib/toolError.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { extractPlanToolCallContent, getPlanFileLabel } from "@/lib/planToolCall.js";
 import { ToolSnapshotFieldNotice } from "@/ToolCallBlocks/ToolSnapshotFieldNotice.js";
 import type { ToolCallBlockRenderContext } from "../shared.js";
@@ -59,8 +60,8 @@ export function SwitchModeToolCallBlock(context: ToolCallBlockRenderContext) {
   };
 
   const handleCopy = () => {
-    if (!markdown || typeof navigator === "undefined" || !navigator.clipboard?.writeText) return;
-    void navigator.clipboard.writeText(markdown).then(
+    if (!markdown) return;
+    void writeClipboardText(markdown).then(
       () => setCopiedMarkdown(markdown),
       () => setCopiedMarkdown(null),
     );

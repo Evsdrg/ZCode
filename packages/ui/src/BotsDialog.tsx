@@ -31,6 +31,7 @@ import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 import { useServices } from "@/hooks/useServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { isImeComposingKeyEvent } from "@/lib/imeComposition.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { logger } from "@/logger.js";
 import {
   BOT_PROVIDERS,
@@ -938,12 +939,14 @@ export function BotsDialog({
   const copyBindCommand = async () => {
     if (!bindCode || bindExpired) return;
     const command = `/bind ${bindCode.code}`;
-    await navigator.clipboard?.writeText(command).catch((error: unknown) => {
+    try {
+      await writeClipboardText(command);
+    } catch (error) {
       logger.warn(
         "[BotsDialog] 复制绑定命令失败",
         error instanceof Error ? error.message : String(error),
       );
-    });
+    }
     toast(intl.formatMessage({ id: "bots.bindCommandCopied" }));
   };
 
