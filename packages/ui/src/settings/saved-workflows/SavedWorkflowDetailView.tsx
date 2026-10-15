@@ -16,6 +16,7 @@ import { Spinner } from "@/components/ui/spinner.js";
 import { toast } from "@/components/ui/toast.js";
 import { cn } from "@/components/lib/utils.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { logger } from "@/logger.js";
 import { SettingsBreadcrumbReporter } from "@/settings/SettingsHeaderBreadcrumb.js";
 import { SETTINGS_FRAME_CONTENT_CLASSNAME } from "@/settings/SettingsPageParts.js";
@@ -248,7 +249,7 @@ export function SavedWorkflowDetailView({
 
   const copyScript = useCallback(() => {
     if (!detail) return;
-    void navigator.clipboard?.writeText(detail.script).catch(() => undefined);
+    void writeClipboardText(detail.script).catch(() => undefined);
   }, [detail]);
 
   // 「最近产物」条：**最近一次 completed run** 的

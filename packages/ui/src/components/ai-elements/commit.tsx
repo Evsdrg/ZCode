@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback } from "../ui/avatar.js";
 import { Button } from "../ui/button.js";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.js";
 import { cn } from "../lib/utils.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { CheckIcon, CopyIcon, FileIcon, GitCommitIcon, MinusIcon, PlusIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -167,14 +168,9 @@ export const CommitCopyButton = ({
   const timeoutRef = useRef<number>(0);
 
   const copyToClipboard = useCallback(async () => {
-    if (typeof window === "undefined" || !navigator?.clipboard?.writeText) {
-      onError?.(new Error("Clipboard API not available"));
-      return;
-    }
-
     try {
       if (!isCopied) {
-        await navigator.clipboard.writeText(hash);
+        await writeClipboardText(hash);
         setIsCopied(true);
         onCopy?.();
         timeoutRef.current = window.setTimeout(() => setIsCopied(false), timeout);

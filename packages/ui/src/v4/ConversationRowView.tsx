@@ -102,6 +102,7 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useOptionalPlatform } from "@/hooks/usePlatform.js";
 import { reportAppTelemetryEvent } from "@/lib/appTelemetry.js";
 import { runUserAction, runUserActionAsync } from "@/lib/userActionTelemetry.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { logger } from "@/logger.js";
 import { PluginUiModelContextChip, formatPluginDisplayName } from "@/plugin-ui/index.js";
 import type { AssistantPreviewCard } from "@/lib/assistantPreviewCards.js";
@@ -192,10 +193,10 @@ const CopyRowAction = memo(function CopyRowAction({
 }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
-    if (!text || !navigator.clipboard) return;
+    if (!text) return;
     void runUserActionAsync({
       input: { featureId: "conversation.history.feedback", action: "copy", trigger: "button" },
-      operation: () => navigator.clipboard.writeText(text),
+      operation: () => writeClipboardText(text),
       completed: { resultSource: "platform_result" },
       failureStage: "clipboard_write",
     }).then(() => {

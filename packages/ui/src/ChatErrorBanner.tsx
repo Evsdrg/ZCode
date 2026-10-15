@@ -31,6 +31,7 @@ import {
 import { cn } from "./components/lib/utils.js";
 import { toast } from "./components/ui/toast.js";
 import { useFeedbackStore } from "@/feedback/feedbackStore.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { getProviderBusinessErrorMessageId } from "@/lib/providerBusinessError.js";
 import { buildErrorFeedbackDescription } from "@/lib/errorFeedbackDraft.js";
 import {
@@ -229,17 +230,10 @@ export function ChatErrorBanner({
   };
 
   const handleCopyError = async () => {
-    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
-      toast(
-        intl.formatMessage({ id: "chat.error.copyFailed" }, { error: "clipboard-unavailable" }),
-      );
-      return;
-    }
-
     try {
       // 错误横幅之前只能复制 TraceID，开发拿不到完整上下文。
       // 这里统一复制摘要、TraceID 和详情，方便用户一键转发完整报错信息。
-      await navigator.clipboard.writeText(
+      await writeClipboardText(
         buildErrorCopyText({
           message: localizedErrorMessage,
           detail: error.detail,

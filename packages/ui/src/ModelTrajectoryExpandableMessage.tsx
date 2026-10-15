@@ -10,6 +10,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible.js";
 import type { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { logger } from "@/logger.js";
 import {
   TrajectoryExpansionCommandContext,
@@ -85,8 +86,8 @@ export function ExpandableTrajectoryMessage({
   const open = userOpen || searchRevealed;
 
   const handleCopy = () => {
-    if (!copyText || typeof navigator === "undefined" || !navigator.clipboard?.writeText) return;
-    void navigator.clipboard.writeText(copyText).catch((error: unknown) => {
+    if (!copyText) return;
+    void writeClipboardText(copyText).catch((error: unknown) => {
       logger.warn("[ModelTrajectory] copy expanded content failed", error);
     });
   };

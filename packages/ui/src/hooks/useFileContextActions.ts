@@ -4,6 +4,7 @@ import { toast } from "@/components/ui/toast.js";
 import { usePlatform } from "@/hooks/usePlatform.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { getContainingDirectoryPath } from "@/lib/path.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { logger } from "@/logger.js";
 
 interface FileContextActionOptions {
@@ -50,15 +51,8 @@ export function useFileContextActions(options: FileContextActionOptions = {}) {
   );
 
   const copyPathText = useCallback(async (path: string) => {
-    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
-      logger.warn("[FileContextActions] 复制文件路径失败", {
-        path,
-        error: "clipboard-unavailable",
-      });
-      return;
-    }
     try {
-      await navigator.clipboard.writeText(path);
+      await writeClipboardText(path);
       logger.info("[FileContextActions] 文件路径已复制", { path });
     } catch (error) {
       logger.warn("[FileContextActions] 复制文件路径失败", {

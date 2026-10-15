@@ -100,6 +100,11 @@ export default defineConfig(({ mode }) => {
       __ZCODE_MIN_COMPATIBLE_VERSION__: JSON.stringify(minCompatibleVersion),
       __ZCODE_COMMIT__: JSON.stringify(env.ZCODE_COMMIT || "unknown"),
       __ZCODE_ENV__: JSON.stringify(zcodeEnv),
+      // 私有部署门控：自部署 WebUI 常以 HTTP 访问内网/组网地址（非安全上下文），
+      // crypto.subtle 不可用会让附件上传失败。只有构建期显式带 ZCODE_PRIVATE_DEPLOYMENT=1
+      // 才把该常量置 true，允许 shared 的 sha256 入口回退到纯 JS 实现；线上 Web 构建
+      // 不设该变量，产物不含回退分支。见 docs/specs/selfhost-private-deployment-digest-fallback.md。
+      __ZCODE_PRIVATE_DEPLOYMENT__: JSON.stringify(env.ZCODE_PRIVATE_DEPLOYMENT?.trim() === "1"),
       "import.meta.env.VITE_ZCODE_BASE_URL": JSON.stringify(zcodeEndpointOrigin),
       // 兼容旧 Web runtime 读取名；新代码统一读 VITE_ZCODE_BASE_URL。
       "import.meta.env.VITE_ZCODE_ENDPOINT_ORIGIN": JSON.stringify(zcodeEndpointOrigin),

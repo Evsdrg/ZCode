@@ -56,6 +56,7 @@ import type {
   V4ConversationFileChangesResult,
 } from "@zcode/shared/zcode-protocol-v4";
 import { logger } from "@/logger.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { PluginUiSessionProvider } from "@/plugin-ui/index.js";
 import {
   getConversationShareErrorDetails,
@@ -5215,9 +5216,9 @@ export function SessionPane({
   ]);
 
   const handleCopyPublishedShare = useCallback(async () => {
-    if (!publishedShareUrl || !navigator.clipboard?.writeText) return false;
+    if (!publishedShareUrl) return false;
     try {
-      await navigator.clipboard.writeText(publishedShareUrl);
+      await writeClipboardText(publishedShareUrl);
       toast(intl.formatMessage({ id: "conversationShare.copySucceeded" }));
       return true;
     } catch {
@@ -5234,11 +5235,11 @@ export function SessionPane({
 
   const handleCopyShareRequestId = useCallback(() => {
     const requestId = shareError?.requestId;
-    if (!requestId || !navigator.clipboard?.writeText) {
+    if (!requestId) {
       toast(intl.formatMessage({ id: "conversationShare.copyFailed" }));
       return;
     }
-    void navigator.clipboard.writeText(requestId).then(
+    void writeClipboardText(requestId).then(
       () => toast(intl.formatMessage({ id: "conversationShare.copySucceeded" })),
       () => toast(intl.formatMessage({ id: "conversationShare.copyFailed" })),
     );

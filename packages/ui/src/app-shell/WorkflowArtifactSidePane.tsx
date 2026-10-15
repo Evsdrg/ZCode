@@ -26,6 +26,7 @@ import {
   type WorkflowRunArtifactView,
 } from "@/hooks/useWorkflowRunArtifacts.js";
 import { joinFilePath } from "@/lib/path.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import type { WorkflowArtifactSidePaneTab } from "@/lib/workspaceSidePane.js";
 import { useZCodeStoreWithDefault } from "@/store/StoreProvider.js";
 import { resolveTheme, type Theme } from "@/useTheme.js";
@@ -225,8 +226,7 @@ function WorkflowArtifactView({
     !preset && bytesState.bytes !== null && isTextArtifactContentType(artifact.contentType);
   const handleCopy = useCallback(() => {
     if (bytesState.bytes === null) return;
-    void navigator.clipboard
-      ?.writeText(new TextDecoder().decode(bytesState.bytes))
+    void writeClipboardText(new TextDecoder().decode(bytesState.bytes))
       .then(() => setCopied(true))
       .catch(() => undefined);
   }, [bytesState.bytes]);

@@ -16,6 +16,7 @@ import {
   Maximize2Icon,
 } from "lucide-react";
 import { cn } from "@/components/lib/utils.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { Button } from "@/components/ui/button.js";
 import {
   Dialog,
@@ -1103,15 +1104,8 @@ export function MarkdownTable({ className, children, node: _node, ...props }: Ma
   );
 
   const handleCopyMarkdown = useCallback(async () => {
-    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
-      toast(
-        intl.formatMessage({ id: "markdownTable.copyFailed" }, { error: "clipboard-unavailable" }),
-      );
-      return;
-    }
-
     try {
-      await navigator.clipboard.writeText(buildMarkdownTableText(getRows()));
+      await writeClipboardText(buildMarkdownTableText(getRows()));
       toast(intl.formatMessage({ id: "markdownTable.copySucceeded" }));
     } catch (error) {
       toast(

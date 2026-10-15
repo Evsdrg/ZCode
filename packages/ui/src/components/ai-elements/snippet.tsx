@@ -14,6 +14,7 @@ import {
   InputGroupText,
 } from "../ui/input-group.js";
 import { cn } from "../lib/utils.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import {
@@ -94,14 +95,9 @@ export const SnippetCopyButton = ({
   const { code } = useContext(SnippetContext);
 
   const copyToClipboard = useCallback(async () => {
-    if (typeof window === "undefined" || !navigator?.clipboard?.writeText) {
-      onError?.(new Error("Clipboard API not available"));
-      return;
-    }
-
     try {
       if (!isCopied) {
-        await navigator.clipboard.writeText(code);
+        await writeClipboardText(code);
         setIsCopied(true);
         onCopy?.();
         timeoutRef.current = window.setTimeout(() => setIsCopied(false), timeout);
