@@ -45,7 +45,7 @@ type TrustedConnectionCarrier = {
   [TRUSTED_CONNECTION_FIELD]?: ZCodeAgentV4ConnectionContext;
 };
 
-interface TrustedZCodeAgentV4UnsubscribeRoute {
+export interface TrustedZCodeAgentV4UnsubscribeRoute {
   topic: string;
   connectionId: string;
 }

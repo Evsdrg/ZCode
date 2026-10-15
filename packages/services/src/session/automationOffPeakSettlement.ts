@@ -2,8 +2,8 @@
 // 桌面 scheduler 与自部署 server 共用；失败分类语义必须一致（transient 才允许回 queued）。
 import type { OffPeakTaskRepo } from "./offPeakTaskRepo.js";
 
-const OFF_PEAK_DISPATCH_RETRY_BASE_MS = 30_000;
-const OFF_PEAK_DISPATCH_RETRY_CAP_MS = 15 * 60_000;
+export const OFF_PEAK_DISPATCH_RETRY_BASE_MS = 30_000;
+export const OFF_PEAK_DISPATCH_RETRY_CAP_MS = 15 * 60_000;
 
 export interface OffPeakDispatchResult {
   offPeakTaskId: string;
@@ -19,7 +19,7 @@ type OffPeakDispatchSettlementRepo = Pick<
   "markRunning" | "markTerminal" | "releaseClaim"
 >;
 
-interface OffPeakDispatchSettlementDeps {
+export interface OffPeakDispatchSettlementDeps {
   repo: OffPeakDispatchSettlementRepo;
   retryAt: Map<string, number>;
   retryAttempts: Map<string, number>;

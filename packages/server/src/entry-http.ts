@@ -3,6 +3,7 @@ import {
   AutomationScheduler,
   createLocalServices,
   createServiceLogger,
+  createTopicResourcePeers,
   disposeServiceResourcesAndWait,
   getAppConfigDir,
   OffPeakTaskRepo,
@@ -30,6 +31,8 @@ async function main(): Promise<void> {
   const browserExecutor = browserConfig
     ? createConfiguredBrowserExecutor(browserConfig)
     : undefined;
+  // topic resource 中继：上游在自部署入口建立 peers 并注入服务集合与 HTTP 层。
+  const topicResourcePeers = createTopicResourcePeers();
 
   // 定时任务 / 闲时任务调度：桌面形态由 Electron main fork 的 scheduler 进程承担；
   // 自部署 server 没有该进程，改为在本进程内起 AutomationScheduler，并直接派发给本进程
@@ -41,6 +44,7 @@ async function main(): Promise<void> {
   let dispatchRuntime: ReturnType<typeof createServerAutomationDispatchRuntime> | undefined;
 
   const services = createLocalServices({
+    topicResourceRelayChannel: (request) => topicResourcePeers.getChannel(request),
     zcodeBuiltinProviderConfigFilePath,
     providerProvisioningTargetEnabled: Boolean(authToken),
     webRemoteControlRelay: true,
@@ -82,6 +86,7 @@ async function main(): Promise<void> {
   await automationScheduler.start();
 
   const server = createHttpServer(services, port, {
+    topicResourcePeers,
     ...(host ? { host } : {}),
     ...(staticRoot ? { staticRoot, spaFallback: true } : {}),
     ...(authToken ? { authToken, authRequired: true } : {}),

@@ -249,6 +249,7 @@ export function createServerAutomationDispatchRuntime(
         try {
           await watchCronRunBotDelivery({
             automationId: request.automationId,
+            runId: promptTraceId,
             workspaceKey,
             workspacePath: request.workspacePath,
             ...(request.workspaceIdentity ? { workspaceIdentity: request.workspaceIdentity } : {}),
