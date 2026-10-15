@@ -1,14 +1,36 @@
+import type { IPlatformService } from "@zcode/shared";
 import type { IWebRemoteControlRelayService, WebRemoteControlRelayStatus } from "@zcode/services";
 
 /**
- * 「官方中转远程控制」区块的纯逻辑：可见性、状态文案与主操作的映射。
- * 事实所有者是服务端 WebRemoteControlRelayService；本文件只做展示投影，不缓存连接事实。
+ * 远控对话框两张卡片的纯逻辑：官方中转卡片与原生「手机扫码连接」卡片的可见性、
+ * 状态文案与主操作映射。事实所有者分别是服务端 WebRemoteControlRelayService 与
+ * 桌面端原生远控；本文件只做展示投影，不缓存连接事实。
  */
 
 export function resolveRelaySectionVisible(
   service: IWebRemoteControlRelayService | undefined | null,
 ): service is IWebRemoteControlRelayService {
   return Boolean(service);
+}
+
+/**
+ * 原生「手机扫码连接」卡片是否可用。
+ *
+ * 上游 3.15.1 给对话框加了这张卡，它走 platform.startWebRemoteControl，而只有
+ * Electron 桌面端能真正发起：Web 平台的实现是永远拒绝的桩（main.tsx 里
+ * "Web remote control can only be started from desktop"）。自部署浏览器里开屏必报
+ * 这个错，且这张卡与上面的官方中转卡片功能重复（都是二维码 + 复制链接），
+ * 自部署可用的入口是中转卡片。
+ *
+ * 判据用可选方法 openCuaPermissionOnboarding——它只在桌面 preload 注入
+ * （packages/desktop/src/preload/index.ts），Web 平台没有该属性，因此
+ * typeof 判定即可区分，无需 UA 嗅探。与 lib/cuaPlatform.ts 的
+ * 「UA + capability」双判同一模式：先确认平台真有这个能力，再渲染依赖它的入口。
+ */
+export function resolveNativeWebRemoteControlVisible(
+  platform: Pick<IPlatformService, "openCuaPermissionOnboarding"> | null | undefined,
+): boolean {
+  return typeof platform?.openCuaPermissionOnboarding === "function";
 }
 
 export type RelayStateLabelId =

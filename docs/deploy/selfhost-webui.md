@@ -147,6 +147,13 @@ ZCODE_ENV=production ZCODE_PRIVATE_DEPLOYMENT=1 pnpm --filter @zcode/web build
 `https`、非 `localhost`/`127.0.0.1`）访问时才需要它；用 HTTPS 或本机 localhost 访问时
 不必设置，走原生 WebCrypto。详见 `docs/specs/selfhost-private-deployment-digest-fallback.md`。
 
+> **警告：重建 Web 产物时漏掉 `ZCODE_PRIVATE_DEPLOYMENT=1` 会静默破坏自部署功能。**
+> 该变量是编译期常量，漏加时产物不含兜底分支，且**没有任何构建报错**——表现为能打开页面、
+> 能对话，但发图片必失败（`crypto.subtle is unavailable...`）、复制按钮无反应。
+> 自部署形态下这条命令应当总是带上该变量。验证产物是否含兜底：
+> `grep -c 1779033703 packages/web/dist/assets/*.js` 应大于 0（纯 JS SHA-256 的初始
+> 哈希 h0；用函数名 grep 会因 minify 改名而漏检）。
+
 同机部署可由Host服务`ZCODE_WEB_STATIC_ROOT`提供静态资源（纯本地部署即此形态，无需外层反代）。分离部署可将静态产物同步到edge-proxy的专用目录：
 
 ```bash

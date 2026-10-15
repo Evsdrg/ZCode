@@ -31,7 +31,10 @@ import { useOptionalServices } from "@/hooks/useServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 import { getBotProviderRegionTagLabelId } from "@/botsUi.js";
-import { resolveRelaySectionVisible } from "@/webRemoteControlRelayUi.js";
+import {
+  resolveNativeWebRemoteControlVisible,
+  resolveRelaySectionVisible,
+} from "@/webRemoteControlRelayUi.js";
 import { WebRemoteControlRelaySection } from "@/WebRemoteControlRelaySection.js";
 
 type RemoteControlBotProvider = Extract<BotProvider, "weixin" | "feishu" | "lark" | "telegram">;
@@ -271,6 +274,9 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
   const { intl } = useZCodeIntl();
   // 自部署 server 注册 relay 服务后才显示配对卡片；桌面/未注册时保持上游布局。
   const relaySectionVisible = resolveRelaySectionVisible(webRemoteControlRelayService);
+  // 原生「手机扫码连接」卡片只有桌面端能发起；Web 平台该方法是永远拒绝的桩，
+  // 自部署浏览器里不渲染它，也不发起启动（否则开屏就弹 startFailed）。
+  const nativeWebRemoteControlVisible = resolveNativeWebRemoteControlVisible(platform);
   const [status, setStatus] = useState<WebRemoteControlStatus>({
     status: "idle",
   });
@@ -298,7 +304,9 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
   const statusDotClassName = getStatusDotClassName(status);
 
   useEffect(() => {
-    if (!open) {
+    // 原生远控只能由桌面端发起；非桌面形态直接跳过，不要触发必然失败的启动
+    // （Web 平台的 startWebRemoteControl 是拒绝桩，会弹 startFailed 并写入 error 状态）。
+    if (!open || !nativeWebRemoteControlVisible) {
       return;
     }
 
@@ -628,9 +636,9 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
               data-testid="web-remote-control-main-grid"
               className={cn(
                 "mt-5 grid gap-4",
-                // 自部署 server 注册 relay 服务时多出一张配对卡片，用三列容纳；
-                // 桌面/未注册时保持上游的两列布局。
-                relaySectionVisible
+                // 三列只在「中转卡片 + 原生扫码卡片」同时可见时使用（自部署桌面双开）；
+                // 其余组合都是两张卡片，保持上游的两列布局。
+                relaySectionVisible && nativeWebRemoteControlVisible
                   ? "md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(300px,1fr)]"
                   : "md:grid-cols-[minmax(0,1.45fr)_minmax(300px,1fr)]",
               )}
@@ -638,126 +646,129 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
               {relaySectionVisible ? (
                 <WebRemoteControlRelaySection service={webRemoteControlRelayService} />
               ) : null}
-              <section
-                data-testid="web-remote-control-scan-card"
-                className="flex min-h-[360px] flex-col rounded-xl border border-border bg-card p-4"
-              >
-                <div className="mb-4 flex items-start gap-2">
-                  <Smartphone className="mt-0.5 size-4 shrink-0 text-foreground-subtle" />
-                  <div className="min-w-0 space-y-1">
-                    <div className="text-ui-base font-medium text-foreground">
-                      {intl.formatMessage({
-                        id: "webRemoteControl.mobileQr.title",
-                      })}
-                    </div>
-                    <p className="text-ui-base/relaxed text-foreground-subtle">
-                      {intl.formatMessage({
-                        id: "webRemoteControl.mobileQr.description",
-                      })}
-                    </p>
-                  </div>
-                </div>
-                <div
-                  data-testid="web-remote-control-connection-card"
-                  className="mb-3 rounded-lg bg-surface px-3 py-2"
+              {nativeWebRemoteControlVisible ? (
+                <section
+                  data-testid="web-remote-control-scan-card"
+                  className="flex min-h-[360px] flex-col rounded-xl border border-border bg-card p-4"
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <div className="text-ui-base font-medium text-foreground">
-                          {statusLabel}
-                        </div>
-                        <div className="flex min-w-0 items-center gap-1.5 rounded-full bg-card px-2 py-0.5 text-ui-xs font-medium text-foreground-subtle">
-                          <span
-                            className={`size-1.5 shrink-0 rounded-full ${statusDotClassName}`}
-                          />
-                          <span className="truncate">{statusTagLabel}</span>
-                        </div>
+                  <div className="mb-4 flex items-start gap-2">
+                    <Smartphone className="mt-0.5 size-4 shrink-0 text-foreground-subtle" />
+                    <div className="min-w-0 space-y-1">
+                      <div className="text-ui-base font-medium text-foreground">
+                        {intl.formatMessage({
+                          id: "webRemoteControl.mobileQr.title",
+                        })}
                       </div>
-                      <div className="text-ui-base/relaxed text-foreground-subtle">
-                        {statusDetail}
-                      </div>
+                      <p className="text-ui-base/relaxed text-foreground-subtle">
+                        {intl.formatMessage({
+                          id: "webRemoteControl.mobileQr.description",
+                        })}
+                      </p>
                     </div>
-                    {loading ? (
-                      <LoaderCircle className="size-4 animate-spin text-foreground-subtle" />
-                    ) : (
+                  </div>
+                  <div
+                    data-testid="web-remote-control-connection-card"
+                    className="mb-3 rounded-lg bg-surface px-3 py-2"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <div className="text-ui-base font-medium text-foreground">
+                            {statusLabel}
+                          </div>
+                          <div className="flex min-w-0 items-center gap-1.5 rounded-full bg-card px-2 py-0.5 text-ui-xs font-medium text-foreground-subtle">
+                            <span
+                              className={`size-1.5 shrink-0 rounded-full ${statusDotClassName}`}
+                            />
+                            <span className="truncate">{statusTagLabel}</span>
+                          </div>
+                        </div>
+                        <div className="text-ui-base/relaxed text-foreground-subtle">
+                          {statusDetail}
+                        </div>
+                      </div>
+                      {loading ? (
+                        <LoaderCircle className="size-4 animate-spin text-foreground-subtle" />
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="default"
+                          className="shrink-0 gap-2 enabled:cursor-pointer"
+                          onClick={() => void handleStop()}
+                          disabled={status.status === "idle"}
+                        >
+                          <Unplug className="size-3.5" />
+                          {intl.formatMessage({ id: "webRemoteControl.stop" })}
+                        </Button>
+                      )}
+                    </div>
+                    {failureDescription ? (
+                      <div className="mt-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-ui-base/relaxed text-destructive">
+                        <p>{failureDescription}</p>
+                        {status.failure?.message &&
+                        status.failure.message !== failureDescription ? (
+                          <p className="mt-1 text-ui-xs/relaxed opacity-80">
+                            {status.failure.message}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : status.error ? (
+                      <p className="mt-3 text-ui-base/relaxed text-destructive">{status.error}</p>
+                    ) : null}
+                    <div
+                      data-testid="web-remote-control-copy-link-row"
+                      className="mt-3 flex min-h-10 flex-wrap items-center gap-3 border-t border-border pt-3"
+                    >
+                      <div className="min-w-48 flex-1 text-ui-base/relaxed text-foreground-subtle">
+                        {intl.formatMessage({
+                          id: "webRemoteControl.copyLink.description",
+                        })}
+                      </div>
                       <Button
                         type="button"
                         variant="outline"
                         size="default"
                         className="shrink-0 gap-2 enabled:cursor-pointer"
-                        onClick={() => void handleStop()}
-                        disabled={status.status === "idle"}
+                        onClick={() => void handleRefreshQr()}
+                        disabled={loading}
                       >
-                        <Unplug className="size-3.5" />
-                        {intl.formatMessage({ id: "webRemoteControl.stop" })}
+                        <RefreshCw className="size-3.5" />
+                        {intl.formatMessage({ id: "webRemoteControl.refreshQr" })}
                       </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="default"
+                        className="shrink-0 gap-2 enabled:cursor-pointer"
+                        onClick={() => void handleCopyLink()}
+                        disabled={!status.connectUrl || loading}
+                      >
+                        <CopyIcon className="size-3.5" />
+                        {intl.formatMessage({ id: "webRemoteControl.copyLink" })}
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-dashed border-border bg-background-alt p-4">
+                    {qrDataUrl ? (
+                      <img
+                        src={qrDataUrl}
+                        alt={intl.formatMessage({ id: "webRemoteControl.qrAlt" })}
+                        className="size-64 max-w-full rounded-lg bg-white p-3"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center gap-3 text-center text-ui-base text-foreground-subtle">
+                        <LoaderCircle className="size-5 animate-spin" />
+                        <span>
+                          {intl.formatMessage({
+                            id: "webRemoteControl.generating",
+                          })}
+                        </span>
+                      </div>
                     )}
                   </div>
-                  {failureDescription ? (
-                    <div className="mt-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-ui-base/relaxed text-destructive">
-                      <p>{failureDescription}</p>
-                      {status.failure?.message && status.failure.message !== failureDescription ? (
-                        <p className="mt-1 text-ui-xs/relaxed opacity-80">
-                          {status.failure.message}
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : status.error ? (
-                    <p className="mt-3 text-ui-base/relaxed text-destructive">{status.error}</p>
-                  ) : null}
-                  <div
-                    data-testid="web-remote-control-copy-link-row"
-                    className="mt-3 flex min-h-10 flex-wrap items-center gap-3 border-t border-border pt-3"
-                  >
-                    <div className="min-w-48 flex-1 text-ui-base/relaxed text-foreground-subtle">
-                      {intl.formatMessage({
-                        id: "webRemoteControl.copyLink.description",
-                      })}
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="default"
-                      className="shrink-0 gap-2 enabled:cursor-pointer"
-                      onClick={() => void handleRefreshQr()}
-                      disabled={loading}
-                    >
-                      <RefreshCw className="size-3.5" />
-                      {intl.formatMessage({ id: "webRemoteControl.refreshQr" })}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="default"
-                      className="shrink-0 gap-2 enabled:cursor-pointer"
-                      onClick={() => void handleCopyLink()}
-                      disabled={!status.connectUrl || loading}
-                    >
-                      <CopyIcon className="size-3.5" />
-                      {intl.formatMessage({ id: "webRemoteControl.copyLink" })}
-                    </Button>
-                  </div>
-                </div>
-                <div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-dashed border-border bg-background-alt p-4">
-                  {qrDataUrl ? (
-                    <img
-                      src={qrDataUrl}
-                      alt={intl.formatMessage({ id: "webRemoteControl.qrAlt" })}
-                      className="size-64 max-w-full rounded-lg bg-white p-3"
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center gap-3 text-center text-ui-base text-foreground-subtle">
-                      <LoaderCircle className="size-5 animate-spin" />
-                      <span>
-                        {intl.formatMessage({
-                          id: "webRemoteControl.generating",
-                        })}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </section>
+                </section>
+              ) : null}
 
               <section className="flex min-h-[360px] flex-col rounded-xl border border-border bg-card p-4">
                 <div className="mb-4 flex items-start gap-2">

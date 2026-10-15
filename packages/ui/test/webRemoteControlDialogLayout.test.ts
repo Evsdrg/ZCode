@@ -48,11 +48,15 @@ vi.mock("@/BotsDialog.js", () => ({
   BotsDialog: () => createElement("div", { "data-testid": "bots-dialog" }),
 }));
 
+// 桌面形态：openCuaPermissionOnboarding 只有桌面 preload 才注入，原生「手机扫码连接」
+// 卡片按这个能力判定可见性（见 webRemoteControlRelayUi.resolveNativeWebRemoteControlVisible）。
+// 下面这些用例描述的都是桌面行为，因此 mock 必须带上该能力。
 const platformMock = vi.hoisted(() => ({
   getWebRemoteControlStatus: vi.fn(async () => ({ status: "idle" })),
   startWebRemoteControl: vi.fn(async () => ({ status: "running" })),
   refreshWebRemoteControlPairing: vi.fn(async () => ({ status: "running" })),
   stopWebRemoteControl: vi.fn(async () => {}),
+  openCuaPermissionOnboarding: vi.fn(async () => ({ success: true })),
 }));
 
 vi.mock("@/hooks/usePlatform.js", () => ({

@@ -44,6 +44,23 @@ spawn 本机 `node server/entry-http.js` → `createLocalServices()` → `create
 远控入口属于闭源侧实现。因此本分支不为远控新增或调整任何门控：
 不为一个不存在于本版本的入口写死代码，避免开源侧凭空多出一层无法验证的行为。
 
+### 后续修正（上游 3.15.1 合并后，官方中转远控）
+
+本 fork 已基于**官方中转**实现自部署手机远控：自部署 server 注册
+`webRemoteControlRelayService`，对话框多出一张「官方中转远程控制」配对卡片，
+连接事实的所有者是服务端 relay service，UI 只轮询 `getStatus` 做投影。
+
+合并上游 3.15.1 后需再收敛一处：上游给 `WebRemoteControlDialog` 新增了原生
+「手机扫码连接」卡片，它走 `platform.startWebRemoteControl`，而该方法只有 Electron
+桌面端能真正发起——Web 平台的实现是永远拒绝的桩。自部署浏览器里开屏必弹
+「Web remote control can only be started from desktop」，且这张卡与官方中转卡片功能重复
+（都是二维码 + 复制链接）。
+
+因此按平台能力门控原生卡片：判据用 `IPlatformService` 的可选方法
+`openCuaPermissionOnboarding`（只有桌面 preload 注入，Web 平台没有该属性），
+与 `lib/cuaPlatform.ts` 的「UA + capability」双判同一模式。非桌面形态不渲染该卡片，
+也不发起启动；对话框列数随之从三列退回两列。桌面形态行为不变。
+
 ## 状态所有者
 
 - **入口可见性的唯一所有者**：各组件自己的 `isDesktop` prop 链（`Root` → `WorkspaceSidebar` → `WorkspaceSidebarFooter`）。本次不引入新的平台探测，也不新增全局状态；门控条件只在消费者本地收窄或放开。

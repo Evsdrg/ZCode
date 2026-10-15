@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WebRemoteControlRelayStatus } from "@zcode/services";
 import {
+  resolveNativeWebRemoteControlVisible,
   resolveRelayPrimaryAction,
   resolveRelaySectionVisible,
   resolveRelayTriggerIconClass,
@@ -75,5 +76,24 @@ describe("webRemoteControlRelayUi 侧栏入口图标", () => {
   it("开启中为 amber，未开启为默认色", () => {
     expect(resolveRelayTriggerIconClass(true)).toBe("text-amber-500");
     expect(resolveRelayTriggerIconClass(false)).toBe("text-foreground-subtle");
+  });
+});
+
+describe("webRemoteControlRelayUi 原生远控卡片可见性", () => {
+  // 上游 3.15.1 给对话框加了「手机扫码连接」卡片，它走 startWebRemoteControl，
+  // 只有桌面端能发起。自部署浏览器里该方法是拒绝桩，开屏必报 startFailed，
+  // 且与官方中转卡片功能重复，因此按平台能力隐藏。
+  it("桌面 preload 注入了授权能力时可见", () => {
+    expect(
+      resolveNativeWebRemoteControlVisible({
+        openCuaPermissionOnboarding: async () => ({ success: true }),
+      }),
+    ).toBe(true);
+  });
+
+  it("Web 平台没有该能力时隐藏（含 undefined / null 平台）", () => {
+    expect(resolveNativeWebRemoteControlVisible({})).toBe(false);
+    expect(resolveNativeWebRemoteControlVisible(undefined)).toBe(false);
+    expect(resolveNativeWebRemoteControlVisible(null)).toBe(false);
   });
 });
