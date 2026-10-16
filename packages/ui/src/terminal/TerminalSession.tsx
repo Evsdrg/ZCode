@@ -9,6 +9,7 @@ import type { IServiceAccessor } from "@zcode/services";
 import type { IDisposable } from "@zcode/rpc";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { writeClipboardText } from "@/lib/clipboard.js";
+import { canReadClipboard, readClipboardText } from "@/lib/clipboardRead.js";
 import { logger } from "@/logger.js";
 import {
   ContextMenu,
@@ -460,17 +461,25 @@ export function TerminalSession({
           // 不会取消浏览器随后派发的原生 paste 事件；这里手动 paste 一次后，
           // 原生 paste 又会被 xterm 的内置监听写入一次，导致快捷键粘贴重复。
           // 因此必须先取消默认事件，再保留手动读取剪贴板的单次写入。
+          //
+          // 修复：仅当异步读取真的可用（安全上下文）时才走这条拦截路径。
+          // 私有部署的 WebUI 以 HTTP 访问非 localhost 地址时 `navigator.clipboard` 为
+          // undefined，原代码会在这里 preventDefault 把原生 paste 也堵死、再调用
+          // undefined.readText() 抛错，结果是「完全粘不进去」。此时不能拦截，交给
+          // xterm 的原生 paste 监听（读 DOM `clipboardData`，同步 API，非安全上下文可用）。
           // 与原路径（下侧 terminal）字节对齐：两份拷贝曾在此漂移（persistentKey 漏了 debug 日志），
           // 待后续重构收敛为单一 wireTerminalProcessing 后此注释删除。
+          if (!canReadClipboard()) {
+            return false;
+          }
           e.preventDefault();
           e.stopPropagation();
-          navigator.clipboard
-            .readText()
-            .then((text) => {
+          void readClipboardText().then((text) => {
+            if (text) {
               logger.debug("[Terminal] paste via shortcut", { length: text.length });
-              if (text) term.paste(text);
-            })
-            .catch((err) => logger.warn("[Terminal] paste via shortcut failed:", err));
+              term.paste(text);
+            }
+          });
           return false;
         }
         return true;
@@ -831,15 +840,20 @@ export function TerminalSession({
         // 不会取消浏览器随后派发的原生 paste 事件；这里手动 paste 一次后，
         // 原生 paste 又会被 xterm 的内置监听写入一次，导致快捷键粘贴重复。
         // 因此必须先取消默认事件，再保留手动读取剪贴板的单次写入。
+        //
+        // 修复同上方 handler：`navigator.clipboard` 在非安全上下文为 undefined，
+        // 拦截会连原生 paste 一起堵死。不可用时直接放行，交给 xterm 的原生监听。
+        if (!canReadClipboard()) {
+          return false;
+        }
         e.preventDefault();
         e.stopPropagation();
-        navigator.clipboard
-          .readText()
-          .then((text) => {
+        void readClipboardText().then((text) => {
+          if (text) {
             logger.debug("[Terminal] paste via shortcut", { length: text.length });
-            if (text) term.paste(text);
-          })
-          .catch((err) => logger.warn("[Terminal] paste via shortcut failed:", err));
+            term.paste(text);
+          }
+        });
         return false;
       }
       return true;
@@ -1096,10 +1110,16 @@ export function TerminalSession({
   const handlePaste = () => {
     const term = termRef.current;
     if (!term) return;
-    navigator.clipboard
-      .readText()
-      .then((text) => text && term.paste(text))
-      .catch((err) => logger.warn("[Terminal] paste via context menu failed:", err));
+    if (!canReadClipboard()) {
+      // 非安全上下文下浏览器不提供任何脚本读取剪贴板的途径（execCommand("paste")
+      // 被刻意禁用，无法绕过），因此上下文菜单的「粘贴」在此环境不可用。
+      // 键盘 Ctrl+V 仍可用——那条路径靠原生 paste 事件同步取 clipboardData。
+      logger.debug("[Terminal] paste via context menu unavailable (non-secure context)");
+      return;
+    }
+    void readClipboardText().then((text) => {
+      if (text) term.paste(text);
+    });
   };
 
   return (
