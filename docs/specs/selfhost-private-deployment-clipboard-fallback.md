@@ -27,8 +27,41 @@
 - 有 `navigator.clipboard` 时始终优先用它；`execCommand` 只是兜底。
 - 门控关闭且 `navigator.clipboard` 缺失时，保持现状语义：调用方原有的存在性检查/失败处理不变，
   不抛新异常。
-- 只覆盖**写入文本**（`writeText`）。当前 25 个文件只用到 `writeText`，没有 `readText`；
-  读剪贴板不在本次范围。
+- 写入覆盖**纯文本**（`writeText`）；调用方 25 个文件改为调用统一入口。
+
+## 读取（`readText`）：无法降级，但可用原生路径
+
+**读取没有 `execCommand` 等价降级**——浏览器刻意禁止脚本用 `execCommand("paste")` 读系统剪贴板，
+无法绕过。但 `navigator.clipboard.readText` 不可用**不等于粘贴不可用**：`paste` 事件上的
+`clipboardData` 是同步 API，非安全上下文下**照常可用**。
+
+实测（`http://10.126.126.42:3030`）：`isSecureContext=false`、`typeof navigator.clipboard === "undefined"`，
+而构造的 `ClipboardEvent` 上 `clipboardData.getData("text/plain")` 能正常读到内容。
+
+终端粘贴（`packages/ui/src/terminal/TerminalSession.tsx`）**曾因此完全失效**，根因是它自己
+把可用的路径堵死了：
+
+```text
+Ctrl+V keydown → preventDefault() + stopPropagation()   ← 杀掉浏览器原生 paste
+              → navigator.clipboard.readText()          ← undefined，抛 TypeError
+```
+
+两个 Ctrl+V handler 之所以 `preventDefault`，是为了避免「手动 paste 一次 + 原生 paste 一次」
+重复写入；但该设计以 `navigator.clipboard` 可用为前提，在私有部署下前提不成立，结果是两头落空。
+
+修复（`packages/ui/src/lib/clipboardRead.ts`）：
+
+- `canReadClipboard()` / `readClipboardText()`：存在性检查 + 失败返回 `null`，不用 `undefined.readText()` 抛错。
+- 两个 Ctrl+V handler 改为**仅当 `canReadClipboard()` 为真时才 `preventDefault` 并手动 paste**；
+  否则直接放行，由 xterm 自己的原生 `paste` 监听（读 `clipboardData`）处理。
+- 上下文菜单的「粘贴」明确降级为不可用（记 debug 日志）——它没有键盘事件可放行，
+  而浏览器不提供任何脚本读取途径。键盘 Ctrl+V 仍可用。
+
+验收：在真实浏览器终端里派发带 `clipboardData` 的 `paste` 事件 → 文本进入命令行，
+且 `defaultPrevented=false`（证明未被拦截）。
+
+**读取路径上的平台边界**：`execCommand("copy")` 受 sticky activation 约束（页面须被交互过），
+而原生 paste 路径由用户的 Ctrl+V 手势天然满足该约束。
 
 ## 所有者与接口
 
