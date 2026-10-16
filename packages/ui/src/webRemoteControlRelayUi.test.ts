@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WebRemoteControlRelayStatus } from "@zcode/services";
 import {
-  resolveNativeWebRemoteControlVisible,
+  resolveWebRemoteControlAvailable,
   resolveRelayPrimaryAction,
   resolveRelaySectionVisible,
   resolveRelayTriggerIconClass,
@@ -79,21 +79,32 @@ describe("webRemoteControlRelayUi 侧栏入口图标", () => {
   });
 });
 
-describe("webRemoteControlRelayUi 原生远控卡片可见性", () => {
-  // 上游 3.15.1 给对话框加了「手机扫码连接」卡片，它走 startWebRemoteControl，
-  // 只有桌面端能发起。自部署浏览器里该方法是拒绝桩，开屏必报 startFailed，
-  // 且与官方中转卡片功能重复，因此按平台能力隐藏。
-  it("桌面 preload 注入了授权能力时可见", () => {
+describe("webRemoteControlRelayUi 官方卡片可用性", () => {
+  // 「手机扫码连接」卡片走官方四个 platform 方法。桌面端由 Electron preload 提供原生链路；
+  // 自部署端由 server 注册的 relay 服务投影进这四个方法（同一 zcode.z.ai 中转）。
+  it("桌面 preload 注入了原生链路能力时可用", () => {
     expect(
-      resolveNativeWebRemoteControlVisible({
-        openCuaPermissionOnboarding: async () => ({ success: true }),
+      resolveWebRemoteControlAvailable({
+        platform: { openCuaPermissionOnboarding: async () => ({ success: true }) },
+        relayService: undefined,
       }),
     ).toBe(true);
   });
 
-  it("Web 平台没有该能力时隐藏（含 undefined / null 平台）", () => {
-    expect(resolveNativeWebRemoteControlVisible({})).toBe(false);
-    expect(resolveNativeWebRemoteControlVisible(undefined)).toBe(false);
-    expect(resolveNativeWebRemoteControlVisible(null)).toBe(false);
+  it("自部署注册了 relay 服务时可用（无需桌面能力）", () => {
+    expect(
+      resolveWebRemoteControlAvailable({
+        platform: {},
+        relayService: {} as never,
+      }),
+    ).toBe(true);
+  });
+
+  it("两者都不存在时不可用（避免必然失败的启动）", () => {
+    expect(resolveWebRemoteControlAvailable({ platform: {}, relayService: undefined })).toBe(false);
+    expect(resolveWebRemoteControlAvailable({ platform: undefined, relayService: null })).toBe(
+      false,
+    );
+    expect(resolveWebRemoteControlAvailable({ platform: null, relayService: null })).toBe(false);
   });
 });

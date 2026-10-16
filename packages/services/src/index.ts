@@ -369,3 +369,12 @@ export { createHighspeedMockTransport } from "./highspeed/highspeedMockTransport
 
 export { IGenUiService } from "./gen-ui/contract.js";
 export type { GenUiPrepareParams } from "./gen-ui/contract.js";
+
+// 官方中转远控的状态投影：自部署 WebUI 用它把 relay 服务投影成官方 dialog 的
+// WebRemoteControlStatus 契约（packages/web 经 @zcode/ui 转出消费）。
+export {
+  mapRelayStateToStatusKind,
+  projectRelayStatusToWebRemoteControlStatus,
+  type RelayStatusProjectionInput,
+  type RelayStatusSource,
+} from "./web-remote-control/relayStatusProjection.js";

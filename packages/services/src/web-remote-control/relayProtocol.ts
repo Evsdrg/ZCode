@@ -41,16 +41,6 @@ export function createRelayDeviceCredential(): RelayDeviceCredential {
   return { deviceMid: randomUUID(), passHash: createRelayPassHash(createRelayPassword()) };
 }
 
-/** 挑战证明：HMAC-SHA256(passHash)(`${nonce}|${role}|${sid}`)，base64url。 */
-export function calculateRelayProof(
-  passHash: string,
-  nonce: string,
-  role: "device" | "terminal",
-  sid: string,
-): string {
-  return createHmac("sha256", passHash).update(`${nonce}|${role}|${sid}`).digest("base64url");
-}
-
 export function buildRelayPairingQrUrl(options: {
   baseUrl?: string;
   deviceSid: string;

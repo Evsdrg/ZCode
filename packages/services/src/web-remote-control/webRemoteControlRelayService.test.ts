@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ServiceCollection } from "../collection.js";
 import type { ICredentialService } from "../credential/credential.js";
-import type { RelayWebSocketLike } from "./relayDeviceTransport.js";
+import type { WebRemoteControlRelaySocketLike } from "./relayDeviceTransportV2.js";
 import { createWebRemoteControlRelayService } from "./webRemoteControlRelayService.js";
 
 /**
@@ -25,7 +25,7 @@ function createMemoryCredentialService(): ICredentialService & { store: Map<stri
   };
 }
 
-class FakeRelaySocket implements RelayWebSocketLike {
+class FakeRelaySocket implements WebRemoteControlRelaySocketLike {
   readyState = 0;
   OPEN = 1;
   sent: string[] = [];
@@ -125,15 +125,18 @@ describe("webRemoteControlRelayService 状态机", () => {
     expect(persisted.credential.deviceSid).toBe("d_sid_1");
   });
 
-  it("matched 进入 paired；回到 waiting 自动卸载数据面桥", async () => {
+  it("matched 进入 paired；waiting 抖动先进入怀疑态而非立即降级", async () => {
     const h = createHarness();
     await h.service.setEnabled(true);
     const socket = h.sockets[0]!;
     driveToWaiting(socket);
     socket.emit("message", JSON.stringify({ type: "pair_status_ack", pair_status: "matched" }));
     expect(await h.service.getStatus()).toMatchObject({ state: "paired" });
+    // transport 用下沉自官方的实现：已配对后首次收到 waiting 不立刻降级，而是进入
+    // 「stale waiting 怀疑态」（sendPayload 暂停业务发送）并挂 15s 恢复计时，
+    // 避免 relay 单次抖动被放大成手机断线。见 relayDeviceTransportV2.applyPairStatus。
     socket.emit("message", JSON.stringify({ type: "pair_status_ack", pair_status: "waiting" }));
-    expect(await h.service.getStatus()).toMatchObject({ state: "waiting" });
+    expect(await h.service.getStatus()).toMatchObject({ state: "paired" });
   });
 
   it("重复 setEnabled(true) 幂等：不新建连接", async () => {
@@ -164,6 +167,10 @@ describe("webRemoteControlRelayService 状态机", () => {
     await h.service.setEnabled(true);
     driveToWaiting(h.sockets[0]!);
     h.sockets[0]!.emit("message", JSON.stringify({ type: "error", code: "AUTH_FAILED" }));
+    // transport 用下沉自官方的实现：AUTH_FAILED 后本地清 deviceSid、切 register 模式，
+    // 再经 scheduleReconnect(0) 用 setTimeout 重连（不是同步重建），因此需要多等一轮
+    // 宏任务才能观察到第二个 socket。
+    await h.flush();
     await h.flush();
     const second = h.sockets[1]!;
     expect(second).toBeTruthy();

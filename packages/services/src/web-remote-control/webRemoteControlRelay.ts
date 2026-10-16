@@ -22,6 +22,8 @@ export interface WebRemoteControlRelayPairingInfo {
   /** 官方手机页 URL（含一次性配对参数），前端渲染为二维码。 */
   qrUrl: string;
   deviceName: string;
+  /** relay 注册分配的设备会话 id；官方 status 的 sessionId/windowControlSessionId 同口径。 */
+  deviceSid: string;
 }
 
 export interface IWebRemoteControlRelayService {

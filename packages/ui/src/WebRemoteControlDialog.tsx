@@ -30,10 +30,11 @@ import { usePlatform } from "@/hooks/usePlatform.js";
 import { useOptionalServices } from "@/hooks/useServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
+import { writeClipboardText } from "@/lib/clipboard.js";
 import { getBotProviderRegionTagLabelId } from "@/botsUi.js";
 import {
-  resolveNativeWebRemoteControlVisible,
   resolveRelaySectionVisible,
+  resolveWebRemoteControlAvailable,
 } from "@/webRemoteControlRelayUi.js";
 import { WebRemoteControlRelaySection } from "@/WebRemoteControlRelaySection.js";
 
@@ -274,9 +275,13 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
   const { intl } = useZCodeIntl();
   // 自部署 server 注册 relay 服务后才显示配对卡片；桌面/未注册时保持上游布局。
   const relaySectionVisible = resolveRelaySectionVisible(webRemoteControlRelayService);
-  // 原生「手机扫码连接」卡片只有桌面端能发起；Web 平台该方法是永远拒绝的桩，
-  // 自部署浏览器里不渲染它，也不发起启动（否则开屏就弹 startFailed）。
-  const nativeWebRemoteControlVisible = resolveNativeWebRemoteControlVisible(platform);
+  // 「手机扫码连接」卡片能否发起：桌面走原生链路，自部署走 relay 投影（见
+  // webRemoteControlRelayUi.resolveWebRemoteControlAvailable）。两者都没有时不渲染，
+  // 避免一个必然失败的启动（Web 平台未接 relay 时 start 会 reject）。
+  const webRemoteControlAvailable = resolveWebRemoteControlAvailable({
+    platform,
+    relayService: webRemoteControlRelayService,
+  });
   const [status, setStatus] = useState<WebRemoteControlStatus>({
     status: "idle",
   });
@@ -306,7 +311,7 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
   useEffect(() => {
     // 原生远控只能由桌面端发起；非桌面形态直接跳过，不要触发必然失败的启动
     // （Web 平台的 startWebRemoteControl 是拒绝桩，会弹 startFailed 并写入 error 状态）。
-    if (!open || !nativeWebRemoteControlVisible) {
+    if (!open || !webRemoteControlAvailable) {
       return;
     }
 
@@ -466,7 +471,10 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
     }
 
     try {
-      await navigator.clipboard.writeText(status.connectUrl);
+      // 用统一封装而非 navigator.clipboard：自部署 WebUI 常以 HTTP 访问内网地址，
+      // 那不是安全上下文，navigator.clipboard 为 undefined，直接调用会抛错。
+      // 封装在私有部署构建下回退到 execCommand("copy")。见 lib/clipboard.ts。
+      await writeClipboardText(status.connectUrl);
       toast(intl.formatMessage({ id: "webRemoteControl.copyLink.copied" }));
       logger.info("[WebRemoteControlDialog] 已复制 Web 远程控制链接", {
         workspacePath,
@@ -638,7 +646,7 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
                 "mt-5 grid gap-4",
                 // 三列只在「中转卡片 + 原生扫码卡片」同时可见时使用（自部署桌面双开）；
                 // 其余组合都是两张卡片，保持上游的两列布局。
-                relaySectionVisible && nativeWebRemoteControlVisible
+                relaySectionVisible && webRemoteControlAvailable
                   ? "md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(300px,1fr)]"
                   : "md:grid-cols-[minmax(0,1.45fr)_minmax(300px,1fr)]",
               )}
@@ -646,7 +654,7 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
               {relaySectionVisible ? (
                 <WebRemoteControlRelaySection service={webRemoteControlRelayService} />
               ) : null}
-              {nativeWebRemoteControlVisible ? (
+              {webRemoteControlAvailable ? (
                 <section
                   data-testid="web-remote-control-scan-card"
                   className="flex min-h-[360px] flex-col rounded-xl border border-border bg-card p-4"

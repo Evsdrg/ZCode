@@ -8,8 +8,11 @@ import {
   generateMobileDeviceFingerprint,
   installDocumentHiddenMotionPause,
   playTaskNotificationSound,
+  mapRelayStateToStatusKind,
+  projectRelayStatusToWebRemoteControlStatus,
   setStreamClientId,
   setWebRemoteControlTerminalTransportState,
+  type RelayStatusSource,
   type Theme,
   type WebRemoteControlTerminalTransportState as UiWebRemoteControlTerminalTransportState,
 } from "@zcode/ui";
@@ -23,6 +26,8 @@ import {
 import {
   WEB_REMOTE_CONTROL_WORKSPACE_RECONNECT_TIMEOUT_MS,
   resolveWebRemoteControlRelayWsUrl,
+  type WebRemoteControlContext,
+  type WebRemoteControlStartOperationResult,
 } from "@zcode/shared";
 import { WebCallbackPage } from "./auth/WebCallbackPage.js";
 import { WebLoggedInWaitingPage } from "./auth/WebLoggedInWaitingPage.js";
@@ -611,12 +616,73 @@ async function updateWebRemoteControlMobileViewState(
   }
 }
 
+/**
+ * 把自部署 server 的 relay 服务投影成官方 dialog 期望的 status 契约。
+ *
+ * 官方 dialog 的四个 platform 方法只有 Electron 桌面实现了原生链路；自部署侧用
+ * IWebRemoteControlRelayService 连同一个 zcode.z.ai 中转，字段与枚举名不同，
+ * 故经 projectRelayStatusToWebRemoteControlStatus 做纯投影（映射规则与单测在该模块）。
+ */
+async function buildRelayWebRemoteControlStatus(
+  source: RelayStatusSource,
+  context: WebRemoteControlContext,
+): Promise<WebRemoteControlStatus> {
+  const [relayStatus, pairing] = await Promise.all([source.getStatus(), source.getPairingInfo()]);
+  return projectRelayStatusToWebRemoteControlStatus({
+    relayStatus,
+    pairing,
+    workspacePath: context.workspacePath,
+    ...(context.workspaceIdentity ? { workspaceIdentity: context.workspaceIdentity } : {}),
+    ...(context.remoteSessionId ? { remoteSessionId: context.remoteSessionId } : {}),
+    ...(context.initialTaskId ? { initialTaskId: context.initialTaskId } : {}),
+    ...(pairing?.deviceSid ? { windowControlSessionId: pairing.deviceSid } : {}),
+  });
+}
+
+/**
+ * start / refresh 的返回契约比 status 更严（`status` 只允许 running|connecting|active，
+ * 且 sessionId/qrUrl/connectUrl 必填）。relay 刚开启时可能仍在 connecting，
+ * 此时按官方语义回 `running`（等待手机扫码）并带上二维码。
+ */
+async function buildRelayWebRemoteControlStartResult(
+  source: RelayStatusSource,
+  context: WebRemoteControlContext,
+): Promise<WebRemoteControlStartOperationResult> {
+  const [relayStatus, pairing] = await Promise.all([source.getStatus(), source.getPairingInfo()]);
+  const kind = mapRelayStateToStatusKind(relayStatus.state);
+  // idle/error 不该出现在 start 之后；退回 running 以免把错误态塞进 start 结果。
+  const status = kind === "active" ? "active" : kind === "starting" ? "connecting" : "running";
+  if (!pairing) {
+    throw new Error(
+      relayStatus.errorMessage ?? "Web remote control relay is not ready to pair yet",
+    );
+  }
+  return {
+    status,
+    sessionId: pairing.deviceSid,
+    windowControlSessionId: pairing.deviceSid,
+    qrUrl: pairing.qrUrl,
+    connectUrl: pairing.qrUrl,
+    workspacePath: context.workspacePath,
+    ...(context.workspaceIdentity ? { workspaceIdentity: context.workspaceIdentity } : {}),
+    ...(context.remoteSessionId ? { remoteSessionId: context.remoteSessionId } : {}),
+    ...(context.initialTaskId ? { initialTaskId: context.initialTaskId } : {}),
+  };
+}
+
 function createWebPlatform(options?: {
   webRemoteControlProxy?: WebRemoteControlProxyOptions;
   externalWebRemoteControlProxy?: WebRemoteControlPlatformProxy;
+  /** 自部署 server 注册的官方中转远控服务；未注册（如桌面 host）时为 undefined。 */
+  relayStatusSource?: RelayStatusSource;
 }): IPlatformService {
   const webRemoteControlProxy = options?.webRemoteControlProxy;
   const platformProxy = options?.externalWebRemoteControlProxy;
+  const relayStatusSource = options?.relayStatusSource;
+  // 官方契约里 start/refresh/getStatus 都要回填目标 workspace（对话框靠它判定「同一目标」）。
+  // 桌面端按窗口持有 target；这里按「最后一次 start/refresh 收到的 context」记录，
+  // getStatus 用它投影，语义与桌面按窗口一致（自部署是 server 级单实例）。
+  let webRemoteControlTarget: WebRemoteControlContext | null = null;
   // 跨调用的通知权限请求状态：避免每次任务通知都重复请求权限。
   const webTaskNotificationState = createWebTaskNotificationState();
 
@@ -672,16 +738,50 @@ function createWebPlatform(options?: {
       };
     },
     cancelPendingRemoteConnection: (_requestId?: string) => Promise.resolve(),
-    // Web 端不作为 Web 远程控制的发起端，保留空实现以兼容统一接口。
-    startWebRemoteControl: () =>
-      Promise.reject(new Error("Web remote control can only be started from desktop")),
-    refreshWebRemoteControlPairing: () =>
-      Promise.reject(new Error("Web remote control pairing can only be refreshed from desktop")),
-    stopWebRemoteControl: () => Promise.resolve(),
-    getWebRemoteControlStatus: () =>
-      Promise.resolve<WebRemoteControlStatus>({
-        status: "idle",
-      }),
+    // 原生远控的发起端只有 Electron 桌面（需要 MessagePort sideband 把
+    // AttachServicePort 注入窗口 Host）。自部署 server 侧不具备该能力，因此这四个方法
+    // 不实现原生链路，而是把自部署实际拥有的「官方中转远控」服务
+    // （IWebRemoteControlRelayService，经 relay 连同一个 zcode.z.ai 中转）
+    // 投影成官方 dialog 期望的 WebRemoteControlStatus 契约，让同一张卡片可直接使用。
+    // 未注册 relay 服务时（桌面 host / 未开启）退回 idle，卡片按“不可用”呈现。
+    startWebRemoteControl: async (context) => {
+      const source = relayStatusSource;
+      if (!source) {
+        return Promise.reject(new Error("Web remote control can only be started from desktop"));
+      }
+      // 记下目标 workspace：后续 getStatus 用它回填，保证对话框判定为「同一目标」。
+      webRemoteControlTarget = context;
+      // 与官方一致：start 即开启中转远控。
+      await source.setEnabled(true);
+      return buildRelayWebRemoteControlStartResult(source, context);
+    },
+    refreshWebRemoteControlPairing: async (context) => {
+      const source = relayStatusSource;
+      if (!source) {
+        return Promise.reject(
+          new Error("Web remote control pairing can only be refreshed from desktop"),
+        );
+      }
+      webRemoteControlTarget = context;
+      // 官方“刷新二维码”= 轮换配对材料，等价于 relay 的 resetPairing（重签 deviceSid，
+      // 旧二维码立即失效）。
+      await source.resetPairing();
+      return buildRelayWebRemoteControlStartResult(source, context);
+    },
+    stopWebRemoteControl: async () => {
+      await relayStatusSource?.setEnabled(false);
+    },
+    getWebRemoteControlStatus: async () => {
+      const source = relayStatusSource;
+      if (!source) {
+        return { status: "idle" } satisfies WebRemoteControlStatus;
+      }
+      // 未 start 过时无目标上下文，退回空 workspacePath（对话框会据此触发一次 start）。
+      return buildRelayWebRemoteControlStatus(
+        source,
+        webRemoteControlTarget ?? { workspacePath: "" },
+      );
+    },
     disposeRemoteSession: () => Promise.resolve(),
     isDockerAvailable: () =>
       platformProxy
@@ -2552,7 +2652,11 @@ async function bootstrapWebApp() {
     });
     clientFlowControl.sync();
     window.addEventListener("beforeunload", () => clientFlowControl.dispose(), { once: true });
-    const platform = createWebPlatform();
+    // 自部署 server 注册 relay 服务时，把官方远控卡片接到它（同一 zcode.z.ai 中转）。
+    // 桌面 host 不注册该服务，此时保持原有「只能从桌面发起」的拒绝语义。
+    const platform = createWebPlatform({
+      relayStatusSource: services.webRemoteControlRelayService,
+    });
     document.title = "ZCode - Web + Server";
 
     root.render(

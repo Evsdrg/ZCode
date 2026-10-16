@@ -148,6 +148,12 @@ export type {
 } from "./cua-permission-broker/index.js";
 export { createBotsService } from "./bots/botsService.js";
 export { createWebRemoteControlRelayService } from "./web-remote-control/webRemoteControlRelayService.js";
+export {
+  mapRelayStateToStatusKind,
+  projectRelayStatusToWebRemoteControlStatus,
+  type RelayStatusProjectionInput,
+  type RelayStatusSource,
+} from "./web-remote-control/relayStatusProjection.js";
 export { createFileWatcherService } from "./fileWatcher/fileWatcherService.js";
 export { createOAuthService } from "./oauth/oauthService.js";
 export { createOAuthProviderLogoutHandler } from "./oauth/oauthProviderLogout.js";

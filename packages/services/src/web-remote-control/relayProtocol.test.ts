@@ -1,8 +1,7 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   buildRelayPairingQrUrl,
-  calculateRelayProof,
   computeRelayFrameChecksum,
   createRelayPassHash,
   decodeRelayRpcFrameData,
@@ -12,16 +11,6 @@ import {
 } from "./relayProtocol.js";
 
 describe("relay protocol", () => {
-  it("calculateRelayProof 与官方客户端算法一致（PoC 实测通过的公式）", () => {
-    const passHash = createHash("sha256").update("password").digest("base64");
-    const nonce = "test-nonce";
-    const sid = "test-device-sid";
-    const expected = createHmac("sha256", passHash)
-      .update(`${nonce}|device|${sid}`)
-      .digest("base64url");
-    expect(calculateRelayProof(passHash, nonce, "device", sid)).toBe(expected);
-  });
-
   it("createRelayPassHash 是 sha256 base64", () => {
     expect(createRelayPassHash("abc")).toBe(createHash("sha256").update("abc").digest("base64"));
   });

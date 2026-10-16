@@ -3,7 +3,7 @@ import { WebSocket } from "ws";
 import { ZCODE_VERSION } from "@zcode/shared";
 import { IZCodeTaskService } from "../session/zcodeTaskService.js";
 import { ISettingService } from "../setting/setting.js";
-import type { PersistedWorkspaceSessionEntry } from "@zcode/shared";
+import type { PersistedWorkspaceSessionEntry, WebRemoteControlAppPayload } from "@zcode/shared";
 import { basename } from "node:path";
 import type { ICredentialService } from "../credential/credential.js";
 import { createServiceLogger } from "../logger/serviceLogger.js";
@@ -14,11 +14,14 @@ import {
   resolveRelayWsUrl,
   type RelayDeviceCredential,
 } from "./relayProtocol.js";
+// transport 使用下沉自桌面官方的实现（含其自带测试）：状态机更完整
+// （stale 恢复、重连 jitter、KICKED/INTERNAL 分支），协议面与我们手写版一致。
 import {
-  RelayDeviceTransport,
-  type RelayDeviceTransportState,
-  type RelayWebSocketCtor,
-} from "./relayDeviceTransport.js";
+  WebRemoteControlDeviceTransport,
+  type WebRemoteControlDeviceTransportState,
+  type WebRemoteControlRelaySocketCtor,
+} from "./relayDeviceTransportV2.js";
+import { createNodeWebRemoteControlRelayAuthProvider } from "./relayAuthProvider.js";
 import { createRelayBridgeChannel, type RelayBridgeChannel } from "./relayBridgeChannel.js";
 import {
   projectRelayTaskView,
@@ -58,24 +61,31 @@ export interface CreateWebRemoteControlRelayServiceOptions {
   relayWsUrl?: string;
   deviceName?: string;
   appVersion?: string;
-  webSocketCtor?: RelayWebSocketCtor;
+  webSocketCtor?: WebRemoteControlRelaySocketCtor;
 }
 
 export function createWebRemoteControlRelayService(
   options: CreateWebRemoteControlRelayServiceOptions,
 ): IWebRemoteControlRelayService {
   const logger = createServiceLogger("web-remote-control");
+  // transport 下沉自桌面，其 logger 契约是 (message, ...args)；ServiceLogger 是
+  // (traceId, message, ...args)。这里补一层适配，避免改动官方 transport 的调用点。
+  const transportLogger = {
+    info: (...args: unknown[]) => logger.info(undefined, ...args),
+    warn: (...args: unknown[]) => logger.warn(undefined, ...args),
+    error: (...args: unknown[]) => logger.error(undefined, ...args),
+  };
   const relayWsUrl = options.relayWsUrl ?? resolveRelayWsUrl();
   const deviceName = options.deviceName ?? hostname();
   const appVersion = options.appVersion ?? ZCODE_VERSION;
-  const webSocketCtor: RelayWebSocketCtor =
+  const webSocketCtor: WebRemoteControlRelaySocketCtor =
     options.webSocketCtor ??
     ((url, wsOptions) =>
-      new WebSocket(url, wsOptions) as unknown as ReturnType<RelayWebSocketCtor>);
+      new WebSocket(url, wsOptions) as unknown as ReturnType<WebRemoteControlRelaySocketCtor>);
 
   let persisted: PersistedRelayState | null = null;
   let readyPromise: Promise<void> | null = null;
-  let transport: RelayDeviceTransport | null = null;
+  let transport: WebRemoteControlDeviceTransport | null = null;
   let bridge: RelayBridgeChannel | null = null;
   let runtimeState: WebRemoteControlRelayState = "disabled";
   let errorCode: string | undefined;
@@ -112,7 +122,9 @@ export function createWebRemoteControlRelayService(
     await options.credentialService.save(STATE_STORAGE_KEY, JSON.stringify(next));
   }
 
-  function mapTransportState(state: RelayDeviceTransportState): WebRemoteControlRelayState {
+  function mapTransportState(
+    state: WebRemoteControlDeviceTransportState,
+  ): WebRemoteControlRelayState {
     switch (state) {
       case "waiting_terminal":
         return "waiting";
@@ -215,7 +227,10 @@ export function createWebRemoteControlRelayService(
     if (bridge) return;
     bridge = createRelayBridgeChannel({
       services: options.resolveServices(),
-      sendFrame: (payload) => transport?.sendPayload(payload) ?? false,
+      // 桥的 sendFrame 声明为 unknown（它对消息形状保持通用）；实际发出的都是
+      // WebRemoteControlAppPayload 联合内的控制消息与 rpc-frame，故在此边界收窄。
+      sendFrame: (payload) =>
+        transport?.sendPayload(payload as WebRemoteControlAppPayload) ?? false,
       workspace: resolvePrimaryWorkspace(),
       source: createRelayWorkspaceSource({
         primaryWorkspace: resolvePrimaryWorkspace(),
@@ -242,13 +257,17 @@ export function createWebRemoteControlRelayService(
     unmountBridge();
     authRetryUsed = false;
     applyRuntimeState("connecting");
-    transport = new RelayDeviceTransport({
+    transport = new WebRemoteControlDeviceTransport({
       relayWsUrl,
       deviceMid: credential.deviceMid,
-      credential,
+      // 有 deviceSid 走 persisted 复用旧身份（二维码不变）；否则 register 新注册。
+      auth: credential.deviceSid
+        ? { mode: "persisted", deviceSid: credential.deviceSid, passHash: credential.passHash }
+        : { mode: "register", passHash: credential.passHash },
       meta: { platform: process.platform, version: appVersion, name: deviceName },
-      logger,
-      webSocketCtor,
+      authProvider: createNodeWebRemoteControlRelayAuthProvider(),
+      logger: transportLogger,
+      socketCtor: webSocketCtor,
       onStateChange: (state) => {
         const next = mapTransportState(state);
         // 桥的挂载/卸载是可选功能，异常只降级不冒泡：这里由 socket 事件驱动，
@@ -264,28 +283,45 @@ export function createWebRemoteControlRelayService(
         }
         applyRuntimeState(next);
       },
-      onPayload: (payload) => {
+      onPayload: (payload: WebRemoteControlAppPayload) => {
         if (!bridge) return;
         bridge.routePayload(payload);
       },
+      // transport 会在 onPayload 之前拦下 rpc-frame / rpc-frame-ack（数据面），
+      // 转交同一个桥处理并返回 true 表示已消费；未挂桥时返回 false 让它走丢帧路径。
+      onRawTransportPayload: (payload) => {
+        if (!bridge) return false;
+        bridge.routePayload(payload);
+        return true;
+      },
       onRegisteredAuth: (next) => {
         if (!persisted) return;
-        void persist({ ...persisted, credential: next }).catch((error: unknown) => {
+        void persist({
+          ...persisted,
+          credential: { deviceMid: persisted.credential.deviceMid, ...next },
+        }).catch((error: unknown) => {
           logger.warn(undefined, "[relay] 凭据持久化失败", {
             message: error instanceof Error ? error.message : String(error),
           });
         });
       },
-      onTerminalError: (code, message) => {
-        // 持久 deviceSid 失效（服务器清理等）时丢弃 sid 重注册一次；再失败进入 error 态。
-        if (code === "AUTH_FAILED" && persisted?.credential.deviceSid && !authRetryUsed) {
-          authRetryUsed = true;
-          logger.warn(undefined, "[relay] 持久凭据被拒，丢弃 deviceSid 重新注册");
-          void handleResetCredential();
-          return;
-        }
-        errorCode = code;
-        errorMessage = message;
+      // 持久 deviceSid 失效时 transport 内部已自动转 register 重签并回调；
+      // 这里只负责把本地持久化状态同步成“已丢弃 deviceSid”。
+      onInvalidPersistedAuth: async () => {
+        if (!persisted?.credential.deviceSid) return;
+        authRetryUsed = true;
+        logger.warn(undefined, "[relay] 持久凭据被拒，丢弃 deviceSid 重新注册");
+        await persist({
+          enabled: persisted.enabled,
+          credential: {
+            deviceMid: persisted.credential.deviceMid,
+            passHash: persisted.credential.passHash,
+          },
+        });
+      },
+      onError: (error) => {
+        errorCode = "relay_error";
+        errorMessage = error.message;
         applyRuntimeState("error");
         transport?.dispose();
         transport = null;
@@ -334,6 +370,7 @@ export function createWebRemoteControlRelayService(
           appVersion,
         }),
         deviceName,
+        deviceSid: sid,
       };
     },
 
