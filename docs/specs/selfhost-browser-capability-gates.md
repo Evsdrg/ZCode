@@ -47,19 +47,38 @@ spawn 本机 `node server/entry-http.js` → `createLocalServices()` → `create
 ### 后续修正（上游 3.15.1 合并后，官方中转远控）
 
 本 fork 已基于**官方中转**实现自部署手机远控：自部署 server 注册
-`webRemoteControlRelayService`，对话框多出一张「官方中转远程控制」配对卡片，
-连接事实的所有者是服务端 relay service，UI 只轮询 `getStatus` 做投影。
+`webRemoteControlRelayService`，连接事实的所有者是服务端 relay service。
 
-合并上游 3.15.1 后需再收敛一处：上游给 `WebRemoteControlDialog` 新增了原生
-「手机扫码连接」卡片，它走 `platform.startWebRemoteControl`，而该方法只有 Electron
-桌面端能真正发起——Web 平台的实现是永远拒绝的桩。自部署浏览器里开屏必弹
-「Web remote control can only be started from desktop」，且这张卡与官方中转卡片功能重复
-（都是二维码 + 复制链接）。
+合并上游 3.15.1 后做了两次收敛：
 
-因此按平台能力门控原生卡片：判据用 `IPlatformService` 的可选方法
-`openCuaPermissionOnboarding`（只有桌面 preload 注入，Web 平台没有该属性），
-与 `lib/cuaPlatform.ts` 的「UA + capability」双判同一模式。非桌面形态不渲染该卡片，
-也不发起启动；对话框列数随之从三列退回两列。桌面形态行为不变。
+**第一次（已实施）**：上游给 `WebRemoteControlDialog` 新增了官方「手机扫码连接」卡片，
+它走 `platform.startWebRemoteControl` 等四个方法，而当时只有 Electron 桌面端实现了原生
+链路，Web 平台是永远拒绝的桩——自部署浏览器里开屏必弹
+「Web remote control can only be started from desktop」。先按平台能力门控该卡片
+（避免渲染一个必然失败的入口）。
+
+**第二次（已实施，取代第一次的门控）**：把官方卡片接通，并删除我们那张中转卡片。
+方向是「官方卡片是唯一入口，本 fork 的实现收敛到官方代码」。做法：
+
+- 官方 transport（`webRemoteControlTransport.ts`，791 行）经核实**零 Electron 依赖**
+  （BrowserWindow/webContents/utilityProcess/MessagePort 出现次数均为 0），按仓库既有
+  desktop → services 下沉模式搬入 `@zcode/services`，替换我们手写的 transport
+  （`relayDeviceTransport.ts` 已删除）。官方自带 1354 行测试一并下沉。
+- 自部署侧把 relay 服务投影成官方 dialog 期望的 `WebRemoteControlStatus` 契约
+  （`relayStatusProjection.ts`），`createWebPlatform` 的四个方法不再拒绝而是转发 relay。
+- 因此官方卡片在**桌面与自部署两种形态**都可用，`resolveWebRemoteControlAvailable`
+  的判据是「桌面原生链路 **或** 自部署 relay 服务」，不再需要隐藏。
+- 我方 `WebRemoteControlRelaySection.tsx` 及其状态投影函数、i18n key 已删除；
+  对话框回到上游原布局（扫码卡片 + Bot Channel 卡片两列）。
+- 侧栏入口的橙色状态图标（`useWebRemoteControlRelayActive`）保留：它表达「中转远控已开启」，
+  与卡片是否渲染无关。
+
+两个待办/限制：
+
+- 只做过静态检查与浏览器端实测（配对 URL 合法、能端到端加载桌面工作区、切换工作区时
+  服务端重建 bridgeSessionId）；真机手机未实测。
+- `wss://zcode.z.ai/ws` 与 `/remote/v4` 是官方外部服务，源码不在本仓；官方若收紧第三方
+  设备接入，两种形态会同时失效，属部署层风险。
 
 ## 状态所有者
 

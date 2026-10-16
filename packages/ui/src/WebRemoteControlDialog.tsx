@@ -32,11 +32,7 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 import { writeClipboardText } from "@/lib/clipboard.js";
 import { getBotProviderRegionTagLabelId } from "@/botsUi.js";
-import {
-  resolveRelaySectionVisible,
-  resolveWebRemoteControlAvailable,
-} from "@/webRemoteControlRelayUi.js";
-import { WebRemoteControlRelaySection } from "@/WebRemoteControlRelaySection.js";
+import { resolveWebRemoteControlAvailable } from "@/webRemoteControlRelayUi.js";
 
 type RemoteControlBotProvider = Extract<BotProvider, "weixin" | "feishu" | "lark" | "telegram">;
 
@@ -274,7 +270,6 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
   const webRemoteControlRelayService = useOptionalServices()?.webRemoteControlRelayService;
   const { intl } = useZCodeIntl();
   // 自部署 server 注册 relay 服务后才显示配对卡片；桌面/未注册时保持上游布局。
-  const relaySectionVisible = resolveRelaySectionVisible(webRemoteControlRelayService);
   // 「手机扫码连接」卡片能否发起：桌面走原生链路，自部署走 relay 投影（见
   // webRemoteControlRelayUi.resolveWebRemoteControlAvailable）。两者都没有时不渲染，
   // 避免一个必然失败的启动（Web 平台未接 relay 时 start 会 reject）。
@@ -644,16 +639,10 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
               data-testid="web-remote-control-main-grid"
               className={cn(
                 "mt-5 grid gap-4",
-                // 三列只在「中转卡片 + 原生扫码卡片」同时可见时使用（自部署桌面双开）；
-                // 其余组合都是两张卡片，保持上游的两列布局。
-                relaySectionVisible && webRemoteControlAvailable
-                  ? "md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(300px,1fr)]"
-                  : "md:grid-cols-[minmax(0,1.45fr)_minmax(300px,1fr)]",
+                // 上游原布局：扫码卡片 + Bot Channel 卡片两列。
+                "md:grid-cols-[minmax(0,1.45fr)_minmax(300px,1fr)]",
               )}
             >
-              {relaySectionVisible ? (
-                <WebRemoteControlRelaySection service={webRemoteControlRelayService} />
-              ) : null}
               {webRemoteControlAvailable ? (
                 <section
                   data-testid="web-remote-control-scan-card"

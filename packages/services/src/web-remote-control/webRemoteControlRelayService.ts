@@ -90,7 +90,6 @@ export function createWebRemoteControlRelayService(
   let runtimeState: WebRemoteControlRelayState = "disabled";
   let errorCode: string | undefined;
   let errorMessage: string | undefined;
-  let authRetryUsed = false;
 
   async function ensureReady(): Promise<PersistedRelayState | null> {
     if (!readyPromise) {
@@ -255,7 +254,6 @@ export function createWebRemoteControlRelayService(
   function startTransport(credential: RelayDeviceCredential): void {
     transport?.dispose();
     unmountBridge();
-    authRetryUsed = false;
     applyRuntimeState("connecting");
     transport = new WebRemoteControlDeviceTransport({
       relayWsUrl,
@@ -309,7 +307,6 @@ export function createWebRemoteControlRelayService(
       // 这里只负责把本地持久化状态同步成“已丢弃 deviceSid”。
       onInvalidPersistedAuth: async () => {
         if (!persisted?.credential.deviceSid) return;
-        authRetryUsed = true;
         logger.warn(undefined, "[relay] 持久凭据被拒，丢弃 deviceSid 重新注册");
         await persist({
           enabled: persisted.enabled,

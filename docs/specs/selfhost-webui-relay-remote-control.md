@@ -27,12 +27,17 @@ relay 的设备注册对第三方开放（已实测）：`device_mid`/`passHash`
 
 ## 行为规则
 
-| 能力                 | 自部署浏览器形态     | 说明                                                                              |
-| -------------------- | -------------------- | --------------------------------------------------------------------------------- |
-| 官方中转远控 section | 可见（服务已注册时） | `accessor.webRemoteControlRelayService` 为可选成员，desktop host 不注册则 UI 隐藏 |
-| 开启/关闭            | 用户显式开关         | 默认关闭；开启后持久化，server 重启自动重连                                       |
-| 二维码               | waiting 态展示       | URL 由服务端构造，前端渲染                                                        |
-| 重置配对             | 可用                 | 重新生成 mid/passHash，旧手机立即失效（relay 侧 AUTH_FAILED）                     |
+服务层（relay service）不变；**UI 入口已收敛到官方卡片**：原先自建一张「官方中转远程控制」
+卡片，现已删除，改用上游 3.15.1 的官方「手机扫码连接」卡片——官方 transport 已下沉到
+`@zcode/services`（详见 `selfhost-browser-capability-gates.md` 的「后续修正」）。
+下表描述服务层能力，不再对应独立卡片。
+
+| 能力      | 自部署浏览器形态     | 说明                                                                                                 |
+| --------- | -------------------- | ---------------------------------------------------------------------------------------------------- |
+| UI 入口   | 官方卡片（两种形态） | `createWebPlatform` 把 relay 投影进官方四个 platform 方法；判据见 `resolveWebRemoteControlAvailable` |
+| 开启/关闭 | 用户显式开关         | 默认关闭；开启后持久化，server 重启自动重连                                                          |
+| 二维码    | waiting 态展示       | URL 由服务端构造，经投影回填官方 status 的 qrUrl/connectUrl                                          |
+| 重置配对  | 可用                 | 官方「刷新二维码」映射到 `resetPairing()`，旧手机立即失效（relay 侧 AUTH_FAILED）                    |
 
 ## 状态所有者
 
@@ -129,7 +134,11 @@ clientMode；`IZCodeAgentService` 的 connectionScope role 为 `terminal-client`
 
 ## 验收场景
 
-1. 自部署 WebUI 打开「移动端远程控制」→ 出现「官方中转远程控制」区块（desktop 不出现）。
+以下 1-4 已在浏览器端实测通过（用桌面二维码在浏览器打开配对链接，端到端加载到桌面工作区
+与会话内容；切换工作区时服务端重建 bridgeSessionId）。真机手机未实测。
+
+1. 自部署 WebUI 打开「移动端远程控制」→ 官方「手机扫码连接」卡片在**自部署与桌面两种形态**
+   都可用（`resolveWebRemoteControlAvailable`）；不再有独立的「官方中转远程控制」区块。
 2. 开启 → 状态 waiting → 出现二维码与「复制链接」；手机扫码**或**桌面浏览器打开配对链接
    → 状态 paired。
 3. 控制端页面可加载并与本地 server 交换 RPC 帧（数据面最小验证；如卡在工作区选择，按
