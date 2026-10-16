@@ -106,6 +106,8 @@ export const ServiceChannels = {
   CuaPipSession: "cua-pip-session",
   /** 跨窗口广播 */
   Broadcast: "broadcast",
+  /** 自部署官方中转远程控制（relay device 桥） */
+  WebRemoteControlRelay: "web-remote-control-relay",
   /** ZCode task wrapper 服务 */
   ZCodeTask: "zcode-task",
   /** 窗口 Host 聚合 workspace/task 投影与列表写路由 */

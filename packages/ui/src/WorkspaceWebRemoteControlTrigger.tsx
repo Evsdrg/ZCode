@@ -11,11 +11,13 @@ import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { useResolvedRemoteWorkspaceSessionId } from "@/hooks/useResolvedRemoteWorkspaceSessionId.js";
 import { useOptionalPlatform } from "@/hooks/usePlatform.js";
 import { useWebRemoteControlStatus } from "@/hooks/useWebRemoteControlStatus.js";
+import { useWebRemoteControlRelayActive } from "@/hooks/useWebRemoteControlRelayActive.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 import { reportAppTelemetryEvent } from "@/lib/appTelemetry.js";
 import { WebRemoteControlDialog } from "@/web-remote-control/index.js";
 import { useWebRemoteControlFeatureEnabled } from "@/WebRemoteControlFeatureProvider.js";
+import { resolveRelayTriggerIconClass } from "@/webRemoteControlRelayUi.js";
 
 type FormatMessage = ReturnType<typeof useZCodeIntl>["intl"]["formatMessage"];
 
@@ -140,6 +142,12 @@ function WorkspaceWebRemoteControlTriggerContent({
     remoteControlStatus,
     intl.formatMessage,
   );
+  // 自部署 server 注册 relay 服务后，入口图标用橙色表达「官方中转远控已开启」。
+  // 这是 fork 独有的状态指示；上游的状态色（error/active/starting 等）在桌面形态下仍生效。
+  const relayActive = useWebRemoteControlRelayActive();
+  const triggerIconClassName = relayActive
+    ? resolveRelayTriggerIconClass(true)
+    : triggerPresentation.iconClassName;
 
   return (
     <>
@@ -186,7 +194,7 @@ function WorkspaceWebRemoteControlTriggerContent({
           {/* Bugfix: 触发入口以前只显示固定手机图标，用户无法从桌面端判断手机是否已连上。
               这里复用远控状态轮询结果，用语义色表达连接状态，并把入口名称和状态文案合进同一个 tooltip，
               避免桌面端 footer 外层和按钮内层同时弹出两份提示。 */}
-          <Smartphone className={cn("size-4", triggerPresentation.iconClassName)} />
+          <Smartphone className={cn("size-4", triggerIconClassName)} />
           {compact ? (
             <span className="sr-only">
               {intl.formatMessage({ id: "webRemoteControl.trigger" })}

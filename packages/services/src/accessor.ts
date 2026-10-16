@@ -24,6 +24,7 @@ import type { IZCodeAgentService } from "./zcode-agent/zcodeAgent.js";
 import type { IZCodeSessionService } from "./zcode-session/zcodeSession.js";
 import type { ICuaPermissionService } from "./cua-permission-broker/cuaPermissionService.js";
 import type { IBotsService } from "./bots/bots.js";
+import type { IWebRemoteControlRelayService } from "./web-remote-control/webRemoteControlRelay.js";
 import type { IFileWatcherService } from "./fileWatcher/fileWatcher.js";
 import type { IOAuthService } from "./oauth/oauth.js";
 import type {
@@ -82,6 +83,8 @@ export interface IServiceAccessor {
   readonly cuaPermissionService?: ICuaPermissionService;
   readonly conversationShareService: IConversationShareService;
   readonly botsService: IBotsService;
+  /** 自部署官方中转远控（仅 server 形态注册）；desktop host 不提供，UI 按此隐藏入口。 */
+  readonly webRemoteControlRelayService?: IWebRemoteControlRelayService;
   readonly fileWatcherService: IFileWatcherService;
   readonly oauthService: IOAuthService;
   /** 当前 Environment 的 Provider 配置与设置视图。 */

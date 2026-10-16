@@ -16,6 +16,14 @@ export { Root } from "./Root.js";
 export { UpdateStatusWindowRoot } from "./UpdateStatusWindowRoot.js";
 export type { WebRemoteControlTerminalTransportState } from "./root/types.js";
 export { setWebRemoteControlTerminalTransportState } from "./webRemoteControlTerminalTransportState.js";
+// 自部署 WebUI 需要把 relay 服务投影成官方 dialog 的 status 契约。投影逻辑归属
+// @zcode/services（两侧状态类型都在那里），这里只做转出：packages/web 依赖 ui 而不直接
+// 依赖 services，经此入口消费可避免新增跨包依赖。
+export type { RelayStatusSource } from "@zcode/services";
+export {
+  mapRelayStateToStatusKind,
+  projectRelayStatusToWebRemoteControlStatus,
+} from "@zcode/services";
 export { ConfirmDialogHost } from "./ConfirmDialog.js";
 export { Terminal } from "./Terminal.js";
 export { GitGraphPane } from "./git-graph/GitGraphPane.js";

@@ -18,6 +18,8 @@ export interface WebSocketConnectionCloseEvent {
 interface WebSocketConnectionOptions {
   onClose?: (event: WebSocketConnectionCloseEvent) => void;
   onOpenSocket?: (socket: WebSocket) => void;
+  /** 仅自部署 server 主连接开启：暴露 webRemoteControlRelayService 代理。 */
+  webRemoteControlRelay?: boolean;
 }
 
 function wrapBrowserWebSocket(ws: WebSocket): ISocket {
@@ -94,14 +96,18 @@ export function connectViaWebSocket(
       settled = true;
       options?.onOpenSocket?.(ws);
       const socket = wrapBrowserWebSocket(ws);
-      resolve(connectViaProtocol(new SocketProtocol(socket)));
+      resolve(
+        connectViaProtocol(new SocketProtocol(socket), {
+          webRemoteControlRelay: options?.webRemoteControlRelay,
+        }),
+      );
     });
   });
 }
 
 export function connectViaProtocol(
   protocol: IMessagePassingProtocol,
-  options: { windowProjectDirectory?: boolean } = {},
+  options: { windowProjectDirectory?: boolean; webRemoteControlRelay?: boolean } = {},
 ): IServiceAccessor {
   const client = new ChannelClient(protocol);
   return new RemoteServiceAccess(client, options);
