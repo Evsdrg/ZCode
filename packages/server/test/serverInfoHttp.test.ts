@@ -174,4 +174,64 @@ describe("server info HTTP endpoint", () => {
     const apiFallback = await fetch(`${baseUrl}/api/missing`);
     expect(apiFallback.status).toBe(404);
   });
+
+  it("compresses large static assets when the client accepts compression", async () => {
+    const staticRoot = await mkdtemp(join(tmpdir(), "zcode-lite-static-gzip-"));
+    tempDirs.push(staticRoot);
+    // 超过压缩阈值，内容可压缩。
+    const payload = "console.log('zcode compression probe');\n".repeat(200);
+    await writeFile(join(staticRoot, "bundle.js"), payload, "utf8");
+    await writeFile(join(staticRoot, "small.js"), "1;\n", "utf8");
+
+    const server = createHttpServer(new ServiceCollection(), 0, { staticRoot });
+    servers.push(server);
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const gzipped = await fetch(`${baseUrl}/bundle.js`, {
+      headers: { "accept-encoding": "gzip" },
+    });
+    expect(gzipped.status).toBe(200);
+    expect(gzipped.headers.get("content-encoding")).toBe("gzip");
+    expect(gzipped.headers.get("vary")).toBe("Accept-Encoding");
+    // undici 会按 content-encoding 自动解压，正文必须与原文一致。
+    await expect(gzipped.text()).resolves.toBe(payload);
+
+    const brotli = await fetch(`${baseUrl}/bundle.js`, {
+      headers: { "accept-encoding": "br, gzip" },
+    });
+    expect(brotli.headers.get("content-encoding")).toBe("br");
+    await expect(brotli.text()).resolves.toBe(payload);
+
+    const plain = await fetch(`${baseUrl}/bundle.js`, {
+      headers: { "accept-encoding": "identity" },
+    });
+    expect(plain.headers.get("content-encoding")).toBeNull();
+    await expect(plain.text()).resolves.toBe(payload);
+
+    // 小于阈值的文件即使客户端支持压缩也原样返回。
+    const small = await fetch(`${baseUrl}/small.js`, {
+      headers: { "accept-encoding": "gzip, br" },
+    });
+    expect(small.headers.get("content-encoding")).toBeNull();
+    await expect(small.text()).resolves.toBe("1;\n");
+  });
+
+  it("does not compress binary static assets", async () => {
+    const staticRoot = await mkdtemp(join(tmpdir(), "zcode-lite-static-bin-"));
+    tempDirs.push(staticRoot);
+    // 未压缩但体积超过阈值的二进制内容；.png 不在可压缩列表内。
+    await writeFile(join(staticRoot, "image.png"), Buffer.alloc(4096, 0x89));
+
+    const server = createHttpServer(new ServiceCollection(), 0, { staticRoot });
+    servers.push(server);
+    const address = server.address() as AddressInfo;
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/image.png`, {
+      headers: { "accept-encoding": "gzip, br" },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-encoding")).toBeNull();
+    expect(response.headers.get("content-type")).toBe("image/png");
+  });
 });

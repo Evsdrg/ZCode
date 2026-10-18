@@ -44,6 +44,11 @@ import {
 } from "@zcode/services/node";
 import { createHostCapabilityStore } from "./hostCapability.js";
 import { startWebSocketHeartbeat } from "./webSocketHeartbeat.js";
+import {
+  STATIC_ASSET_COMPRESSION_MIN_BYTES,
+  compressStaticAsset,
+  selectStaticAssetEncoding,
+} from "./staticAssetCompression.js";
 
 function wrapWebSocket(ws: WebSocket): ISocket {
   const onData = new Emitter<VSBuffer>();
@@ -470,11 +475,36 @@ export function createHttpServer(
       if (!filePath) {
         return c.notFound();
       }
-      return c.body(await readFile(filePath), 200, {
-        "Cache-Control": filePath.endsWith("index.html")
-          ? "no-cache"
-          : "public, max-age=31536000, immutable",
-        "Content-Type": staticContentType(filePath),
+      const fileBody = await readFile(filePath);
+      const cacheControl = filePath.endsWith("index.html")
+        ? "no-cache"
+        : "public, max-age=31536000, immutable";
+      const contentType = staticContentType(filePath);
+
+      // 自部署 WebUI 首屏以未压缩形式传输 9.47MB（主包 6.42MB）。
+      // Hono 的 c.body 不做内容协商压缩，这里显式选择编码；
+      // 压缩失败时回退原始字节，绝不让静态资源返回 5xx。
+      const encoding = selectStaticAssetEncoding(c.req.header("accept-encoding"), filePath);
+      if (encoding && fileBody.byteLength >= STATIC_ASSET_COMPRESSION_MIN_BYTES) {
+        const fileStat = await stat(filePath);
+        const cacheKey = `${filePath}:${fileStat.mtimeMs}:${fileStat.size}`;
+        try {
+          const compressed = await compressStaticAsset(fileBody, encoding, cacheKey);
+          return c.body(compressed, 200, {
+            "Cache-Control": cacheControl,
+            "Content-Type": contentType,
+            "Content-Encoding": encoding,
+            Vary: "Accept-Encoding",
+          });
+        } catch {
+          // 压缩失败时按未压缩返回，保持可用性优先。
+        }
+      }
+
+      return c.body(fileBody, 200, {
+        "Cache-Control": cacheControl,
+        "Content-Type": contentType,
+        Vary: "Accept-Encoding",
       });
     });
   }
