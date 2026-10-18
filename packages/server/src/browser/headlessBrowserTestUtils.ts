@@ -18,15 +18,36 @@ export function createFakePlaywright() {
     innerText: async () => "文本",
     ariaSnapshot: async () => "- document:",
   };
+  const mouse = {
+    move: vi.fn(async () => {}),
+    down: vi.fn(async () => {}),
+    up: vi.fn(async () => {}),
+    click: vi.fn(async () => {}),
+    wheel: vi.fn(async () => {}),
+  };
+  const keyboard = {
+    type: vi.fn(async () => {}),
+    press: vi.fn(async () => {}),
+    down: vi.fn(async () => {}),
+    up: vi.fn(async () => {}),
+  };
+  const pageListeners = new Map<string, Array<(payload: unknown) => void>>();
   const page = {
     url: () => "http://example.test/",
     title: async () => "Example",
     viewportSize: () => ({ width: 1280, height: 720 }),
-    evaluate: async () => ({ x: 0, y: 0 }),
+    evaluate: vi.fn(async () => ({ x: 0, y: 0 })),
     goto,
     isClosed: () => false,
     close: vi.fn(async () => {}),
     locator: () => locator,
+    mouse,
+    keyboard,
+    on: (event: string, listener: (payload: unknown) => void) => {
+      const list = pageListeners.get(event) ?? [];
+      list.push(listener);
+      pageListeners.set(event, list);
+    },
   };
   const contexts: Array<{ close: ReturnType<typeof vi.fn> }> = [];
   const newContext = vi.fn(async () => {
@@ -59,6 +80,19 @@ export function createFakePlaywright() {
     goto,
     clickSpy,
     contexts,
+    mouse,
+    keyboard,
+    /** 模拟页面弹出 JS 对话框；返回 fake Dialog 供断言。 */
+    emitDialog: (dialog: {
+      type: () => string;
+      message: () => string;
+      defaultValue: () => string;
+      accept: ReturnType<typeof vi.fn>;
+      dismiss: ReturnType<typeof vi.fn>;
+    }) => {
+      for (const listener of pageListeners.get("dialog") ?? []) listener(dialog);
+      return dialog;
+    },
     browser,
     newContext,
     close,

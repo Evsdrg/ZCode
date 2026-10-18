@@ -93,7 +93,7 @@ export async function runElementAction(
   if (target.kind === "point") {
     switch (command.method) {
       case "click":
-        await tab.page.mouse.click(target.x, target.y);
+        await session.runInputAction(tab, (page) => page.mouse.click(target.x, target.y));
         return;
       case "hover":
         await tab.page.mouse.move(target.x, target.y);
@@ -110,11 +110,19 @@ export async function runElementAction(
   const handle = target.handle;
   switch (command.method) {
     case "click":
-      await handle.click({ timeout });
+    case "hover": {
+      // Bug 原因：ElementHandle.click/hover 会等待 actionability，页面弹 JS 对话框时
+      // click 永久挂起（命令层无法先返回再 handleDialog）。对齐 CLI 托管后端：
+      // 解析元素中心坐标后走 mouse API，命令立即返回，对话框由 getDialog/handleDialog 处理。
+      const rect = await handle.boundingBox();
+      if (!rect) throw new Error("Element has no bounding box; take a fresh snapshot");
+      const x = rect.x + rect.width / 2;
+      const y = rect.y + rect.height / 2;
+      if (command.method === "click")
+        await session.runInputAction(tab, (page) => page.mouse.click(x, y));
+      else await tab.page.mouse.move(x, y);
       return;
-    case "hover":
-      await handle.hover({ timeout });
-      return;
+    }
     case "fill":
       await handle.fill((command as { value: string }).value, { timeout });
       return;
@@ -147,6 +155,52 @@ export async function runPageKeyboardAction(
   if (command.method === "type") await tab.page.keyboard.type((command as { text: string }).text);
   else if (command.method === "press")
     await tab.page.keyboard.press((command as { key: string }).key);
+}
+
+function normalizedModifier(key: string): string {
+  if (key === "ControlOrMeta") return process.platform === "darwin" ? "Meta" : "Control";
+  return key;
+}
+
+/** cuaKeypress：keys 是一组组合键（如 ["Control","a"]），末位是主键，其余是修饰键。 */
+export async function runCuaKeypress(page: Page, keys: readonly string[]): Promise<void> {
+  if (keys.length === 0) return;
+  const normalized = keys.map(normalizedModifier);
+  const modifiers = normalized.slice(0, -1);
+  for (const key of modifiers) await page.keyboard.down(key);
+  try {
+    await page.keyboard.press(normalized.at(-1) ?? "");
+  } finally {
+    for (const key of modifiers.reverse()) await page.keyboard.up(key);
+  }
+}
+
+/** cuaScroll：移动到锚点后滚轮。 */
+export async function runCuaScroll(
+  page: Page,
+  anchor: { x: number; y: number },
+  scrollX: number,
+  scrollY: number,
+): Promise<void> {
+  await page.mouse.move(anchor.x, anchor.y);
+  await page.mouse.wheel(scrollX, scrollY);
+}
+
+/** drag 通用体：按下后沿路径逐点移动（steps=4 平滑），finally 保证抬起。 */
+export async function runDragPath(
+  page: Page,
+  path: ReadonlyArray<{ x: number; y: number }>,
+): Promise<void> {
+  if (path.length === 0) throw new Error("Browser drag requires a non-empty path");
+  const [first, ...rest] = path;
+  if (!first) throw new Error("Browser drag requires a non-empty path");
+  await page.mouse.move(first.x, first.y);
+  await page.mouse.down();
+  try {
+    for (const point of rest) await page.mouse.move(point.x, point.y, { steps: 4 });
+  } finally {
+    await page.mouse.up();
+  }
 }
 
 export async function handlePlaywrightAction(

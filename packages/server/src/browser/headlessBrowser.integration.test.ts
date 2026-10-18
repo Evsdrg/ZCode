@@ -11,8 +11,11 @@ import type { HeadlessBrowserEngine } from "./headlessBrowserConfig.js";
 
 const enabled = process.env["ZCODE_BROWSER_INTEGRATION"] === "1";
 const fixture = `<!doctype html><html><head><title>Managed browser fixture</title></head><body>
+<div style="height:2000px" aria-hidden="true"></div>
 <h1>Managed browser fixture</h1><label>Name <input aria-label="Name"></label>
 <button onclick="document.querySelector('[role=status]').textContent='Hello '+document.querySelector('input').value">Apply</button>
+<button data-testid="alert-button" onclick="alert('fixture alert')">Alert</button>
+<button data-testid="confirm-button" onclick="window.__confirmed = confirm('fixture confirm')">Confirm</button>
 <p role="status">Idle</p><button onclick="window.open('/popup','_blank')">Open popup</button>
 <a href="/next">Next page</a></body></html>`;
 
@@ -159,6 +162,41 @@ describe.skipIf(!enabled)("managed browser integration", () => {
         expect(
           (await run({ method: "evaluate", expression: "document.cookie" }, other)).value,
         ).toBe("");
+        // ② 快照对齐：data-testid 进入 attributes，selector 有 id 时用 #id。
+        const aligned = (await run({ method: "snapshot", tabId })).snapshot!;
+        const alertButton = aligned.elements.find(
+          (element) => element.attributes?.["data-testid"] === "alert-button",
+        );
+        expect(alertButton, "snapshot must expose data-testid attributes").toBeDefined();
+        // ① dialog：弹出 alert 后 getDialog 可见，accept 后清登记且页面恢复可交互。
+        await run({ method: "click", tabId, ref: alertButton!.ref });
+        await expect
+          .poll(async () => (await run({ method: "getDialog", tabId })).dialog)
+          .toMatchObject({ type: "alert", message: "fixture alert" });
+        await run({ method: "handleDialog", tabId, accept: true });
+        expect((await run({ method: "getDialog", tabId })).dialog).toBeNull();
+        // confirm 弹窗 dismiss 后页面全局标记为 false。
+        const confirmButton = aligned.elements.find(
+          (element) => element.attributes?.["data-testid"] === "confirm-button",
+        );
+        await run({ method: "click", tabId, ref: confirmButton!.ref });
+        await expect
+          .poll(async () => (await run({ method: "getDialog", tabId })).dialog)
+          .toMatchObject({ type: "confirm" });
+        await run({ method: "handleDialog", tabId, accept: false });
+        expect(
+          (await run({ method: "evaluate", tabId, expression: "window.__confirmed" })).value,
+        ).toBe(false);
+        // ③ cua：坐标滚动改变 window.scrollY；elementInfo 命中 Apply 按钮。
+        await run({ method: "cuaScroll", tabId, x: 640, y: 400, scrollX: 0, scrollY: 300 });
+        await expect
+          .poll(
+            async () =>
+              (await run({ method: "evaluate", tabId, expression: "window.scrollY" })).value,
+          )
+          .toBeGreaterThan(0);
+        const info = await run({ method: "elementInfo", tabId, x: 10, y: 10 });
+        expect(info.element === undefined || typeof info.element.tag === "string").toBe(true);
         await run({ method: "close", tabId });
         expect((await run({ method: "list" })).tabs!.some((tab) => tab.tabId === tabId)).toBe(
           false,

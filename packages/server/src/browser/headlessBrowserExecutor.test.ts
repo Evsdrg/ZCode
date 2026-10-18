@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   browserBackendDescriptorSchema,
   browserCommandResultSchema,
@@ -165,6 +165,99 @@ describe("headlessBrowserExecutor", () => {
     const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
     const result = await executor.execute(cmd({ method: "recordingStart" }));
     expect(result.error?.code).toBe("capability_unsupported");
+    await executor.shutdown();
+  });
+
+  it("getDialog 无弹窗时返回 null，弹出后返回类型与消息", async () => {
+    const fake = createFakePlaywright();
+    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    expect((await executor.execute(cmd({ method: "getDialog" }))).dialog).toBeNull();
+
+    fake.emitDialog({
+      type: () => "confirm",
+      message: () => "继续吗？",
+      defaultValue: () => "",
+      accept: vi.fn(async () => {}),
+      dismiss: vi.fn(async () => {}),
+    });
+    const result = await executor.execute(cmd({ method: "getDialog" }));
+    expect(result.dialog).toEqual({ type: "confirm", message: "继续吗？" });
+    await executor.shutdown();
+  });
+
+  it("handleDialog accept 转发 promptText 并清登记，dismiss 走对应分支", async () => {
+    const fake = createFakePlaywright();
+    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    // 先触发一次命令让 session/context 建立（page.on("dialog") 挂上），再弹窗。
+    expect((await executor.execute(cmd({ method: "getDialog" }))).dialog).toBeNull();
+    const accept = vi.fn(async () => {});
+    fake.emitDialog({
+      type: () => "prompt",
+      message: () => "输入名字",
+      defaultValue: () => "默认",
+      accept,
+      dismiss: vi.fn(async () => {}),
+    });
+    const result = await executor.execute(
+      cmd({ method: "handleDialog", accept: true, promptText: "zcode" }),
+    );
+    expect(result.ok).toBe(true);
+    expect(accept).toHaveBeenCalledWith("zcode");
+    // 处理完成后 getDialog 回到 null，重复 handleDialog 报错而不是卡死。
+    expect((await executor.execute(cmd({ method: "getDialog" }))).dialog).toBeNull();
+    const again = await executor.execute(cmd({ method: "handleDialog", accept: false }));
+    expect(again.ok).toBe(false);
+    await executor.shutdown();
+  });
+
+  it("cuaKeypress 修饰键 down→press→up 顺序执行", async () => {
+    const fake = createFakePlaywright();
+    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    const result = await executor.execute(cmd({ method: "cuaKeypress", keys: ["Control", "a"] }));
+    expect(result.ok).toBe(true);
+    expect(fake.keyboard.down).toHaveBeenCalledWith("Control");
+    expect(fake.keyboard.press).toHaveBeenCalledWith("a");
+    expect(fake.keyboard.up).toHaveBeenCalledWith("Control");
+    await executor.shutdown();
+  });
+
+  it("cuaScroll 移动锚点后滚轮；cuaDrag 逐点移动并保证抬起", async () => {
+    const fake = createFakePlaywright();
+    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    const scroll = await executor.execute(
+      cmd({ method: "cuaScroll", x: 100, y: 200, scrollX: 0, scrollY: 480 }),
+    );
+    expect(scroll.ok).toBe(true);
+    expect(fake.mouse.move).toHaveBeenCalledWith(100, 200);
+    expect(fake.mouse.wheel).toHaveBeenCalledWith(0, 480);
+
+    const drag = await executor.execute(
+      cmd({
+        method: "cuaDrag",
+        path: [
+          { x: 0, y: 0 },
+          { x: 50, y: 50 },
+          { x: 100, y: 100 },
+        ],
+      }),
+    );
+    expect(drag.ok).toBe(true);
+    expect(fake.mouse.down).toHaveBeenCalledTimes(1);
+    expect(fake.mouse.move).toHaveBeenCalledTimes(4);
+    expect(fake.mouse.up).toHaveBeenCalledTimes(1);
+    await executor.shutdown();
+  });
+
+  it("playwrightWaitForTimeout 与 listUserTabs/nameSession 返回兼容语义", async () => {
+    const fake = createFakePlaywright();
+    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    const wait = await executor.execute(cmd({ method: "playwrightWaitForTimeout", timeoutMs: 0 }));
+    expect(wait.ok).toBe(true);
+    const userTabs = await executor.execute(cmd({ method: "listUserTabs" }));
+    expect(userTabs.ok).toBe(true);
+    expect(userTabs.userTabs).toEqual([]);
+    const name = await executor.execute(cmd({ method: "nameSession", name: "probe" }));
+    expect(name.ok).toBe(true);
     await executor.shutdown();
   });
 });

@@ -1,4 +1,4 @@
-import type { BrowserContext, Page, ElementHandle } from "playwright-core";
+import type { BrowserContext, Dialog, Page, ElementHandle } from "playwright-core";
 import {
   browserSnapshotSchema,
   type BrowserSnapshot,
@@ -47,7 +47,11 @@ const SNAPSHOT_SCRIPT = `(() => {
     if (type === "search") return "searchbox";
     return "textbox";
   };
+  // 有合法 id 时优先返回 id 选择器：更短、不受兄弟节点增删影响。
+  // 非法字符的 id（如以数字开头）对 CSS 无效，退回 nth-of-type 链。
   const cssPath = (el) => {
+    const id = el.getAttribute("id");
+    if (id && /^[A-Za-z][A-Za-z0-9_-]*$/.test(id)) return "#" + id;
     const parts = [];
     let node = el;
     while (node && node.nodeType === 1 && parts.length < 6) {
@@ -81,10 +85,11 @@ const SNAPSHOT_SCRIPT = `(() => {
     if (hidden(el)) continue;
     const tag = el.tagName.toLowerCase();
     const rect = el.getBoundingClientRect();
+    // 属性白名单对齐 CLI 托管后端：testid 类属性是我们自己 WebUI 的主要定位锚点。
     const attrs = {};
-    for (const name of ["type", "name", "aria-label", "placeholder", "href", "value"]) {
+    for (const name of ["id", "href", "name", "type", "placeholder", "title", "alt", "role", "aria-label", "data-testid", "data-test", "data-qa"]) {
       const v = el.getAttribute(name);
-      if (v) attrs[name] = norm(v, 120);
+      if (v) attrs[name] = norm(v, 240);
     }
     elements.push({
       ref: "e" + (elements.length + 1),
@@ -94,7 +99,7 @@ const SNAPSHOT_SCRIPT = `(() => {
         el.getAttribute("placeholder") || el.innerText || el.value || "", 120) || undefined,
       text: norm(el.innerText, 160) || undefined,
       value: (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
-        ? (norm(el.value, 160) || undefined) : undefined,
+        ? (norm(el.value, 240) || undefined) : undefined,
       disabled: (el instanceof HTMLInputElement || el instanceof HTMLButtonElement) ? el.disabled : undefined,
       checked: el instanceof HTMLInputElement ? el.checked : undefined,
       selector: cssPath(el),
@@ -127,6 +132,9 @@ export class HeadlessBrowserSession {
   readonly #context: BrowserContext;
   readonly #tabs = new Map<string, ManagedTab>();
   readonly #refsByPage = new WeakMap<Page, Map<string, ElementHandle>>();
+  // Playwright 默认不自动处理 JS 对话框；不登记的话，弹出 alert/confirm 的 tab
+  // 后续所有命令都会挂起。这里只登记挂起的 Dialog，由 handleDialog 命令显式处理。
+  readonly #dialogs = new Map<string, Dialog>();
   #activeTabId: string | undefined;
   #viewport: BrowserViewportSize = DEFAULT_VIEWPORT;
 
@@ -149,6 +157,12 @@ export class HeadlessBrowserSession {
     };
     this.#tabs.set(tab.id, tab);
     if (!this.#activeTabId) this.#activeTabId = tab.id;
+    page.on("dialog", (dialog) => this.#dialogs.set(tab.id, dialog));
+    page.on("close", () => {
+      this.#tabs.delete(tab.id);
+      this.#dialogs.delete(tab.id);
+      if (this.#activeTabId === tab.id) this.#activeTabId = [...this.#tabs.keys()][0];
+    });
     return tab;
   }
 
@@ -191,8 +205,42 @@ export class HeadlessBrowserSession {
         : undefined;
     if (!tab) return;
     this.#tabs.delete(tab.id);
+    this.#dialogs.delete(tab.id);
     if (this.#activeTabId === tab.id) this.#activeTabId = [...this.#tabs.keys()][0];
     if (!tab.page.isClosed()) await tab.page.close().catch(() => {});
+  }
+
+  dialogFor(tabId: string): Dialog | undefined {
+    return this.#dialogs.get(tabId);
+  }
+
+  clearDialog(tabId: string): void {
+    this.#dialogs.delete(tabId);
+  }
+
+  /**
+   * Playwright 挂了 dialog 监听后，触发 JS 对话框的输入命令（mouse.click 等）
+   * 会在渲染进程 ack 上无限等待——监听者存在时它假定你会先处理对话框。
+   * 但命令层必须先返回，模型才能 getDialog/handleDialog。这里把输入动作与
+   * dialog 事件竞速：dialog 打开即证明输入已送达页面，按成功返回，对话框留给
+   * handleDialog 处理。
+   */
+  async runInputAction(tab: ManagedTab, action: (page: Page) => Promise<void>): Promise<void> {
+    let onDialog: (() => void) | undefined;
+    const dialogOpened = new Promise<void>((resolve) => {
+      onDialog = () => resolve();
+      tab.page.on("dialog", onDialog);
+    });
+    const task = action(tab.page);
+    const winner = await Promise.race([
+      task.then(() => "done" as const),
+      dialogOpened.then(() => "dialog" as const),
+    ]);
+    if (onDialog) tab.page.off("dialog", onDialog);
+    if (winner === "done") return;
+    // dialog 分支：task 仍挂着 ack，不能 await；对话框关闭后它自然 settle。
+    // 防止未处理 rejection 崩进程。
+    void task.catch(() => {});
   }
 
   listTabs(): BrowserTabSummary[] {
@@ -296,7 +344,36 @@ export class HeadlessBrowserSession {
     if (!handle) {
       throw new Error(`Element ref '${ref}' is unknown; take a fresh snapshot first`);
     }
+    // 死元素（SPA 路由切换/DOM 重渲染后）直接抛 stale，错误信息引导模型重新快照；
+    // 不检查的话 ElementHandle 动作会抛难懂的底层错误，模型会拿着死 handle 反复重试。
+    const connected = await handle.evaluate((node) => node.isConnected).catch(() => false);
+    if (!connected) {
+      throw new Error(
+        `Element ref '${ref}' is stale or unavailable; take a fresh snapshot before retrying`,
+      );
+    }
     return handle;
+  }
+
+  /** 坐标类 cua 命令的锚点：ref 解析为元素中心（滚动到可见后），否则要求显式坐标。 */
+  async resolveRefCenter(
+    tab: ManagedTab,
+    ref: string | undefined,
+    x?: number,
+    y?: number,
+  ): Promise<{ x: number; y: number }> {
+    if (typeof x === "number" && typeof y === "number") return { x, y };
+    if (!ref) throw new Error("Browser action requires a ref or x/y coordinates");
+    const handle = await this.resolveRef(tab, ref);
+    await handle.scrollIntoViewIfNeeded().catch(() => {});
+    const rect = await handle.boundingBox();
+    if (!rect) {
+      throw new Error(`Element ref '${ref}' has no bounding box; take a fresh snapshot`);
+    }
+    return {
+      x: Math.round(rect.x + rect.width / 2),
+      y: Math.round(rect.y + rect.height / 2),
+    };
   }
 
   async close(): Promise<void> {
@@ -304,6 +381,7 @@ export class HeadlessBrowserSession {
       if (!tab.page.isClosed()) await tab.page.close().catch(() => {});
     }
     this.#tabs.clear();
+    this.#dialogs.clear();
     this.#activeTabId = undefined;
     await this.#context.close().catch(() => {});
   }

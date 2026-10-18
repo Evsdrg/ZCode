@@ -88,6 +88,51 @@ AI 使用已有 `agent.browsers.list()` / `get(id)` 选择。两个兼容 type �
 
 不扩展录屏、用户 tab 接管、下载、文件选择器等未覆盖 SDK 方法。`getState` 的前进/后退可用性仍是现有保守值，不伪称新增导航历史支持。
 
+## 对齐扩展（2026-10-18，对照官方 CLI 托管后端核对后）
+
+三个缺口按故障严重度补齐；全部在执行器内部，不碰协议与闭源制品：
+
+### ① JS 对话框（防卡死）
+
+- Playwright 的 `page.on("dialog")` 默认不自动处理；页面弹 `alert/confirm/prompt/beforeunload`
+  后，该 tab 的后续命令会无限挂起——这是故障模式，不是功能缺失。
+- `HeadlessBrowserSession` 在 `registerPage` 时挂 `page.on("dialog")`，按 tab 登记挂起的
+  `Dialog` 对象；tab 关闭时清登记。**不自动 accept/dismiss**，由模型通过命令显式处理。
+- 新增 `getDialog`（返回 `{type, message, defaultPrompt?} | null`）与
+  `handleDialog`（`accept(promptText?)` / `dismiss`）。处理完成或 tab 关闭即清登记。
+- 语义对齐 CLI 托管后端（`adapters/src/browser/session.ts` 的 `#dialogs` 与
+  `index.ts` 的 dispatch）；`beforeunload` 在 accept 时由 Playwright 自行触发导航。
+
+### ② 快照对齐（模型"看页面"的质量）
+
+对齐 CLI 版 `snapshot.ts`，仅改注入脚本与 ref 解析，不改协议结构：
+
+- attributes 白名单扩到 11 项：新增 `id`、`title`、`alt`、`role`、`data-testid`、
+  `data-test`、`data-qa`（server 自己的 WebUI 重度使用 `data-testid` 定位）。
+- CSS selector 有合法 `#id` 时直接返回 id 选择器，否则保持 `tag:nth-of-type()` 链。
+- `resolveRef` 增加 `isConnected` 存活检查；死元素抛与 CLI 同义的 stale 错误
+  （"take a fresh snapshot"），避免模型拿着死 handle 反复重试。
+- `value` 截断从 160 放宽到 240，与 CLI 一致。
+
+### ③ 坐标控制面补齐
+
+补 `cuaKeypress` / `cuaScroll` / `domCuaScroll` / `cuaDrag` / `drag` /
+`elementInfo` / `playwrightWaitForTimeout` / `listUserTabs` / `nameSession`：
+
+- `cuaKeypress`：组合键拆分，修饰键 down → press → up（`ControlOrMeta` 按平台归一）。
+- `cuaScroll`：移动到锚点坐标后 `mouse.wheel(scrollX, scrollY)`。
+- `domCuaScroll`：`nodeId` 即 ref，解析元素中心为锚点；无 ref 用视口中心。
+- `cuaDrag` / `drag`：`mouse.move → down → 逐点 move(steps=4) → up`；`drag` 用
+  fromRef/toRef 或坐标解析端点。
+- `elementInfo`：`document.elementsFromPoint` 命中测试，返回 CLI 同构的元素摘要。
+- `playwrightWaitForTimeout`：`setTimeout` 直通。
+- `listUserTabs` 返回空数组、`nameSession` 返回 ok——对齐 CLI 的兼容语义，SDK
+  facade 依赖这两个命令不报错。
+
+`getJsDialog` 技能文档承诺的能力随 ① 落地；cua 系列随 ③ 落地后，控制浏览器技能的
+坐标路径在托管后端不再断。`navigate` 的 `domcontentloaded` + 15s 保持不变（与 skill
+指导一致）；CLI 的 `load` + 30s 不跟进。
+
 ## 验收场景与测试
 
 1. 未设置开关不注册；开启但缺省 engine 仍是 Chromium；无效 engine 明确失败。
