@@ -74,12 +74,23 @@ export function createFakePlaywright() {
     },
     close,
   } as unknown as Browser;
-  const chromiumLaunch = vi.fn(async () => browser);
-  const firefoxLaunch = vi.fn(async () => browser);
+  // 真实 launch 每次返回新进程；fake 复用同一对象，重新 launch 时恢复连接态。
+  const relaunch = async () => {
+    connected = true;
+    return browser;
+  };
+  const chromiumLaunch = vi.fn(relaunch);
+  const firefoxLaunch = vi.fn(relaunch);
+  const module = {
+    chromium: { launch: chromiumLaunch, executablePath: () => "/fake/chromium" },
+    firefox: { launch: firefoxLaunch, executablePath: () => "/fake/firefox" },
+  } as unknown as typeof import("playwright-core");
+  const executableAvailable = vi.fn((_path: string) => true);
   return {
     goto,
     clickSpy,
     contexts,
+    page,
     mouse,
     keyboard,
     /** 模拟页面弹出 JS 对话框；返回 fake Dialog 供断言。 */
@@ -102,9 +113,11 @@ export function createFakePlaywright() {
       connected = false;
       for (const listener of disconnectedListeners) listener();
     },
-    module: {
-      chromium: { launch: chromiumLaunch },
-      firefox: { launch: firefoxLaunch },
-    } as unknown as typeof import("playwright-core"),
+    module,
+    executableAvailable,
+    runtimeOptions: {
+      loadPlaywright: async () => module,
+      isExecutableAvailable: async (path: string) => executableAvailable(path),
+    },
   };
 }

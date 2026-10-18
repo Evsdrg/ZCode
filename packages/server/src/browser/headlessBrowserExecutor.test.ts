@@ -34,9 +34,9 @@ describe("browserUrlPolicy", () => {
 });
 
 describe("headlessBrowserExecutor", () => {
-  it("缺省引擎保留 Chromium ID、名称及启动参数", async () => {
+  it("缺省引擎保留 Chromium ID、名称；discovery 不拉起进程，首次执行才启动", async () => {
     const fake = createFakePlaywright();
-    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
     const backends = await executor.list(listInput);
     expect(backends).toHaveLength(1);
     expect(backends[0]).toMatchObject({
@@ -44,6 +44,12 @@ describe("headlessBrowserExecutor", () => {
       type: "cdp",
       name: "ZCode Server Headless Chromium",
     });
+    // discovery 只返回描述符，不启动浏览器进程。
+    expect(fake.chromiumLaunch).not.toHaveBeenCalled();
+    expect(fake.firefoxLaunch).not.toHaveBeenCalled();
+    // 首次 execute 才启动，且携带既有参数。
+    const result = await executor.execute(cmd({ method: "getState" }));
+    expect(result.ok).toBe(true);
     expect(fake.chromiumLaunch).toHaveBeenCalledWith({
       headless: true,
       args: ["--no-sandbox", "--disable-dev-shm-usage"],
@@ -57,7 +63,7 @@ describe("headlessBrowserExecutor", () => {
     const executor = createHeadlessBrowserExecutor({
       engine: "firefox",
       executablePath: "/test/firefox",
-      loadPlaywright: async () => fake.module,
+      ...fake.runtimeOptions,
     });
     const [backend] = await executor.list(listInput);
     expect(browserBackendDescriptorSchema.parse(backend)).toMatchObject({
@@ -67,6 +73,9 @@ describe("headlessBrowserExecutor", () => {
       metadata: { engine: "firefox", driver: "playwright", headless: "true" },
       apiSupportOverrides: { "BrowserUser.openTabs": false, "PlaywrightLocator.evaluate": false },
     });
+    // execute 才真实启动 Firefox launcher。
+    const exec = await executor.execute(cmd({ method: "getState" }));
+    expect(exec.ok).toBe(true);
     expect(fake.firefoxLaunch).toHaveBeenCalledWith({
       headless: true,
       executablePath: "/test/firefox",
@@ -80,23 +89,51 @@ describe("headlessBrowserExecutor", () => {
     await executor.shutdown();
   });
 
-  it("Firefox 启动失败不回退 Chromium，后续 discovery 可以重试", async () => {
+  it("Firefox 启动失败不回退 Chromium；execute 报 backend_unavailable 且可重试", async () => {
     const fake = createFakePlaywright();
     fake.firefoxLaunch.mockRejectedValueOnce(new Error("no firefox"));
     const executor = createHeadlessBrowserExecutor({
       engine: "firefox",
-      loadPlaywright: async () => fake.module,
+      ...fake.runtimeOptions,
     });
-    expect(await executor.list(listInput)).toEqual([]);
+    // discovery 仍返回描述符（不探测启动）。
     expect(await executor.list(listInput)).toHaveLength(1);
-    expect(fake.firefoxLaunch).toHaveBeenCalledTimes(2);
+    // 首次 execute 启动失败：backend_unavailable，不回退 Chromium。
+    const failed = await executor.execute(cmd({ method: "getState" }));
+    expect(failed.error?.code).toBe("backend_unavailable");
     expect(fake.chromiumLaunch).not.toHaveBeenCalled();
+    // 重试成功。
+    const retried = await executor.execute(cmd({ method: "getState" }));
+    expect(retried.ok).toBe(true);
+    expect(fake.firefoxLaunch).toHaveBeenCalledTimes(2);
     await executor.shutdown();
+  });
+
+  it("可执行文件缺失或 runtime 已关闭时 discovery 返回空，且都不拉起进程", async () => {
+    const fake = createFakePlaywright();
+    fake.executableAvailable.mockReturnValue(false);
+    const missing = createHeadlessBrowserExecutor({
+      engine: "firefox",
+      executablePath: "/missing/firefox",
+      ...fake.runtimeOptions,
+    });
+    expect(await missing.list(listInput)).toEqual([]);
+    expect(fake.executableAvailable).toHaveBeenCalledWith("/missing/firefox");
+    await missing.shutdown();
+
+    fake.executableAvailable.mockReturnValue(true);
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
+    expect(await executor.list(listInput)).toHaveLength(1);
+    expect(fake.executableAvailable).toHaveBeenCalledWith("/fake/chromium");
+    await executor.shutdown();
+    expect(await executor.list(listInput)).toEqual([]);
+    expect(fake.chromiumLaunch).not.toHaveBeenCalled();
+    expect(fake.firefoxLaunch).not.toHaveBeenCalled();
   });
 
   it("非 http(s) 导航被拒绝为 navigation_blocked", async () => {
     const fake = createFakePlaywright();
-    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
     const result = await executor.execute(cmd({ method: "navigate", url: "file:///etc/passwd" }));
     expect(result.error?.code).toBe("navigation_blocked");
     expect(fake.goto).not.toHaveBeenCalled();
@@ -105,7 +142,7 @@ describe("headlessBrowserExecutor", () => {
 
   it("http 导航放行并调用 goto", async () => {
     const fake = createFakePlaywright();
-    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
     const result = await executor.execute(
       cmd({ method: "navigate", url: "https://example.test/" }),
     );
@@ -117,7 +154,7 @@ describe("headlessBrowserExecutor", () => {
 
   it("domSnapshot 仍返回 facade 要求的 string", async () => {
     const fake = createFakePlaywright();
-    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
     const result = await executor.execute(
       cmd({ method: "playwright", action: { name: "domSnapshot" } }),
     );
@@ -128,7 +165,7 @@ describe("headlessBrowserExecutor", () => {
 
   it("locator 的 click 和 count 分派正确", async () => {
     const fake = createFakePlaywright();
-    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
     const click = await executor.execute(
       cmd({
         method: "playwright",
@@ -149,7 +186,7 @@ describe("headlessBrowserExecutor", () => {
 
   it("locator 未知 operation 返回明确错误", async () => {
     const fake = createFakePlaywright();
-    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
     const result = await executor.execute(
       cmd({
         method: "playwright",
@@ -162,7 +199,7 @@ describe("headlessBrowserExecutor", () => {
 
   it("未支持命令返回 capability_unsupported", async () => {
     const fake = createFakePlaywright();
-    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
     const result = await executor.execute(cmd({ method: "recordingStart" }));
     expect(result.error?.code).toBe("capability_unsupported");
     await executor.shutdown();
@@ -170,7 +207,7 @@ describe("headlessBrowserExecutor", () => {
 
   it("getDialog 无弹窗时返回 null，弹出后返回类型与消息", async () => {
     const fake = createFakePlaywright();
-    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
     expect((await executor.execute(cmd({ method: "getDialog" }))).dialog).toBeNull();
 
     fake.emitDialog({
@@ -187,7 +224,7 @@ describe("headlessBrowserExecutor", () => {
 
   it("handleDialog accept 转发 promptText 并清登记，dismiss 走对应分支", async () => {
     const fake = createFakePlaywright();
-    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
     // 先触发一次命令让 session/context 建立（page.on("dialog") 挂上），再弹窗。
     expect((await executor.execute(cmd({ method: "getDialog" }))).dialog).toBeNull();
     const accept = vi.fn(async () => {});
@@ -212,7 +249,7 @@ describe("headlessBrowserExecutor", () => {
 
   it("cuaKeypress 修饰键 down→press→up 顺序执行", async () => {
     const fake = createFakePlaywright();
-    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
     const result = await executor.execute(cmd({ method: "cuaKeypress", keys: ["Control", "a"] }));
     expect(result.ok).toBe(true);
     expect(fake.keyboard.down).toHaveBeenCalledWith("Control");
@@ -223,7 +260,7 @@ describe("headlessBrowserExecutor", () => {
 
   it("cuaScroll 移动锚点后滚轮；cuaDrag 逐点移动并保证抬起", async () => {
     const fake = createFakePlaywright();
-    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
     const scroll = await executor.execute(
       cmd({ method: "cuaScroll", x: 100, y: 200, scrollX: 0, scrollY: 480 }),
     );
@@ -250,7 +287,7 @@ describe("headlessBrowserExecutor", () => {
 
   it("playwrightWaitForTimeout 与 listUserTabs/nameSession 返回兼容语义", async () => {
     const fake = createFakePlaywright();
-    const executor = createHeadlessBrowserExecutor({ loadPlaywright: async () => fake.module });
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
     const wait = await executor.execute(cmd({ method: "playwrightWaitForTimeout", timeoutMs: 0 }));
     expect(wait.ok).toBe(true);
     const userTabs = await executor.execute(cmd({ method: "listUserTabs" }));

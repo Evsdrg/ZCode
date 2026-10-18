@@ -66,7 +66,7 @@ AI get(实际 ID) → SDK 携带 ID / generation → router 精确匹配 → 对
 shutdown → router 关闭 admission → 两个 owner 同时关闭 → 等待所有结果
 ```
 
-- 两个引擎的 discovery 都通过真实启动确认可用，所以首次 discovery 会尝试启动两者；不宣称仅选中后才启动。失败引擎不返回 descriptor，也不影响另一引擎；后续 discovery 可重试。
+- discovery 不启动浏览器进程（见 `selfhost-webui-browser-idle-reclaim.md`）：只检查 runtime 未关闭且可执行文件存在，满足即返回 descriptor；真实启动推迟到首次 execute。可执行文件缺失的引擎不返回 descriptor，也不影响另一引擎；存在但启动失败时 execute 返回 `backend_unavailable`，可重试。
 - 返回顺序固定 Chromium 在前，兼容 SDK 的默认选择；只有 Firefox 可用时默认是 Firefox。
 - 双模式执行必须携带明确 ID 和 generation；缺失、未知 ID 或 stale generation 失败，不按类型或数组位置路由。单模式保留旧接口的可选 ID/代次行为。
 - 指定引擎不可用时不得在另一引擎重放动作；同 session 不同引擎的 cookie/tab/ref 隔离。关闭一引擎的 tab 或断连不改变另一引擎的 generation。

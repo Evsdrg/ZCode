@@ -77,16 +77,11 @@ export function createHeadlessBrowserExecutor(
   const runtime = new HeadlessBrowserRuntime(options);
 
   async function list(): Promise<BrowserBackendDescriptor[]> {
-    try {
-      await runtime.ensureBrowser();
-      return [createDescriptor(runtime)];
-    } catch (error) {
-      logger.warn(undefined, "[browser-use] managed browser unavailable", {
-        engine: runtime.engine,
-        message: error instanceof Error ? error.message : String(error),
-      });
-      return [];
-    }
+    // discovery 不拉起浏览器进程：WebUI 重连会触发 agent.browsers.list() 探测，
+    // 纯发现不应启动两台 headless 浏览器（~600MB）。真实启动推迟到第一次 execute，
+    // 启动失败在那条路径上按既有语义返回 backend_unavailable。
+    // 仍保留廉价过滤：已关闭或可执行文件缺失的引擎不出现在发现结果里。
+    return (await runtime.isDiscoverable()) ? [createDescriptor(runtime)] : [];
   }
 
   async function execute(input: BrowserExecutorExecuteInput): Promise<BrowserCommandResult> {
@@ -118,7 +113,15 @@ export function createHeadlessBrowserExecutor(
       return fail("backend_unavailable", error instanceof Error ? error.message : String(error));
     }
     try {
-      const result = await dispatch(session, command, withMeta, fail);
+      // 空闲回收的 inFlight 计数以「本次命令持有 session」为单位；session 创建失败
+      // 时这里是 undefined，直接跳过记账。
+      const release = session ? runtime.trackSessionActivityByInstance(session) : () => {};
+      let result: BrowserCommandResult;
+      try {
+        result = await dispatch(session, command, withMeta, fail);
+      } finally {
+        release();
+      }
       runtime.assertCurrent(generation, input.browserId);
       return result;
     } catch (error) {
