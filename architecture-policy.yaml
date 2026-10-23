@@ -782,7 +782,7 @@ exceptions:
   # 新文件与既有文件的显式接线（经公开入口导入），不深导入实现细节；不为此接管整包根。
   - id: selfhost-server-browser-module
     rule: unmanaged-new-file
-    paths: [packages/server/src/browser/**]
+    paths: [packages/server/src/browser/**, packages/services/src/browser/managedBrowserMaintenanceService.ts]
     reason: 自部署托管浏览器执行器（Chromium/Firefox 双引擎、命令面、空闲回收），仅经 createConfiguredBrowserExecutor 公开入口装配。
   - id: selfhost-server-modules
     rule: unmanaged-new-file

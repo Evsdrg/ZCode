@@ -2130,12 +2130,16 @@ export function SettingsPage({
                             </ServiceProvider>
                           ) : activeSection === "memory" ? (
                             <ServiceProvider services={localHostServices}>
-                              {/* Memory catalog 始终使用本地 Host，避免远程 workspace 误读本机数据。 */}
+                              {/* Memory catalog 始终使用本地 Host，避免远程 workspace 误读本机数据。
+                                  MemorySettingsViewer 零 platform 依赖，纯走 memoryService；
+                                  IMemoryService 在 server 与桌面 host 均注册，读取的是
+                                  host 所在机器数据，不按宿主形态门控（fork 修复，见
+                                  docs/specs/selfhost-browser-capability-gates.md）。 */}
                               <MemorySettingsSection
                                 memoryEnabled={memoryEnabled}
                                 memoryService={localHostServices.memoryService}
                                 onMemoryEnabledChange={handleMemoryEnabledChange}
-                                projectMemoryViewerAvailable={Boolean(isDesktop)}
+                                projectMemoryViewerAvailable
                                 workspaceDisplayNames={memoryWorkspaceDisplayNames}
                               />
                             </ServiceProvider>

@@ -144,3 +144,25 @@ service stub 体系，超出本次范围；其行为已由上述纯逻辑测试�
 - 分区可见性：所有桌面形态（含 Linux）都显示该分区；不可用环境由 `ComputerUseSection` 渲染「当前环境暂不支持」提示卡并区分 Linux 与远端文案，而不是让分区消失——直接不渲染会让设置页只剩标题，被误认为加载失败。
 - 能力判定：仍只有 macOS / Windows 本地桌面为 `supported: true`，见 `resolveComputerUseAvailability`。macOS 另有版本地板 12.0 与 TCC 双权限（Accessibility / Screen Recording）；Windows 只复用 zcode-cua 插件总开关，不读 TCC 与 Helper 状态。
 - 自部署浏览器不传 `isDesktop`，`showComputerUse` 为 false，该分区在 WebUI 里依旧不出现，本次改动对自部署形态零影响。
+
+## 2026-10-24 复查（3.16.2 同步后）
+
+上游 3.16.2 重构后逐项复核，本轮修复：
+
+1. **记忆详情查看器**：`SettingsPage` 的 `projectMemoryViewerAvailable` 在变基时回退为
+   `Boolean(isDesktop)`，自部署再次显示「记忆详情仅支持本地桌面端查看」。已恢复为不按
+   宿主门控（MemorySettingsViewer 纯走 memoryService，读取 host 所在机器数据）。
+2. **浏览器数据清理**：`BrowserSettingsSection` 原以 `isDesktop` 一刀切隐藏清理/导入。
+   改为按平台能力判定：Web 平台新增 `clearEmbeddedBrowserData`（服务端
+   `IManagedBrowserMaintenanceService.clearAllData` 关闭全部托管浏览器会话与进程，
+   context 销毁即数据清除）；Chrome profile 导入仍按方法存在性仅桌面显示。
+3. **任务写面（归档失败根因）**：3.16.2 侧栏的置顶/归档/删除/未读/重命名改经
+   `window-controller.mutateTask` 下发；本地 Controller 的显式拒绝导致归档报
+   「not implemented」。已实现完整映射转交任务服务（open/resume 为导航意图返回 null）。
+4. **工作区记忆开关**：确认开关与持久化链路正常（此前「打不开」发生在 3.16.2 同步
+   初期的错误装配期间）。职业引导弹窗的跳过语义会写保守默认值（memory 关），
+   属产品行为非缺陷。
+
+已知未决：设置页 MCP 列表不显示用户级（`~/.zcode/cli/config.json`）服务器
+（如 pdf-rag），但 Agent 会话实际已加载可用（工具面正常）；商店加载链路在浏览器侧
+的失败点待查。

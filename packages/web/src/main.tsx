@@ -517,9 +517,12 @@ function createWebPlatform(options?: {
   externalWebRemoteControlProxy?: WebRemoteControlPlatformProxy;
   /** 自部署 server 注册的官方中转远控服务；未注册（如桌面 host）时为 undefined。 */
   relayStatusSource?: RelayStatusSource;
+  /** 自部署：托管浏览器数据清理服务；桌面/未开启托管浏览器的 host 不提供。 */
+  managedBrowserMaintenance?: { clearAllData(): Promise<{ success: boolean; error?: string }> };
 }): IPlatformService {
   const platformProxy = options?.externalWebRemoteControlProxy;
   const relayStatusSource = options?.relayStatusSource;
+  const managedBrowserMaintenance = options?.managedBrowserMaintenance;
   // 官方契约里 start/getStatus 都要回填目标 workspace（对话框靠它判定「同一目标」）。
   // 桌面端按窗口持有 target；这里按「最后一次 start 收到的 context」记录，
   // getStatus 用它投影，语义与桌面按窗口一致（自部署是 server 级单实例）。
@@ -676,6 +679,23 @@ function createWebPlatform(options?: {
       if (parsed.success) platformProxy?.reportTelemetryEvent?.(parsed.data);
     },
     reportArmsCustomEvent: () => Promise.resolve(),
+    // 自部署「清理浏览器数据」：托管浏览器没有桌面 Chrome profile，语义是关闭全部
+    // 会话与浏览器进程（context 销毁即清除 cookie/存储），下次命令按需重启。
+    clearEmbeddedBrowserData: async () => {
+      try {
+        return (
+          (await managedBrowserMaintenance?.clearAllData()) ?? {
+            success: false,
+            error: "managed browser maintenance is unavailable",
+          }
+        );
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
     showTaskNotification: (payload) => {
       showWebTaskNotification(
         {
@@ -730,8 +750,6 @@ function createWebPlatform(options?: {
         },
         error: "chrome_import_not_supported" as const,
       }),
-    clearEmbeddedBrowserData: () =>
-      Promise.resolve({ success: false, error: "Not supported in web mode" }),
     // IPlatformService 新增更新提示能力后，Web fallback 没有同步补齐空实现，
     // 根级 typecheck 会直接失败，连与桌面端无关的改动都没法完成校验。
     // Web 端当前没有桌面更新器，先显式 no-op，保持接口完整且不改变现有行为。
@@ -2230,6 +2248,7 @@ async function bootstrapWebApp() {
     // 桌面 host 不注册该服务，此时保持原有「只能从桌面发起」的拒绝语义。
     const platform = createWebPlatform({
       relayStatusSource: services.webRemoteControlRelayService,
+      managedBrowserMaintenance: services.managedBrowserMaintenanceService,
     });
     document.title = "ZCode - Web + Server";
 

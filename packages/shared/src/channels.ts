@@ -112,6 +112,8 @@ export const ServiceChannels = {
   ZCodeTask: "zcode-task",
   /** 窗口 Host 聚合 workspace/task 投影与列表写路由 */
   WindowController: "window-controller",
+  /** 自部署：托管浏览器数据清理（关闭全部会话与浏览器进程，cookie/存储随 context 销毁） */
+  ManagedBrowserMaintenance: "managed-browser-maintenance",
   /** ZCode Protocol agent 服务 */
   ZCodeAgent: "zcode-agent",
   /** ZCode session 应用服务 */

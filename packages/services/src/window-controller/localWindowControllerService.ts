@@ -114,8 +114,49 @@ export function createLocalWindowControllerService(options: {
         taskIds,
       });
     },
-    async mutateTask() {
-      throw new Error("window controller mutateTask is not implemented on the self-hosted server");
+    // 3.16.2 起侧栏的置顶/归档/删除/未读/重命名经窗口 Controller 下发（3.15.x 直连任务服务，
+    // 本实现当时显式拒绝写面）。自部署即本机 Host，直接转交同一任务服务，保持与桌面同语义。
+    async mutateTask({ address, mutation }) {
+      const target = {
+        taskId: address.taskId,
+        workspacePath: address.workspacePath,
+        ...(address.workspaceIdentity ? { workspaceIdentity: address.workspaceIdentity } : {}),
+      };
+      switch (mutation.kind) {
+        case "rename":
+          return taskService.renameTask({ ...target, title: mutation.title });
+        case "pin":
+          return taskService.setTaskPinned({ ...target, pinned: mutation.pinned });
+        case "archive":
+          // 归档后任务仍在索引中（列表按 kind=archived 查询），返回新 meta 供 UI 即时刷新。
+          return mutation.archived
+            ? taskService.archiveTask(target)
+            : taskService.unarchiveTask(target);
+        case "delete":
+          await taskService.deleteTask(target);
+          return null;
+        case "delete-archived":
+          await taskService.deleteArchivedTask(target);
+          return null;
+        case "mark-read":
+          return taskService.setTaskUnread({
+            ...target,
+            unread: false,
+            ...(mutation.expectedUnreadAt !== undefined
+              ? { expectedUnreadAt: mutation.expectedUnreadAt }
+              : {}),
+          });
+        case "mark-unread":
+          return taskService.setTaskUnread({ ...target, unread: true });
+        case "open":
+        case "resume":
+          // 导航类意图由 UI 本地处理（切 tab/开任务），服务端无对应状态写入。
+          return null;
+        default:
+          throw new Error(
+            `window controller mutation is not supported on the self-hosted server: ${String(mutation)}`,
+          );
+      }
     },
 
     async subscribeControllerV4(

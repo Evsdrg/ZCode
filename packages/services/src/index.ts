@@ -414,3 +414,5 @@ export {
   type RelayStatusProjectionInput,
   type RelayStatusSource,
 } from "./web-remote-control/relayStatusProjection.js";
+export { IManagedBrowserMaintenanceService } from "./browser/managedBrowserMaintenanceService.js";
+export type { IManagedBrowserMaintenanceService as IManagedBrowserMaintenanceServiceType } from "./browser/managedBrowserMaintenanceService.js";

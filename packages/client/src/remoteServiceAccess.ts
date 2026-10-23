@@ -53,6 +53,7 @@ import {
   IFeedbackService,
   IPromptAttachmentTransferService,
   IWindowControllerService,
+  IManagedBrowserMaintenanceService,
   IWebRemoteControlRelayService,
   IWindowProjectService,
   IWindowRemoteProjectService,
@@ -131,6 +132,8 @@ export class RemoteServiceAccess implements IServiceAccessor {
    * UI 依此隐藏区块（见 docs/specs/selfhost-webui-relay-remote-control.md）。
    */
   readonly webRemoteControlRelayService?: IWebRemoteControlRelayService;
+  /** 自部署：托管浏览器数据清理；代理惰性失败——未注册的 host 上仅在调用时报错。 */
+  readonly managedBrowserMaintenanceService: IManagedBrowserMaintenanceService;
 
   constructor(
     channelClient: IChannelClient,
@@ -145,6 +148,10 @@ export class RemoteServiceAccess implements IServiceAccessor {
         channelClient.getChannel(IWebRemoteControlRelayService.channelName),
       );
     }
+    this.managedBrowserMaintenanceService =
+      ProxyChannel.toService<IManagedBrowserMaintenanceService>(
+        channelClient.getChannel(IManagedBrowserMaintenanceService.channelName),
+      );
     // 远端工作区的 project 必须保留 Source 语义；只有显式能力才创建完整窗口目录组。
     if (options.windowProjectDirectory) {
       this.windowProjectDirectory = {

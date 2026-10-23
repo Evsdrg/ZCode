@@ -93,6 +93,8 @@ function mayHaveSideEffects(command: BrowserCommand): boolean {
 }
 
 export interface BrowserControlMainBridge {
+  /** 桌面 IAB 无整体关闭语义；为对齐自部署清理接口提供 no-op。 */
+  shutdown(): Promise<void>;
   list(): Promise<BrowserBackendDescriptor[]>;
   execute(input: {
     requestId?: string;
@@ -170,6 +172,9 @@ export function createBrowserControlMainBridge(deps: {
     async list(): Promise<BrowserBackendDescriptor[]> {
       return [descriptor];
     },
+
+    // 桌面 IAB 的浏览器生命周期由窗口管理；清理动作不支持批量关闭，返回不支持语义。
+    async shutdown(): Promise<void> {},
 
     async execute({
       requestId: inputRequestId,

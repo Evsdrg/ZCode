@@ -491,6 +491,7 @@ import { createWebRemoteControlRelayService } from "./web-remote-control/webRemo
 import { createAllWorkspacesTaskView } from "./session/allWorkspacesTaskView.js";
 import { createLocalWindowControllerService } from "./window-controller/localWindowControllerService.js";
 import { IWindowControllerService } from "./window-controller/windowController.js";
+import { IManagedBrowserMaintenanceService } from "./browser/managedBrowserMaintenanceService.js";
 import { IWebRemoteControlRelayService } from "./web-remote-control/webRemoteControlRelay.js";
 import { BotsRepo } from "#src/bots/repo.js";
 import {
@@ -1365,6 +1366,8 @@ export function createLocalServices(options: {
       sessionContext: "live" | "cached";
       command: BrowserCommand;
     }): Promise<{ ok: boolean; [k: string]: unknown }>;
+    /** 自部署数据清理用：关闭全部会话与浏览器进程。 */
+    shutdown(): Promise<void>;
   };
   /** Windows desktop-local Host 的 CUA turn 状态投影；其它 authority 会在装配层拒绝。 */
   cuaOperationStateReporter?: CuaOperationStateReporter;
@@ -3130,6 +3133,22 @@ export function createLocalServices(options: {
         }),
       );
     }
+  }
+  if (options?.browserControlExecutor) {
+    // 自部署托管浏览器数据清理：关闭全部会话与进程即清除（见模块注释）。
+    services.register(IManagedBrowserMaintenanceService, {
+      async clearAllData() {
+        try {
+          await options.browserControlExecutor?.shutdown();
+          return { success: true };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      },
+    });
   }
   if (options?.webRemoteControlRelay) {
     // resolveServices 经 getter 注入：注册链求值期 services 常量尚未完成初始化。

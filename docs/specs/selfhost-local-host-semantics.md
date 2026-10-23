@@ -7,13 +7,13 @@
 
 ## 1. Feature Summary / Impact Brief
 
-| Field | Value |
-| --- | --- |
+| Field            | Value                                                                                                                                                                        |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Developer intent | 自部署 WebUI **只是把 Electron 的 WebUI 拆出来在浏览器跑**，依赖 Electron 的组件接线修好即可；服务与数据语义必须与 Electron 完全一致，不做「独立 Server Core」那一套远端身份 |
-| Capability | 发消息、项目/任务读写、WebUI 任务列表 |
-| Change layer | `commit-effect`（入口装配）、`persistence`（任务/项目 host 归属） |
-| Primary seeds | `packages/server/src/entry-http.ts`、`tasks-index.sqlite` |
-| Out of scope | 手机扫码远控、独立 Server Core（source-server）部署、多机 controller/remote 拓扑 |
+| Capability       | 发消息、项目/任务读写、WebUI 任务列表                                                                                                                                        |
+| Change layer     | `commit-effect`（入口装配）、`persistence`（任务/项目 host 归属）                                                                                                            |
+| Primary seeds    | `packages/server/src/entry-http.ts`、`tasks-index.sqlite`                                                                                                                    |
+| Out of scope     | 手机扫码远控、独立 Server Core（source-server）部署、多机 controller/remote 拓扑                                                                                             |
 
 ### 1.1 事实（Fact）
 
@@ -99,13 +99,13 @@
 
 ## 4. 验收场景
 
-| # | 场景 | 期望 |
-| --- | --- | --- |
-| 1 | 打开 WebUI，看到项目/任务列表 | 13 个项目、87 条历史任务可见 |
-| 2 | 在已有项目里新建任务并发送一条消息 | 成功，无 `host-offline` / `remote-project-required` |
-| 3 | `project.readTree` / `task-groups.read` / `zcode-agent.sendConversationCommandV4` | 全部 OK |
-| 4 | 库检查 | `tasks.host_id` 与 `projects.host_id` 全为 `local`；`hosts` 表无 `remote:server:*` 悬空行 |
-| 5 | 重启服务 | 幂等，不重复迁移、不报错 |
+| #   | 场景                                                                              | 期望                                                                                      |
+| --- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 1   | 打开 WebUI，看到项目/任务列表                                                     | 13 个项目、87 条历史任务可见                                                              |
+| 2   | 在已有项目里新建任务并发送一条消息                                                | 成功，无 `host-offline` / `remote-project-required`                                       |
+| 3   | `project.readTree` / `task-groups.read` / `zcode-agent.sendConversationCommandV4` | 全部 OK                                                                                   |
+| 4   | 库检查                                                                            | `tasks.host_id` 与 `projects.host_id` 全为 `local`；`hosts` 表无 `remote:server:*` 悬空行 |
+| 5   | 重启服务                                                                          | 幂等，不重复迁移、不报错                                                                  |
 
 ## 5. 风险与回滚
 
