@@ -6,6 +6,7 @@ import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 import {
   Fragment,
   memo,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,

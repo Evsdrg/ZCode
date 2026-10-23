@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Emitter, type Event } from "@zcode/rpc";
+import type { WindowHostTaskAddress } from "@zcode/shared/zcode-protocol-v4";
 import type { ZCodeTaskMeta, ZCodeWorkspaceEvent } from "@zcode/shared";
 import {
   CONTROLLER_TASKS_INDEX_TOPIC,
@@ -13,6 +14,7 @@ import type { IZCodeTaskService } from "../session/zcodeTaskService.js";
 import {
   IWindowControllerService,
   type WindowHostControllerFrame,
+  type WindowHostTaskUnreadSignal,
   type WindowHostControllerTaskListItem,
 } from "./windowController.js";
 
@@ -38,6 +40,7 @@ export function createLocalWindowControllerService(options: {
 }): IWindowControllerService {
   const taskService = options.taskService;
   const frameEmitter = new Emitter<WindowHostControllerFrame>();
+  const unreadSignalEmitter = new Emitter<WindowHostTaskUnreadSignal>();
   const logEpoch = `local-${randomUUID()}`;
   const tasksIndexSubscriptionIds = new Set<string>();
   /** 已建立 workspace 事件订阅的 scope（去重键 = workspaceKey）。 */
@@ -130,8 +133,23 @@ export function createLocalWindowControllerService(options: {
     async unsubscribeControllerV4(params: ControllerUnsubscribeParams): Promise<void> {
       tasksIndexSubscriptionIds.delete(params.subscriptionId);
     },
+    // 轻量 meta 直通 task service：自部署没有实时 overlay，读到的就是索引事实。
+    async getTaskMeta(params: { address: WindowHostTaskAddress }) {
+      return taskService.getTaskMeta({
+        taskId: params.address.taskId,
+        workspacePath: params.address.workspacePath,
+        ...(params.address.workspaceIdentity
+          ? { workspaceIdentity: params.address.workspaceIdentity }
+          : {}),
+      });
+    },
     onDynamicControllerFrame(): Event<WindowHostControllerFrame> {
       return frameEmitter.event;
+    },
+    // 未读信号依赖桌面 runtime 的实时事件流；自部署列表层未接入，发空事件流，
+    // 未读计数由 UI 侧按列表刷新推导，不订阅该信号。
+    onDynamicTaskUnreadSignal(): Event<WindowHostTaskUnreadSignal> {
+      return unreadSignalEmitter.event;
     },
   };
 }

@@ -24,7 +24,10 @@ import {
   setWebRemoteControlTerminalTransportState,
   type Theme,
   type WebRemoteControlTerminalTransportState as UiWebRemoteControlTerminalTransportState,
+  mapRelayStateToStatusKind,
+  projectRelayStatusToWebRemoteControlStatus,
 } from "@zcode/ui";
+import type { RelayStatusSource } from "@zcode/ui";
 import "./styles.css";
 import {
   connectViaProtocol,
@@ -67,11 +70,8 @@ import type {
   WebRemoteControlTaskTarget,
   WebRemoteControlWorkspaceSwitchOptions,
   WebRemoteControlStatus,
-  mapRelayStateToStatusKind,
-  projectRelayStatusToWebRemoteControlStatus,
-  type RelayStatusSource,
-  type WebRemoteControlContext,
-  type WebRemoteControlStartOperationResult,
+  WebRemoteControlContext,
+  WebRemoteControlStartOperationResult,
   WebRemoteControlAppPayload,
   WebRemoteControlExternalWorkspaceBridge,
   RemoteTarget,

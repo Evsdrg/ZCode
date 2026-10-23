@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import zhCN from "@/i18n/locales/zh-CN.js";
 import enUS from "@/i18n/locales/en-US.js";
-import { TID_SETTINGS_WEB_UI_VERSION_VALUE } from "@zcode/shared";
+import { TID_SETTINGS_WEB_UI_VERSION_VALUE } from "@zcode/shared/test-ids";
 import { ZCODE_VERSION } from "@zcode/shared";
 
 // 覆盖 docs/specs/webui-version-display.md 的不变量。

@@ -5,10 +5,7 @@ import type { SourceServerManagementSnapshot } from "@zcode/shared";
 import { describe, expect, it, vi } from "vitest";
 import { useSourceServerManagementSnapshot } from "@/hooks/useSourceServerManagementSnapshot.js";
 
-function snapshot(
-  generation: number,
-  displayName: string,
-): SourceServerManagementSnapshot {
+function snapshot(generation: number, displayName: string): SourceServerManagementSnapshot {
   return {
     generation,
     profiles: [],
@@ -32,14 +29,25 @@ describe("useSourceServerManagementSnapshot", () => {
     const stateEmitter = new Emitter<{ generation: number; state: never }>();
     const directoryEmitter = new Emitter<{ generation: number }>();
     let complete!: (value: SourceServerManagementSnapshot) => void;
-    const getSnapshot = vi.fn()
-      .mockImplementationOnce(() => new Promise<SourceServerManagementSnapshot>((resolve) => { complete = resolve; }))
+    const getSnapshot = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<SourceServerManagementSnapshot>((resolve) => {
+            complete = resolve;
+          }),
+      )
       .mockResolvedValue(snapshot(2, "fresh"));
     const management = {
-      getSnapshot, onDidChangeState: stateEmitter.event, onDidChangeDirectory: directoryEmitter.event,
+      getSnapshot,
+      onDidChangeState: stateEmitter.event,
+      onDidChangeDirectory: directoryEmitter.event,
     } as never;
     const { result, unmount } = renderHook(() => useSourceServerManagementSnapshot(management));
-    act(() => { result.current.refresh(); directoryEmitter.fire({ generation: 1 }); });
+    act(() => {
+      result.current.refresh();
+      directoryEmitter.fire({ generation: 1 });
+    });
     expect(getSnapshot).toHaveBeenCalledOnce();
     await act(async () => complete(snapshot(1, "initial")));
     await waitFor(() => expect(result.current.snapshot?.generation).toBe(2));
@@ -64,18 +72,12 @@ describe("useSourceServerManagementSnapshot", () => {
       onDidChangeDirectory: directoryEmitter.event,
     } as never;
 
-    const { result } = renderHook(() =>
-      useSourceServerManagementSnapshot(management),
-    );
-    await waitFor(() =>
-      expect(result.current.snapshot?.servers[0]?.displayName).toBe("A"),
-    );
+    const { result } = renderHook(() => useSourceServerManagementSnapshot(management));
+    await waitFor(() => expect(result.current.snapshot?.servers[0]?.displayName).toBe("A"));
     expect(getSnapshot).toHaveBeenNthCalledWith(1, { refreshMigrationCounts: true });
 
     act(() => directoryEmitter.fire({ generation: 2 }));
-    await waitFor(() =>
-      expect(result.current.snapshot?.servers[0]?.displayName).toBe("B"),
-    );
+    await waitFor(() => expect(result.current.snapshot?.servers[0]?.displayName).toBe("B"));
 
     act(() => stateEmitter.fire({ generation: 3, state: {} as never }));
     await waitFor(() => expect(getSnapshot).toHaveBeenCalledTimes(3));

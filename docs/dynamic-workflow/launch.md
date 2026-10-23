@@ -146,7 +146,7 @@ window trustworthy: everything downstream of step 3 sees one and the same script
 3. `resolveInput`: the only disk read. For an inline script this is the identity function.
    For `saved` it reads the file, validates the arguments against the declaration, and
    rewrites the input to `{ name: input.name ?? savedName, script, saved: { name, args,
-   path, scope } }`, where `script` is the saved body byte for byte and `scope` is the
+path, scope } }`, where `script` is the saved body byte for byte and `scope` is the
    archive the lookup hit. A failure here (unknown name, malformed file, bad arguments)
    returns a structured error to the model before any hook or dialog. The same step floors
    `max_concurrency` to a whole number of at least 1 (the port floors it again on the way to
@@ -954,13 +954,13 @@ so the model revises and resubmits, which opens a new window. It is never consen
    button list and makes it the feedback row's target.
 2. The answer arrives as `{ optionId: "workflowRefine", freeText }`. The broker maps a
    non-empty `freeText` to `{ decision: "deny", reason: freeText, reasonSource:
-   "workflow_refine_feedback" }`. Empty text, or the same option id on another tool, is a
+"workflow_refine_feedback" }`. Empty text, or the same option id on another tool, is a
    plain deny.
 3. The executor writes the tool result as "The workflow run was not approved by the user."
    and attaches the feedback as a follow-up user input.
 4. The runtime steers the active turn with that input as a `guide` delivery, persisted as
    an ordinary user message. The provider sees `assistant tool_use → tool_result → user
-   feedback`, in that order.
+feedback`, in that order.
 
 Windows without a Refine option (`SaveWorkflow`) show the generic feedback row instead,
 whose text becomes the deny reason.

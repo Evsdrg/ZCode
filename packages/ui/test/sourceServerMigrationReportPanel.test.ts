@@ -55,15 +55,15 @@ describe("SourceServerMigrationReportPanel", () => {
     expect(screen.getByText("/workspace/conflicted")).toBeTruthy();
     expect(screen.getByText(/remote\.error\.workspaceTaskIdentityConflict/u)).toBeTruthy();
     // 失败行说明带「N 处冲突」段（settings.source.migrationConflictCount）。
-    expect(
-      screen.getByText(/settings\.source\.migrationConflictCount/u),
-    ).toBeTruthy();
+    expect(screen.getByText(/settings\.source\.migrationConflictCount/u)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /abandonMigration/u }));
     fireEvent.click(screen.getByRole("button", { name: /retryMigration/u }));
 
     expect(screen.queryByRole("button", { name: /exportMigrationReport/u })).toBeNull();
-    expect(screen.getByText("/workspace/conflicted").getAttribute("title")).toBe("/workspace/conflicted");
+    expect(screen.getByText("/workspace/conflicted").getAttribute("title")).toBe(
+      "/workspace/conflicted",
+    );
     expect(onAbandon).toHaveBeenCalledWith("/workspace/conflicted", "migration-1");
     expect(onRetry).toHaveBeenCalledWith("/workspace/conflicted", "migration-1");
   });
@@ -168,10 +168,7 @@ describe("SourceServerMigrationReportPanel", () => {
           migrationId: "done",
           workspacePath: "/home/dev",
           canonicalKey: "remote:server:s:/home/dev",
-          variantKeys: [
-            "remote:ssh:a:22:u:/home/dev",
-            "remote:ssh:b:22:u:/home/dev",
-          ],
+          variantKeys: ["remote:ssh:a:22:u:/home/dev", "remote:ssh:b:22:u:/home/dev"],
           status: "completed",
           updatedAt: 1,
           conflicts: [],

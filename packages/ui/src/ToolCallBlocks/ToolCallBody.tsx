@@ -209,7 +209,6 @@ function InlineImageContent({ preview }: { preview: ImageCodeViewerSource }) {
       }}
     />
   );
->>>>>>> ea3e1799 (feat(attachments): Host 持久保存 20 MiB 以内的任意文件附件)
 }
 
 function InlinePlanResult({

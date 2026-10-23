@@ -13,7 +13,8 @@ import {
   TID_SETTINGS_TOOL_SEARCH_SELECT,
   TID_SETTINGS_TOOL_SEARCH_OPTION,
 } from "@zcode/shared/test-ids";
-import { TID_SETTINGS_WEB_UI_VERSION_VALUE, ZCODE_VERSION } from "@zcode/shared";
+import { ZCODE_VERSION } from "@zcode/shared";
+import { TID_SETTINGS_WEB_UI_VERSION_VALUE } from "@zcode/shared/test-ids";
 import { useState, useCallback, useEffect } from "react";
 import type { IPlatformService } from "@zcode/shared";
 import {

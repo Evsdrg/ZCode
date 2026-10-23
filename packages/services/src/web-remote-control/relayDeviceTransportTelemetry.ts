@@ -26,3 +26,25 @@ export const NOOP_WEB_REMOTE_CONTROL_RELAY_TELEMETRY: WebRemoteControlRelayTelem
   noteConnectAttempt: () => {},
   noteReconnect: () => {},
 };
+
+// 下沉适配：官方 transport 直接 import 桌面遥测函数。这里提供同名模块级函数，
+// 转发到端口；server 侧无桌面聚合器，默认 no-op。未来如需服务端遥测再注入端口实现。
+let telemetryPort: WebRemoteControlRelayTelemetryPort = NOOP_WEB_REMOTE_CONTROL_RELAY_TELEMETRY;
+
+export function setWebRemoteControlRelayTelemetryPort(
+  port: WebRemoteControlRelayTelemetryPort,
+): void {
+  telemetryPort = port;
+}
+
+export function noteWebRemoteRelayConnectAttempt(
+  durationMs: number,
+  success: boolean,
+  details: { attempt?: number },
+): void {
+  telemetryPort.noteConnectAttempt(durationMs, success, details);
+}
+
+export function noteWebRemoteRelayReconnect(): void {
+  telemetryPort.noteReconnect();
+}

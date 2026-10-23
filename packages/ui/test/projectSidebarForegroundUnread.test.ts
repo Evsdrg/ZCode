@@ -44,7 +44,7 @@ const fireTerminal = () =>
     address: { ...TARGET },
     updatedAt: Date.now(),
     status: "completed",
-});
+  });
 
 const mutateTaskCalls = () =>
   vi.mocked(mocks.services.windowControllerService.mutateTask).mock.calls;
@@ -60,9 +60,7 @@ beforeEach(() => {
   };
   // 构造 isDesktopViewing 全部命中：workspace tab 激活 + 完整导航地址 + activeTaskId。
   mocks.tabs.getState().addTab("/repo", { workspaceIdentity: TARGET.workspaceIdentity });
-  useZCodeSessionStore
-    .getState()
-    .setActiveTaskId("/repo", TARGET.taskId, TARGET.workspaceIdentity);
+  useZCodeSessionStore.getState().setActiveTaskId("/repo", TARGET.taskId, TARGET.workspaceIdentity);
   useZCodeSessionStore.setState({
     taskNavHistory: {
       entries: [
@@ -177,9 +175,9 @@ describe("project sidebar foreground completion unread", () => {
   it("补写失败不丢记录：下次 blur 重试成功（CR-01）", async () => {
     renderHook(() => useProjectUnreadSignals([{ workspacePath: "/repo" }], refresh));
     await act(async () => fireTerminal());
-    vi
-      .mocked(mocks.services.windowControllerService.mutateTask)
-      .mockRejectedValueOnce(new Error("source temporarily offline"));
+    vi.mocked(mocks.services.windowControllerService.mutateTask).mockRejectedValueOnce(
+      new Error("source temporarily offline"),
+    );
     await act(async () => {
       window.dispatchEvent(new Event("blur"));
     });
@@ -298,12 +296,12 @@ describe("project sidebar foreground completion unread", () => {
     renderHook(() => useProjectUnreadSignals([{ workspacePath: "/repo" }], refresh));
     await act(async () => fireTerminal());
     // blur 发起补写，mutate 挂在 gate 上（在途）
-    vi
-      .mocked(mocks.services.windowControllerService.mutateTask)
-      .mockImplementationOnce(async () => {
+    vi.mocked(mocks.services.windowControllerService.mutateTask).mockImplementationOnce(
+      async () => {
         await gate;
         return { unreadAt: MARKER };
-      });
+      },
+    );
     await act(async () => {
       window.dispatchEvent(new Event("blur"));
     });
@@ -356,9 +354,9 @@ describe("project sidebar foreground completion unread", () => {
     renderHook(() => useProjectUnreadSignals([{ workspacePath: "/repo" }], refresh));
     await act(async () => fireTerminal());
     // 首次补写失败
-    vi
-      .mocked(mocks.services.windowControllerService.mutateTask)
-      .mockRejectedValueOnce(new Error("source temporarily offline"));
+    vi.mocked(mocks.services.windowControllerService.mutateTask).mockRejectedValueOnce(
+      new Error("source temporarily offline"),
+    );
     await act(async () => {
       window.dispatchEvent(new Event("blur"));
     });

@@ -48,9 +48,7 @@ describe("collectClosedRemoteWorkspaceKeys", () => {
       }),
     ];
 
-    expect(collectClosedRemoteWorkspaceKeys(previousTabs, nextTabs)).toEqual(
-      [],
-    );
+    expect(collectClosedRemoteWorkspaceKeys(previousTabs, nextTabs)).toEqual([]);
   });
 
   it("does not include workspace identity when the same remote survives under a new tab id", () => {
@@ -65,9 +63,7 @@ describe("collectClosedRemoteWorkspaceKeys", () => {
       }),
     ];
 
-    expect(collectClosedRemoteWorkspaceKeys(previousTabs, nextTabs)).toEqual(
-      [],
-    );
+    expect(collectClosedRemoteWorkspaceKeys(previousTabs, nextTabs)).toEqual([]);
   });
 
   it("falls back to workspacePath for legacy remote tabs without identity", () => {
@@ -77,9 +73,7 @@ describe("collectClosedRemoteWorkspaceKeys", () => {
       }),
     ];
 
-    expect(collectClosedRemoteWorkspaceKeys(previousTabs, [])).toEqual([
-      "/workspace/demo",
-    ]);
+    expect(collectClosedRemoteWorkspaceKeys(previousTabs, [])).toEqual(["/workspace/demo"]);
   });
 
   it("does not interpret same-tab identity rekey as an explicit close", () => {
@@ -91,14 +85,11 @@ describe("collectClosedRemoteWorkspaceKeys", () => {
     const nextTabs: WorkspaceTabState[] = [
       createWorkspaceTab("remote-1", "/workspace/demo", {
         workspaceIdentity: "remote:server:server-1:/workspace/demo",
-        previousWorkspaceIdentity:
-          "remote:ssh:linux-amd64-dev:dev:/workspace/demo",
+        previousWorkspaceIdentity: "remote:ssh:linux-amd64-dev:dev:/workspace/demo",
       }),
     ];
 
-    expect(collectClosedRemoteWorkspaceKeys(previousTabs, nextTabs)).toEqual(
-      [],
-    );
+    expect(collectClosedRemoteWorkspaceKeys(previousTabs, nextTabs)).toEqual([]);
   });
 });
 

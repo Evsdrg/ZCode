@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   BOT_PROVIDERS,
-  buildCurrentWorkspaceId,
   getBotProviderRegionTagLabelId,
   getBotReplyGranularitiesForProvider,
   resolveBotProviderEntry,
@@ -80,14 +79,5 @@ describe("getBotReplyGranularitiesForProvider", () => {
     for (const granularity of granularities) {
       expect(granularity.labelId.startsWith("bots.replyGranularity.")).toBe(true);
     }
-  });
-});
-
-describe("buildCurrentWorkspaceId", () => {
-  it("identity 优先，与 workspaceIdentity ?? workspacePath 的规则一致", () => {
-    expect(buildCurrentWorkspaceId("/repo", "id-1")).toBe("id-1");
-    expect(buildCurrentWorkspaceId("/repo")).toBe("/repo");
-    // 空白 identity 视作未提供，避免把空串当成稳定 key。
-    expect(buildCurrentWorkspaceId("/repo", "   ")).toBe("/repo");
   });
 });

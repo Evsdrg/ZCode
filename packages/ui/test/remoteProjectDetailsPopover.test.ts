@@ -25,7 +25,9 @@ it("悬停 400ms 打开可操作详情，点击立即打开，关闭菜单不残
   };
   const { rerender } = render(createElement(RemoteProjectDetailsPopover, props));
   const label = screen.getByRole("button", { name: "workspaceSidebar.connectionDetails" });
-  expect(document.getElementById(label.getAttribute("aria-describedby")!)?.textContent).toBe("remote.status.offline");
+  expect(document.getElementById(label.getAttribute("aria-describedby")!)?.textContent).toBe(
+    "remote.status.offline",
+  );
   fireEvent.pointerEnter(label, { pointerType: "mouse" });
   act(() => vi.advanceTimersByTime(399));
   expect(screen.queryByText("/srv/project")).toBeNull();

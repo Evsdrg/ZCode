@@ -815,6 +815,8 @@ export function SettingsPage({
   const [toolGroupingExploreEnabled, setToolGroupingExploreEnabled] = useState(true);
   const [toolGroupingTerminalEnabled, setToolGroupingTerminalEnabled] = useState(true);
   const [toolGroupingChangesEnabled, setToolGroupingChangesEnabled] = useState(false);
+  // 历史回合步骤折叠：打开巨型会话时节点数约减半（见 timeline 性能 spec）。
+  const [historyStepsGroupingEnabled, setHistoryStepsGroupingEnabled] = useState(true);
   const [zcodeInteractionBehavior, setZCodeInteractionBehavior] =
     useState<ZCodeInteractionBehavior>("queue");
   const [defaultHomeDir, setDefaultHomeDir] = useState("");
@@ -896,6 +898,7 @@ export function SettingsPage({
         setDesktopChromiumHardwareAccelerationEnabled(
           settings.desktopChromiumHardwareAccelerationEnabled ?? true,
         );
+        setHistoryStepsGroupingEnabled(settings.historyStepsGroupingEnabled ?? true);
       })
       .catch(() => {});
     localHostServices.systemService
@@ -950,6 +953,7 @@ export function SettingsPage({
     setToolGroupingExploreEnabled(sharedSettings.toolGroupingExploreEnabled ?? true);
     setToolGroupingTerminalEnabled(sharedSettings.toolGroupingTerminalEnabled ?? true);
     setToolGroupingChangesEnabled(sharedSettings.toolGroupingChangesEnabled ?? false);
+    setHistoryStepsGroupingEnabled(sharedSettings.historyStepsGroupingEnabled ?? true);
     setZCodeInteractionBehavior(sharedSettings.zcodeInteractionBehavior ?? "queue");
     setReceivePreviewUpdates(sharedSettings.receivePreviewUpdates ?? false);
     setAutoDownloadAndInstallUpdates(sharedSettings.autoDownloadAndInstallUpdates ?? false);
@@ -1391,6 +1395,23 @@ export function SettingsPage({
     },
     [updateSharedSettings],
   );
+
+  const handleHistoryStepsGroupingEnabledChange = useCallback(
+    async (enabled: boolean) => {
+      await runSettingsActionAsync({
+        featureId: "settings.tool_grouping",
+        action: "toggle_history_steps_grouping",
+        trigger: "switch",
+        operation: () => updateSharedSettings({ historyStepsGroupingEnabled: enabled }),
+        completed: {
+          resultSource: "shared_settings",
+          stateAfter: enabled ? "enabled" : "disabled",
+        },
+      });
+      setHistoryStepsGroupingEnabled(enabled);
+    },
+    [updateSharedSettings],
+  );
   const handleZCodeInteractionBehaviorChange = useCallback(
     async (behavior: ZCodeInteractionBehavior) => {
       await runSettingsActionAsync({
@@ -1825,6 +1846,10 @@ export function SettingsPage({
                               notificationSoundEnabled={notificationSoundEnabled}
                               closeToTrayOnWindows={closeToTrayOnWindows}
                               keepAwakeWhileRunning={sharedSettings?.keepAwakeWhileRunning ?? false}
+                              historyStepsGroupingEnabled={historyStepsGroupingEnabled}
+                              onHistoryStepsGroupingEnabledChange={
+                                handleHistoryStepsGroupingEnabledChange
+                              }
                               desktopChromiumHardwareAccelerationEnabled={
                                 desktopChromiumHardwareAccelerationEnabled
                               }
@@ -1852,13 +1877,13 @@ export function SettingsPage({
                                     trigger: "switch",
                                   },
                                   operation: () => {
-                                  // 浏览器端在用户开启通知（天然手势）时请求系统通知权限，
-                                  // 否则权限停留在 default，任务通知永不触发。桌面端无此方法。
-                                  if (enabled) {
-                                    void platform.requestNotificationPermission?.();
-                                  }
-                                  setNotificationEnabled(enabled);
-                                },
+                                    // 浏览器端在用户开启通知（天然手势）时请求系统通知权限，
+                                    // 否则权限停留在 default，任务通知永不触发。桌面端无此方法。
+                                    if (enabled) {
+                                      void platform.requestNotificationPermission?.();
+                                    }
+                                    setNotificationEnabled(enabled);
+                                  },
                                   completed: {
                                     resultSource: "local_commit",
                                     stateAfter: enabled ? "enabled" : "disabled",

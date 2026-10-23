@@ -84,9 +84,7 @@ describe("remote connection phase rail", () => {
       },
     ]);
 
-    expect(phases.find((phase) => phase.key === "handshake")?.status).toBe(
-      "failed",
-    );
+    expect(phases.find((phase) => phase.key === "handshake")?.status).toBe("failed");
   });
 
   it("keeps deployment progress visible between probe and daemon", () => {
@@ -95,23 +93,16 @@ describe("remote connection phase rail", () => {
       { message: "[source-server:upload] 40%", level: "info" },
     ]);
 
-    expect(phases.find((phase) => phase.key === "deploy")?.status).toBe(
-      "active",
-    );
-    expect(phases.find((phase) => phase.key === "handshake")?.status).toBe(
-      "pending",
-    );
+    expect(phases.find((phase) => phase.key === "deploy")?.status).toBe("active");
+    expect(phases.find((phase) => phase.key === "handshake")?.status).toBe("pending");
   });
 });
 
 describe("remote connection phase sub copy", () => {
   it("maps structured milestones to prototype sub descriptions", () => {
-    expect(
-      resolveRemoteConnectionPhaseSub(
-        { key: "channel", status: "complete" },
-        {},
-      ),
-    ).toEqual({ id: "remote.phaseSub.channelEstablished" });
+    expect(resolveRemoteConnectionPhaseSub({ key: "channel", status: "complete" }, {})).toEqual({
+      id: "remote.phaseSub.channelEstablished",
+    });
     expect(
       resolveRemoteConnectionPhaseSub(
         { key: "identify", status: "complete" },
@@ -142,25 +133,18 @@ describe("remote connection phase sub copy", () => {
       id: "remote.phaseSub.uploadFailed",
       values: { reason: "SFTP channel closed" },
     });
-    expect(
-      resolveRemoteConnectionPhaseSub({ key: "ready", status: "complete" }, {}),
-    ).toEqual({ id: "remote.phaseSub.readyOnline" });
+    expect(resolveRemoteConnectionPhaseSub({ key: "ready", status: "complete" }, {})).toEqual({
+      id: "remote.phaseSub.readyOnline",
+    });
   });
 
   it("stays empty when no structured data source backs the sub description", () => {
     // 缺结构化数据源的阶段（握手端口、部署版本等）留空，不透传英文原始日志。
     expect(
-      resolveRemoteConnectionPhaseSub(
-        { key: "handshake", status: "complete" },
-        {},
-      ),
+      resolveRemoteConnectionPhaseSub({ key: "handshake", status: "complete" }, {}),
     ).toBeNull();
-    expect(
-      resolveRemoteConnectionPhaseSub({ key: "channel", status: "active" }, {}),
-    ).toBeNull();
-    expect(
-      resolveRemoteConnectionPhaseSub({ key: "deploy", status: "active" }, {}),
-    ).toBeNull();
+    expect(resolveRemoteConnectionPhaseSub({ key: "channel", status: "active" }, {})).toBeNull();
+    expect(resolveRemoteConnectionPhaseSub({ key: "deploy", status: "active" }, {})).toBeNull();
   });
 });
 
@@ -223,8 +207,8 @@ describe("sidebar operation progress", () => {
   ])("$name 不再算作进行中：回到第 1 步且不计时", ({ tail }) => {
     // 修复原因：Host 保留的是最近一次操作，断线后首次重试前、两次重试之间读到的都是已结束操作；
     // 曾据此显示“第 4/4 步 · 已用 120 分”。
-    expect(resolveRemoteOperationProgress([log("probe", 1_000), log("daemon", 2_000), tail])).toEqual(
-      { index: 0, total: 4, titleId: "remote.phase.channel" },
-    );
+    expect(
+      resolveRemoteOperationProgress([log("probe", 1_000), log("daemon", 2_000), tail]),
+    ).toEqual({ index: 0, total: 4, titleId: "remote.phase.channel" });
   });
 });

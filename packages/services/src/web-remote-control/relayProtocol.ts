@@ -9,60 +9,11 @@ import { VSBuffer } from "@zcode/rpc";
  * 凭证完全由设备本地生成、经二维码带外交给手机端。
  */
 
-export const WEB_REMOTE_CONTROL_RELAY_WS_URL_ENV_KEY = "ZCODE_WEB_REMOTE_CONTROL_RELAY_WS_URL";
-export const DEFAULT_WEB_REMOTE_CONTROL_RELAY_WS_URL = "wss://zcode.z.ai/ws";
-export const DEFAULT_WEB_REMOTE_CONTROL_PAIRING_PAGE_URL = "https://zcode.z.ai/remote/v4";
-
-/** relay 单帧上限与官方桌面一致；超过即拒发/拒收，避免长连接被大帧拖死。 */
 export const WEB_REMOTE_CONTROL_MAX_FRAME_BYTES = 4 * 1024 * 1024;
 
-export function resolveRelayWsUrl(env: Record<string, string | undefined> = process.env): string {
-  return (
-    env[WEB_REMOTE_CONTROL_RELAY_WS_URL_ENV_KEY]?.trim() || DEFAULT_WEB_REMOTE_CONTROL_RELAY_WS_URL
-  );
-}
-
-/** 设备凭证。deviceMid 是本地稳定设备标识；deviceSid 由 relay 注册后分配。 */
-export interface RelayDeviceCredential {
-  deviceMid: string;
-  deviceSid?: string;
-  passHash: string;
-}
-
-export function createRelayPassword(): string {
-  return randomBytes(24).toString("base64url");
-}
-
-export function createRelayPassHash(password: string): string {
-  return createHash("sha256").update(password).digest("base64");
-}
-
-export function createRelayDeviceCredential(): RelayDeviceCredential {
-  return { deviceMid: randomUUID(), passHash: createRelayPassHash(createRelayPassword()) };
-}
-
-export function buildRelayPairingQrUrl(options: {
-  baseUrl?: string;
-  deviceSid: string;
-  passHash: string;
-  timestamp?: number;
-  deviceMid: string;
-  deviceName?: string;
-  appVersion?: string;
-}): string {
-  const url = new URL(options.baseUrl ?? DEFAULT_WEB_REMOTE_CONTROL_PAIRING_PAGE_URL);
-  url.searchParams.set("sid", options.deviceSid);
-  url.searchParams.set("hash", options.passHash);
-  url.searchParams.set("t", String(options.timestamp ?? Date.now()));
-  url.searchParams.set("mid", options.deviceMid);
-  if (options.deviceName?.trim()) url.searchParams.set("name", options.deviceName.trim());
-  if (options.appVersion?.trim()) url.searchParams.set("app_version", options.appVersion.trim());
-  return url.toString();
-}
-
-// ============================================================================
-// v4 RPC 桥帧 —— relay data 帧的 payload 格式
-// ============================================================================
+// V1 设备凭据（passHash 配对）与二维码构造已随官方 V2 中转协议移除：
+// V2 由账号 JWT 经 HTTP register/token 换取 deviceSid，二维码经
+// shared 的 buildWebRemoteControlExternalQrUrl 构造（见 webRemoteControlRelayService.ts）。
 
 export interface RelayRpcFrameChecksum {
   algorithm: "crc32";

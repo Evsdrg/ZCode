@@ -42,9 +42,7 @@ describe("Source Server display-name registry", () => {
     const snapshotOf = (displayName: string, generation: number) => ({
       generation,
       profiles: [],
-      servers: [
-        { sourceServerId: "source-a", displayName, installState: "installed" },
-      ],
+      servers: [{ sourceServerId: "source-a", displayName, installState: "installed" }],
       workspaceHistory: [],
       states: [],
       failedPathCount: 0,
@@ -63,14 +61,10 @@ describe("Source Server display-name registry", () => {
 
     const registry = getSourceServerDisplayNameRegistry(management);
     const dispose = registry.subscribe(vi.fn());
-    await vi.waitFor(() =>
-      expect(registry.getSnapshot().get("source-a")).toBe("Old Name"),
-    );
+    await vi.waitFor(() => expect(registry.getSnapshot().get("source-a")).toBe("Old Name"));
 
     directoryEmitter.fire({ generation: 2 });
-    await vi.waitFor(() =>
-      expect(registry.getSnapshot().get("source-a")).toBe("New Name"),
-    );
+    await vi.waitFor(() => expect(registry.getSnapshot().get("source-a")).toBe("New Name"));
     expect(getSnapshot).toHaveBeenCalledTimes(2);
     dispose();
   });

@@ -126,7 +126,10 @@ export function RemoteProjectDetailsPopover({
         >
           <span id={statusId} className="sr-only">
             {presentation.recovery
-              ? intl.formatMessage({ id: presentation.recovery.messageId }, presentation.recovery.values)
+              ? intl.formatMessage(
+                  { id: presentation.recovery.messageId },
+                  presentation.recovery.values,
+                )
               : intl.formatMessage({ id: presentation.shortMessageId })}
           </span>
           <span className="truncate">

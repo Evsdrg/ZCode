@@ -228,10 +228,10 @@ export async function reconnectRemoteWorkspaceHistoryEntry({
     let sessionId: string;
     try {
       sessionId = await connectRemoteWorkspaceTarget(reconnectTarget, options?.requestId, {
-      workspacePath: sessionEntry.workspacePath,
-      workspaceIdentity: fallbackWorkspaceIdentity,
-      connectTrigger: "reconnect",
-    });
+        workspacePath: sessionEntry.workspacePath,
+        workspaceIdentity: fallbackWorkspaceIdentity,
+        connectTrigger: "reconnect",
+      });
     } catch (error) {
       // 该结构化错误只由 Host 在 Source 已上线后的目录 admission 发出。发起项目被删
       // 不代表 SSH 凭据失败；先放行复用同一凭据的 siblings，再按原路径记录该项目失败。

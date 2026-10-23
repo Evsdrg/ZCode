@@ -63,19 +63,11 @@ describe("sidebarPurposeSectionPreferences", () => {
       sourceGroupKey: "server:source-a",
     });
 
-    expect(
-      resolveSidebarPurposeSectionExpanded(next, "projects", "server:source-a"),
-    ).toBe(false);
-    expect(
-      resolveSidebarPurposeSectionExpanded(next, "projects", "server:source-b"),
-    ).toBe(true);
-    expect(
-      resolveSidebarPurposeSectionExpanded(
-        next,
-        "conversations",
-        "server:source-a",
-      ),
-    ).toBe(true);
+    expect(resolveSidebarPurposeSectionExpanded(next, "projects", "server:source-a")).toBe(false);
+    expect(resolveSidebarPurposeSectionExpanded(next, "projects", "server:source-b")).toBe(true);
+    expect(resolveSidebarPurposeSectionExpanded(next, "conversations", "server:source-a")).toBe(
+      true,
+    );
   });
 
   it("persists source-group expansion without changing the legacy fallback", () => {
@@ -94,16 +86,10 @@ describe("sidebarPurposeSectionPreferences", () => {
 
     expect(restored.projectsExpanded).toBe(true);
     expect(restored.conversationsExpanded).toBe(true);
-    expect(
-      resolveSidebarPurposeSectionExpanded(restored, "conversations", "local"),
-    ).toBe(false);
-    expect(
-      resolveSidebarPurposeSectionExpanded(
-        restored,
-        "conversations",
-        "server:source-a",
-      ),
-    ).toBe(true);
+    expect(resolveSidebarPurposeSectionExpanded(restored, "conversations", "local")).toBe(false);
+    expect(resolveSidebarPurposeSectionExpanded(restored, "conversations", "server:source-a")).toBe(
+      true,
+    );
   });
 
   it("falls back missing or invalid fields independently", () => {

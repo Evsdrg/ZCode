@@ -50,10 +50,7 @@ describe("Source Server status registry directory events", () => {
       servers: [],
       states: [],
     };
-    const getSnapshot = vi
-      .fn()
-      .mockResolvedValueOnce(withDevice)
-      .mockResolvedValueOnce(removed);
+    const getSnapshot = vi.fn().mockResolvedValueOnce(withDevice).mockResolvedValueOnce(removed);
     const management = {
       getSnapshot,
       onDidChangeState: stateEmitter.event,
@@ -62,14 +59,10 @@ describe("Source Server status registry directory events", () => {
 
     const registry = getSourceServerStatusRegistry(management);
     const dispose = registry.subscribe(vi.fn());
-    await vi.waitFor(() =>
-      expect(registry.getSnapshot().get("source-a")).toBe("online"),
-    );
+    await vi.waitFor(() => expect(registry.getSnapshot().get("source-a")).toBe("online"));
 
     directoryEmitter.fire({ generation: 2 });
-    await vi.waitFor(() =>
-      expect(registry.getSnapshot().has("source-a")).toBe(false),
-    );
+    await vi.waitFor(() => expect(registry.getSnapshot().has("source-a")).toBe(false));
     expect(getSnapshot).toHaveBeenCalledTimes(2);
     dispose();
   });

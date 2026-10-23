@@ -1,27 +1,30 @@
 import { hostname } from "node:os";
-import { WebSocket } from "ws";
-import { ZCODE_VERSION } from "@zcode/shared";
+import { randomUUID } from "node:crypto";
+import {
+  ZCODE_VERSION,
+  buildWebRemoteControlExternalQrUrl,
+  resolveWebRemoteControlRelayWsUrl,
+  type PersistedWorkspaceSessionEntry,
+  type WebRemoteControlAppPayload,
+} from "@zcode/shared";
 import { IZCodeTaskService } from "../session/zcodeTaskService.js";
 import { ISettingService } from "../setting/setting.js";
-import type { PersistedWorkspaceSessionEntry, WebRemoteControlAppPayload } from "@zcode/shared";
 import { basename } from "node:path";
 import type { ICredentialService } from "../credential/credential.js";
 import { createServiceLogger } from "../logger/serviceLogger.js";
 import type { ServiceCollection } from "../collection.js";
 import {
-  buildRelayPairingQrUrl,
-  createRelayDeviceCredential,
-  resolveRelayWsUrl,
-  type RelayDeviceCredential,
-} from "./relayProtocol.js";
-// transport 使用下沉自桌面官方的实现（含其自带测试）：状态机更完整
-// （stale 恢复、重连 jitter、KICKED/INTERNAL 分支），协议面与我们手写版一致。
+  createTelemetryAuthorizationLoader,
+  createTelemetryUserIdLoader,
+} from "../telemetry/telemetryAccountLoaders.js";
+// transport 使用下沉自桌面官方 V2 的实现（3.16.2）：握手改为账号 JWT 换 token，
+// 配对状态由 pair_status 驱动；协议与重连/心跳状态机保持官方原样。
 import {
   WebRemoteControlDeviceTransport,
   type WebRemoteControlDeviceTransportState,
   type WebRemoteControlRelaySocketCtor,
 } from "./relayDeviceTransportV2.js";
-import { createNodeWebRemoteControlRelayAuthProvider } from "./relayAuthProvider.js";
+import { createWebRemoteControlV2Http } from "./relayDeviceHttpV2.js";
 import { createRelayBridgeChannel, type RelayBridgeChannel } from "./relayBridgeChannel.js";
 import {
   projectRelayTaskView,
@@ -39,19 +42,21 @@ import type {
 } from "./webRemoteControlRelay.js";
 
 /**
- * 官方中转远程控制服务实现。
+ * 官方中转远程控制服务实现（V2）。
  *
- * 状态唯一所有者：本实例持有 transport、bridge 与持久化意图（enabled + 设备凭证）。
- * UI 经 RPC 读取投影（getStatus/getPairingInfo）并发命令（setEnabled/resetPairing）。
- * 凭据含 passHash，整体经 credentialService 加密落盘；server 重启按 enabled 自动重连，
- * 复用同一 deviceSid，二维码不变。
+ * 状态唯一所有者：本实例持有 transport、bridge 与持久化意图（enabled + deviceMid）。
+ * V2 鉴权：复用桌面同款只读账号入口（telemetryAccountLoaders）读取 z.ai 登录 JWT，
+ * 经官方 HTTP register/token 换取 deviceSid 与一次性 WS token；不再使用 V1 passHash 配对。
+ * deviceSid 官方存在 AppSettings.webRemoteControlRelayV2Device；enabled/deviceMid 由
+ * credentialService 持久化（沿用旧 key，自动迁移旧 deviceMid，二维码随新 sid 更新）。
  */
 
 const STATE_STORAGE_KEY = "web-remote-control:relay-device-state";
+const DEFAULT_REMOTE_URL = "https://zcode.z.ai/remote/v4";
 
 interface PersistedRelayState {
   enabled: boolean;
-  credential: RelayDeviceCredential;
+  deviceMid: string;
 }
 
 export interface CreateWebRemoteControlRelayServiceOptions {
@@ -59,9 +64,13 @@ export interface CreateWebRemoteControlRelayServiceOptions {
   /** 数据面在 paired 时才挂载；注册链求值期 services 尚未建好，必须经 getter 注入。 */
   resolveServices: () => ServiceCollection;
   relayWsUrl?: string;
+  /** 官方手机端入口（二维码 baseUrl）；缺省用官方默认。 */
+  remoteUrl?: string;
   deviceName?: string;
   appVersion?: string;
   webSocketCtor?: WebRemoteControlRelaySocketCtor;
+  /** 测试注入 HTTP fetch；缺省用 Node fetch（官方 http 客户端同约定）。 */
+  httpFetcher?: typeof fetch;
 }
 
 export function createWebRemoteControlRelayService(
@@ -75,13 +84,15 @@ export function createWebRemoteControlRelayService(
     warn: (...args: unknown[]) => logger.warn(undefined, ...args),
     error: (...args: unknown[]) => logger.error(undefined, ...args),
   };
-  const relayWsUrl = options.relayWsUrl ?? resolveRelayWsUrl();
+  const relayWsUrl = options.relayWsUrl ?? resolveWebRemoteControlRelayWsUrl();
+  const remoteUrl = options.remoteUrl ?? DEFAULT_REMOTE_URL;
+  const endpointOrigin = new URL(remoteUrl).origin;
   const deviceName = options.deviceName ?? hostname();
   const appVersion = options.appVersion ?? ZCODE_VERSION;
-  const webSocketCtor: WebRemoteControlRelaySocketCtor =
-    options.webSocketCtor ??
-    ((url, wsOptions) =>
-      new WebSocket(url, wsOptions) as unknown as ReturnType<WebRemoteControlRelaySocketCtor>);
+  const http = createWebRemoteControlV2Http(endpointOrigin, options.httpFetcher ?? fetch);
+  // 与桌面同款：只读账号入口，不触发 host OAuth 登出；JWT 换 WS token 由官方 HTTP 完成。
+  const loadUserId = createTelemetryUserIdLoader(options.credentialService);
+  const loadAuthorization = createTelemetryAuthorizationLoader(options.credentialService);
 
   let persisted: PersistedRelayState | null = null;
   let readyPromise: Promise<void> | null = null;
@@ -90,6 +101,7 @@ export function createWebRemoteControlRelayService(
   let runtimeState: WebRemoteControlRelayState = "disabled";
   let errorCode: string | undefined;
   let errorMessage: string | undefined;
+  let currentDeviceSid: string | undefined;
 
   async function ensureReady(): Promise<PersistedRelayState | null> {
     if (!readyPromise) {
@@ -97,15 +109,13 @@ export function createWebRemoteControlRelayService(
         const raw = await options.credentialService.load(STATE_STORAGE_KEY);
         if (!raw) return;
         try {
-          const parsed = JSON.parse(raw) as PersistedRelayState;
-          if (
-            parsed &&
-            typeof parsed.enabled === "boolean" &&
-            parsed.credential &&
-            typeof parsed.credential.deviceMid === "string" &&
-            typeof parsed.credential.passHash === "string"
-          ) {
-            persisted = parsed;
+          const parsed = JSON.parse(raw) as
+            | (PersistedRelayState & { credential?: { deviceMid?: string } })
+            | null;
+          // 迁移：V1 持久化里 deviceMid 在 credential 内；enabled/deviceMid 语义不变。
+          const deviceMid = parsed?.deviceMid ?? parsed?.credential?.deviceMid;
+          if (parsed && typeof parsed.enabled === "boolean" && deviceMid) {
+            persisted = { enabled: parsed.enabled, deviceMid };
           }
         } catch {
           logger.warn(undefined, "[relay] 持久化状态损坏，忽略并按首次使用处理");
@@ -119,6 +129,46 @@ export function createWebRemoteControlRelayService(
   async function persist(next: PersistedRelayState): Promise<void> {
     persisted = next;
     await options.credentialService.save(STATE_STORAGE_KEY, JSON.stringify(next));
+  }
+
+  /** V2 官方存储位：AppSettings.webRemoteControlRelayV2Device（与桌面同字段，可互通）。 */
+  async function loadStoredDeviceSid(): Promise<string | undefined> {
+    const services = options.resolveServices();
+    const settingService = services.getOptional(ISettingService);
+    if (!settingService) return undefined;
+    try {
+      return (await settingService.get()).webRemoteControlRelayV2Device?.deviceSid;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async function saveStoredDeviceSid(deviceSid: string): Promise<void> {
+    const services = options.resolveServices();
+    const settingService = services.getOptional(ISettingService);
+    if (!settingService) return;
+    try {
+      // 官方 schema 要求 userId/endpointOrigin（换账号/换环境时便于失效清理）。
+      const { userId } = await requireLogin();
+      await settingService.update({
+        webRemoteControlRelayV2Device: { deviceSid, userId, endpointOrigin },
+      });
+    } catch (error) {
+      logger.warn(undefined, "[relay] deviceSid 持久化失败", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /** 登录态读取：无登录时抛 auth-required，由 transport 记为终态错误。 */
+  async function requireLogin(): Promise<{ userId: string; jwt: string }> {
+    const userId = await loadUserId();
+    const authorization = await loadAuthorization(userId);
+    const jwt = authorization?.slice("Bearer ".length);
+    if (!userId || !jwt) {
+      throw new Error("relay auth-required: z.ai account login is required");
+    }
+    return { userId, jwt };
   }
 
   function mapTransportState(
@@ -234,7 +284,7 @@ export function createWebRemoteControlRelayService(
       source: createRelayWorkspaceSource({
         primaryWorkspace: resolvePrimaryWorkspace(),
         port: createWorkspaceSourcePort(),
-        windowControlSessionId: persisted?.credential.deviceSid ?? deviceName,
+        windowControlSessionId: currentDeviceSid ?? deviceName,
         logger,
       }),
       logger,
@@ -251,27 +301,51 @@ export function createWebRemoteControlRelayService(
     bridge = null;
   }
 
-  function startTransport(credential: RelayDeviceCredential): void {
+  function startTransport(deviceMid: string): void {
     transport?.dispose();
     unmountBridge();
     applyRuntimeState("connecting");
     transport = new WebRemoteControlDeviceTransport({
       relayWsUrl,
-      deviceMid: credential.deviceMid,
-      // 有 deviceSid 走 persisted 复用旧身份（二维码不变）；否则 register 新注册。
-      auth: credential.deviceSid
-        ? { mode: "persisted", deviceSid: credential.deviceSid, passHash: credential.passHash }
-        : { mode: "register", passHash: credential.passHash },
+      deviceMid,
       meta: { platform: process.platform, version: appVersion, name: deviceName },
-      authProvider: createNodeWebRemoteControlRelayAuthProvider(),
       logger: transportLogger,
-      socketCtor: webSocketCtor,
+      ...(options.webSocketCtor ? { socketCtor: options.webSocketCtor } : {}),
+      // V2 鉴权：官方 HTTP 用当前登录 JWT 换一次性 WS token（15s 超时与重试由 http 层负责）。
+      getToken: async (signal) => {
+        const { jwt } = await requireLogin();
+        const token = await http.token(jwt, signal);
+        return token;
+      },
+      // 注册/复用 deviceSid：AUTH_FAILED 时 transport 以 forceRegistration 再调用，
+      // 这里丢弃旧 sid 重新注册并落盘，语义对齐桌面 manager。
+      resolveDeviceSid: async (signal, forceRegistration) => {
+        if (!forceRegistration) {
+          const stored = currentDeviceSid ?? (await loadStoredDeviceSid());
+          if (stored) {
+            currentDeviceSid = stored;
+            return stored;
+          }
+        } else if (currentDeviceSid) {
+          try {
+            const { jwt } = await requireLogin();
+            await http.delete(currentDeviceSid, jwt, signal);
+          } catch {
+            // 删除失败不阻塞重注册；服务端按 KICKED/AUTH_FAILED 收口旧 sid。
+          }
+        }
+        const { jwt } = await requireLogin();
+        const sid = await http.register(deviceMid, jwt, signal);
+        currentDeviceSid = sid;
+        await saveStoredDeviceSid(sid);
+        return sid;
+      },
       onStateChange: (state) => {
         const next = mapTransportState(state);
         // 桥的挂载/卸载是可选功能，异常只降级不冒泡：这里由 socket 事件驱动，
         // 未捕获异常会终止 server 主进程（曾实测：日志包装层缺 dispose 导致整个 WebUI 挂掉）。
         try {
-          if (state === "waiting_terminal") unmountBridge();
+          if (state === "waiting_terminal" || state === "kicked") unmountBridge();
           if (state === "paired") mountBridge();
         } catch (error) {
           logger.warn(undefined, "[relay] 桥状态切换失败（已忽略，不影响主进程）", {
@@ -292,32 +366,8 @@ export function createWebRemoteControlRelayService(
         bridge.routePayload(payload);
         return true;
       },
-      onRegisteredAuth: (next) => {
-        if (!persisted) return;
-        void persist({
-          ...persisted,
-          credential: { deviceMid: persisted.credential.deviceMid, ...next },
-        }).catch((error: unknown) => {
-          logger.warn(undefined, "[relay] 凭据持久化失败", {
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      },
-      // 持久 deviceSid 失效时 transport 内部已自动转 register 重签并回调；
-      // 这里只负责把本地持久化状态同步成“已丢弃 deviceSid”。
-      onInvalidPersistedAuth: async () => {
-        if (!persisted?.credential.deviceSid) return;
-        logger.warn(undefined, "[relay] 持久凭据被拒，丢弃 deviceSid 重新注册");
-        await persist({
-          enabled: persisted.enabled,
-          credential: {
-            deviceMid: persisted.credential.deviceMid,
-            passHash: persisted.credential.passHash,
-          },
-        });
-      },
       onError: (error) => {
-        errorCode = "relay_error";
+        errorCode = error.message.includes("auth-required") ? "auth_required" : "relay_error";
         errorMessage = error.message;
         applyRuntimeState("error");
         transport?.dispose();
@@ -326,17 +376,6 @@ export function createWebRemoteControlRelayService(
       },
     });
     transport.start();
-  }
-
-  async function handleResetCredential(): Promise<void> {
-    const current = await ensureReady();
-    const fresh = createRelayDeviceCredential();
-    await persist({
-      enabled: current?.enabled ?? true,
-      credential: fresh,
-    });
-    if (persisted?.enabled) startTransport(fresh);
-    else applyRuntimeState("disabled");
   }
 
   const service: IWebRemoteControlRelayService = {
@@ -356,13 +395,14 @@ export function createWebRemoteControlRelayService(
     async getPairingInfo() {
       const current = await ensureReady();
       if (!current?.enabled) return null;
-      const sid = current.credential.deviceSid;
+      const sid = currentDeviceSid ?? (await loadStoredDeviceSid());
       if (!sid) return null;
+      // V2 二维码：官方手机页 URL + sid/mid/name/app_version（不再携带 hash/t 凭据）。
       return {
-        qrUrl: buildRelayPairingQrUrl({
+        qrUrl: buildWebRemoteControlExternalQrUrl({
+          baseUrl: remoteUrl,
           deviceSid: sid,
-          passHash: current.credential.passHash,
-          deviceMid: current.credential.deviceMid,
+          deviceMid: current.deviceMid,
           deviceName,
           appVersion,
         }),
@@ -377,10 +417,11 @@ export function createWebRemoteControlRelayService(
         if (current?.enabled && transport) {
           return service.getStatus();
         }
-        const credential = current?.credential ?? createRelayDeviceCredential();
-        await persist({ enabled: true, credential });
-        startTransport(credential);
-        logger.info(undefined, "[relay] 官方中转远控已开启", { relayWsUrl });
+        // deviceMid 必须跨会话稳定（服务端按 mid 识别设备）；旧状态没有时生成并落盘。
+        const deviceMid = current?.deviceMid ?? `zcode-server-${randomUUID()}`;
+        await persist({ enabled: true, deviceMid });
+        startTransport(deviceMid);
+        logger.info(undefined, "[relay] 官方中转远控已开启（V2）", { relayWsUrl });
       } else {
         if (current && current.enabled) {
           await persist({ ...current, enabled: false });
@@ -395,7 +436,21 @@ export function createWebRemoteControlRelayService(
     },
 
     async resetPairing(): Promise<WebRemoteControlRelayStatus> {
-      await handleResetCredential();
+      // V2 语义：作废当前 deviceSid 并强制重注册，旧二维码随 sid 失效。
+      const current = await ensureReady();
+      const deviceMid = current?.deviceMid ?? `zcode-server-${randomUUID()}`;
+      await persist({ enabled: current?.enabled ?? true, deviceMid });
+      if (currentDeviceSid) {
+        try {
+          const { jwt } = await requireLogin();
+          await http.delete(currentDeviceSid, jwt, AbortSignal.timeout(15_000));
+        } catch {
+          // 删除失败同样由服务端按 AUTH_FAILED 收口；不阻塞本地重置。
+        }
+      }
+      currentDeviceSid = undefined;
+      if (persisted?.enabled) startTransport(deviceMid);
+      else applyRuntimeState("disabled");
       return service.getStatus();
     },
   };
@@ -403,7 +458,7 @@ export function createWebRemoteControlRelayService(
   // server 重启后按持久化意图自动恢复连接；不阻塞服务注册本身。
   void ensureReady()
     .then((current) => {
-      if (current?.enabled) startTransport(current.credential);
+      if (current?.enabled) startTransport(current.deviceMid);
     })
     .catch((error: unknown) => {
       logger.warn(undefined, "[relay] 启动恢复失败", {

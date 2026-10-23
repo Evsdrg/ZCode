@@ -40,10 +40,7 @@ function setup() {
       supportedArtifactTypes: [],
     } as Pick<
       ConversationSharePreflightResult,
-      | "revision"
-      | "logEpoch"
-      | "capabilitiesFingerprint"
-      | "supportedArtifactTypes"
+      "revision" | "logEpoch" | "capabilitiesFingerprint" | "supportedArtifactTypes"
     >,
   };
   const fingerprints = new Map(ids.map((id) => [id, `old-${id}`]));
@@ -98,12 +95,7 @@ it("畸形成功响应结束 checking，保留原元信息，重试成功清除�
   await vi.runAllTimersAsync();
   expect(s.meta.current).toBe(original);
   expect(
-    getMissingConversationSharePreflightTurnIds(
-      "scope",
-      s.ids,
-      s.cache.current,
-      s.fingerprints,
-    ),
+    getMissingConversationSharePreflightTurnIds("scope", s.ids, s.cache.current, s.fingerprints),
   ).toEqual([]);
   for (const id of s.ids)
     expect(s.cache.current.get(s.key(id))?.blockingIssues).toEqual([
@@ -129,15 +121,12 @@ it("畸形成功响应结束 checking，保留原元信息，重试成功清除�
     }),
     { wrapper: TooltipProvider },
   );
-  fireEvent.click(
-    screen.getByTestId("conversation-share-selection-preflight-status"),
-  );
+  fireEvent.click(screen.getByTestId("conversation-share-selection-preflight-status"));
   fireEvent.click(screen.getByTestId("conversation-share-preflight-retry"));
   expect(retry).toHaveBeenCalledTimes(1);
   await vi.runAllTimersAsync();
   expect(s.meta.current.capabilitiesFingerprint).toBe("new");
-  for (const id of s.ids)
-    expect(s.cache.current.get(s.key(id))?.blockingIssues).toEqual([]);
+  for (const id of s.ids) expect(s.cache.current.get(s.key(id))?.blockingIssues).toEqual([]);
   expect(s.onUpdated).toHaveBeenCalledTimes(2);
 });
 it("失败处理器抛错仍为所有请求轮次写入可重试终态", async () => {
@@ -153,12 +142,7 @@ it("失败处理器抛错仍为所有请求轮次写入可重试终态", async (
   });
   await vi.runAllTimersAsync();
   expect(
-    getMissingConversationSharePreflightTurnIds(
-      "scope",
-      s.ids,
-      s.cache.current,
-      s.fingerprints,
-    ),
+    getMissingConversationSharePreflightTurnIds("scope", s.ids, s.cache.current, s.fingerprints),
   ).toEqual([]);
   expect(s.onUpdated).toHaveBeenCalledTimes(1);
 });
