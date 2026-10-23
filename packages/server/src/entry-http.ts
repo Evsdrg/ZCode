@@ -1,11 +1,13 @@
 import {
   AutomationRepo,
   AutomationScheduler,
-  createServerHostServices,
+  createLocalServices,
   createServiceLogger,
+  createSettingService,
   createTopicResourcePeers,
   disposeServiceResourcesAndWait,
   getAppConfigDir,
+  migrateApplicationStorage,
   OffPeakTaskRepo,
 } from "@zcode/services/node";
 import { formatLogPrefix } from "@zcode/shared";
@@ -38,36 +40,43 @@ async function main(): Promise<void> {
   // 任务域（复用与桌面同一份调度核心，见 docs/specs/selfhost-server-cron-scheduler.md）。
   const automationRepo = new AutomationRepo();
   const offPeakRepo = new OffPeakTaskRepo();
-  // 派发运行时依赖 ServiceCollection；它晚于 createServerHostServices 返回，用前向引用在
+  // 派发运行时依赖 ServiceCollection；它晚于 createLocalServices 返回，用前向引用在
   // 调用期解析。「立即运行」只会发生在服务集合装配完成之后。
   let dispatchRuntime: ReturnType<typeof createServerAutomationDispatchRuntime> | undefined;
 
   const serverId = resolveHttpServerId();
-  const { services, workspaceIdentityMapper, migrationFailedPathCount } =
-    await createServerHostServices({
-      topicResourceRelayChannel: (request) => topicResourcePeers.getChannel(request),
-      sourceServerId: serverId,
-      zcodeBuiltinProviderConfigFilePath,
-      providerProvisioningTargetEnabled: Boolean(authToken),
-      // 自部署形态的服务开关（fork）：relay 远控、全工作区任务视图、窗口 Controller、
-      // 附件持久上传、托管浏览器执行器与手动调度派发。
-      selfHostOptions: {
-        webRemoteControlRelay: true,
-        // 自部署语义：WebUI 可见本机全部工作区的任务（含「不在项目中工作」）。
-        taskListAllWorkspaces: true,
-        // 桌面 Host 自带窗口 Controller；自部署缺它会让全局任务列表（useGlobalTaskList）恒空。
-        windowController: true,
-        arbitraryFileUploads: true,
-        // 「立即运行」在自部署形态下由本进程直接派发；缺失该 dispatcher 会让 runAutomationNow 抛错。
-        onAutomationManualRunRequested: (params) => {
-          if (!dispatchRuntime) {
-            return Promise.reject(new Error("Automation dispatch runtime is not initialized."));
-          }
-          return dispatchRuntime.dispatchManualRun(params);
-        },
-        ...(browserExecutor ? { browserControlExecutor: browserExecutor } : {}),
-      },
-    });
+  // 先串行预热迁移：AutomationRepo / OffPeakTaskRepo / TaskIndexRepo 各自懒加载时，会分别用独立
+  // 连接对同一个 tasks-index.sqlite 跑迁移（含备份，持写锁数秒）；若被 AutomationScheduler 与其它
+  // service 同时触发，后到者会撞 busy_timeout 报 `database is locked`，启动失败。上游
+  // createServerHostServices 内部就是这么先 migrateApplicationStorage 再装配的。这里走 local 语义
+  //（hostId 省略），与 Electron Local Host 一致；迁移完成后各 repo 的 ensureReady 会直接快速返回。
+  await migrateApplicationStorage(await createSettingService().get());
+  // 自部署 WebUI 只是把 Electron 的 WebUI 拆到浏览器：服务与数据语义必须与 Electron Local Host
+  // 完全一致。这里沿用 v3.14.3/v3.15.1 的 createLocalServices（宿主身份 = local），
+  // 不采用上游 3.16 的 createServerHostServices（它把 projectStorageHostId 设为
+  // remote:server:<id>，导致任务/项目归到远端 host、发消息报 project.host-offline）。
+  // fork 需要的服务开关照常透传。
+  const services = createLocalServices({
+    topicResourceRelayChannel: (request) => topicResourcePeers.getChannel(request),
+    zcodeBuiltinProviderConfigFilePath,
+    providerProvisioningTargetEnabled: Boolean(authToken),
+    // 自部署形态的服务开关（fork）：relay 远控、全工作区任务视图、窗口 Controller、
+    // 附件持久上传、托管浏览器执行器与手动调度派发。
+    webRemoteControlRelay: true,
+    // 自部署语义：WebUI 可见本机全部工作区的任务（含「不在项目中工作」）。
+    taskListAllWorkspaces: true,
+    // 桌面 Host 自带窗口 Controller；自部署缺它会让全局任务列表（useGlobalTaskList）恒空。
+    windowController: true,
+    arbitraryFileUploads: true,
+    // 「立即运行」在自部署形态下由本进程直接派发；缺失该 dispatcher 会让 runAutomationNow 抛错。
+    onAutomationManualRunRequested: (params) => {
+      if (!dispatchRuntime) {
+        return Promise.reject(new Error("Automation dispatch runtime is not initialized."));
+      }
+      return dispatchRuntime.dispatchManualRun(params);
+    },
+    ...(browserExecutor ? { browserControlExecutor: browserExecutor } : {}),
+  });
 
   const automationSchedulerLogger = createServiceLogger("automation-scheduler");
   dispatchRuntime = createServerAutomationDispatchRuntime({
@@ -91,8 +100,6 @@ async function main(): Promise<void> {
 
   const server = createHttpServer(services, port, {
     serverId,
-    workspaceIdentityMapper,
-    migrationFailedPathCount,
     virtualProjects: true,
     topicResourcePeers,
     ...(host ? { host } : {}),
