@@ -34,7 +34,7 @@ modules:
     managed: true
     requires: [shared, rpc, services]
     publicEntrypoints: [packages/services/src/storage/contract.ts]
-    layers: {domain: domain, app: app, adapters: adapters}
+    layers: { domain: domain, app: app, adapters: adapters }
     layerOrder: [domain, app, adapters]
     owner: desktop-settings
   - id: client
@@ -251,14 +251,19 @@ modules:
     managed: true
     requires: []
     publicEntrypoints: [packages/shared/src/gen-ui/index.ts, packages/shared/src/gen-ui/contract.ts]
-    layers: {domain: "."}
+    layers: { domain: "." }
     owner: conversation
   - id: gen-ui-service
     roots: [packages/services/src/gen-ui]
     managed: true
     requires: [services, shared, rpc, gen-ui-protocol, mcp-apps-protocol]
-    publicEntrypoints: [packages/services/src/gen-ui/index.ts, packages/services/src/gen-ui/contract.ts, packages/services/src/gen-ui/node.ts]
-    layers: {domain: domain, app: app, adapters: adapters}
+    publicEntrypoints:
+      [
+        packages/services/src/gen-ui/index.ts,
+        packages/services/src/gen-ui/contract.ts,
+        packages/services/src/gen-ui/node.ts,
+      ]
+    layers: { domain: domain, app: app, adapters: adapters }
     layerOrder: [domain, app, adapters]
     owner: conversation
 
@@ -266,8 +271,13 @@ modules:
     roots: [packages/ui/src/gen-ui]
     managed: true
     requires: [ui, services, gen-ui-service, gen-ui-protocol, mcp-apps-protocol, plugin-ui]
-    publicEntrypoints: [packages/ui/src/gen-ui/index.ts, packages/ui/src/gen-ui/contract.ts, packages/ui/src/gen-ui/host.ts]
-    layers: {domain: domain, app: app, adapters: adapters, ui: components}
+    publicEntrypoints:
+      [
+        packages/ui/src/gen-ui/index.ts,
+        packages/ui/src/gen-ui/contract.ts,
+        packages/ui/src/gen-ui/host.ts,
+      ]
+    layers: { domain: domain, app: app, adapters: adapters, ui: components }
     layerOrder: [domain, app, adapters, ui]
     owner: conversation
 
@@ -276,7 +286,12 @@ modules:
     roots: [packages/shared/src/mcp-apps]
     managed: true
     requires: []
-    publicEntrypoints: [packages/shared/src/mcp-apps/index.ts, packages/shared/src/mcp-apps/contract.ts, packages/shared/src/mcp-apps/hostContract.ts]
+    publicEntrypoints:
+      [
+        packages/shared/src/mcp-apps/index.ts,
+        packages/shared/src/mcp-apps/contract.ts,
+        packages/shared/src/mcp-apps/hostContract.ts,
+      ]
     layers:
       domain: "."
     owner: plugin
@@ -284,7 +299,11 @@ modules:
     roots: [apps/zcode-cli/packages/bootstrap/src/zcode-protocol/mcp-ui]
     managed: true
     requires: [zcode-cli, shared, mcp-apps-protocol]
-    publicEntrypoints: [apps/zcode-cli/packages/bootstrap/src/zcode-protocol/mcp-ui/index.ts, apps/zcode-cli/packages/bootstrap/src/zcode-protocol/mcp-ui/contract.ts]
+    publicEntrypoints:
+      [
+        apps/zcode-cli/packages/bootstrap/src/zcode-protocol/mcp-ui/index.ts,
+        apps/zcode-cli/packages/bootstrap/src/zcode-protocol/mcp-ui/contract.ts,
+      ]
     layers:
       app: "."
     owner: plugin
@@ -292,7 +311,13 @@ modules:
     roots: [packages/services/src/plugin-ui-bridge]
     managed: true
     requires: [services, shared, mcp-apps-protocol]
-    publicEntrypoints: [packages/services/src/plugin-ui-bridge/index.ts, packages/services/src/plugin-ui-bridge/contract.ts, packages/services/src/plugin-ui-bridge/appToolsContract.ts, packages/services/src/plugin-ui-bridge/samplingContract.ts]
+    publicEntrypoints:
+      [
+        packages/services/src/plugin-ui-bridge/index.ts,
+        packages/services/src/plugin-ui-bridge/contract.ts,
+        packages/services/src/plugin-ui-bridge/appToolsContract.ts,
+        packages/services/src/plugin-ui-bridge/samplingContract.ts,
+      ]
     layers:
       app: "."
     owner: plugin
@@ -304,8 +329,7 @@ modules:
       - packages/desktop/src/renderer/src/plugin-sandbox
     managed: true
     requires: [desktop, shared, mcp-apps-protocol, gen-ui-protocol]
-    publicEntrypoints:
-      [
+    publicEntrypoints: [
         packages/desktop/src/host/pluginSandbox/index.ts,
         packages/desktop/src/host/pluginSandbox/contract.ts,
         packages/desktop/src/preload/pluginSandbox/hostBridge.ts,
@@ -313,7 +337,7 @@ modules:
         packages/desktop/src/main/pluginSandbox/contract.ts,
         # 页面兼容接口由宿主及其契约测试维护。
         packages/desktop/src/renderer/src/plugin-sandbox/aliasRuntime.ts,
-        packages/desktop/src/renderer/src/plugin-sandbox/aliasApi.ts
+        packages/desktop/src/renderer/src/plugin-sandbox/aliasApi.ts,
       ]
     layers:
       adapters: "."
@@ -322,7 +346,12 @@ modules:
     roots: [packages/ui/src/plugin-ui]
     managed: true
     requires: [ui, shared, services, mcp-apps-protocol, plugin-ui-bridge, plugin-sandbox]
-    publicEntrypoints: [packages/ui/src/plugin-ui/index.ts, packages/ui/src/plugin-ui/contract.ts, packages/ui/src/plugin-ui/hostPrimitives.ts]
+    publicEntrypoints:
+      [
+        packages/ui/src/plugin-ui/index.ts,
+        packages/ui/src/plugin-ui/contract.ts,
+        packages/ui/src/plugin-ui/hostPrimitives.ts,
+      ]
     layers:
       domain: domain
       app: app
@@ -545,7 +574,7 @@ modules:
     publicEntrypoints:
       - apps/zcode-cli/packages/cli/src/arguments.ts
       - apps/zcode-cli/packages/cli/src/argument-parsing/contract.ts
-    layers: {adapters: .}
+    layers: { adapters: . }
     owner: agent
   - id: workflow-tool-entrypoints
     roots:
@@ -561,7 +590,7 @@ modules:
       - apps/zcode-cli/packages/core/src/tool/handlers/list-models.ts
       - apps/zcode-cli/packages/core/src/tool/handlers/fill-workflow-hole.ts
       - apps/zcode-cli/packages/core/src/tool/workflow-entrypoints/contract.ts
-    layers: {app: .}
+    layers: { app: . }
     owner: agent
 
   - id: tool-result-settlement
@@ -574,7 +603,7 @@ modules:
     publicEntrypoints:
       - apps/zcode-cli/packages/core/src/runtime/methods/tool-result-settlement.ts
       - apps/zcode-cli/packages/core/src/runtime/tool-result-settlement/contract.ts
-    layers: {app: .}
+    layers: { app: . }
     owner: agent
   - id: channel-reply-tool
     roots:
@@ -586,7 +615,7 @@ modules:
     publicEntrypoints:
       - apps/zcode-cli/packages/core/src/tool/handlers/reply-to-channel.ts
       - apps/zcode-cli/packages/core/src/tool/channel-reply/contract.ts
-    layers: {app: .}
+    layers: { app: . }
     owner: agent
 
   # composer-toolbar-layout：登记既有 DOM 布局入口，不改调用路径。
@@ -600,7 +629,7 @@ modules:
     publicEntrypoints:
       - packages/ui/src/prompt-editor/useComposerToolbarFit.ts
       - packages/ui/src/composer-toolbar-layout/contract.ts
-    layers: {ui: .}
+    layers: { ui: . }
     owner: conversation
 
   # task-groups：由 architecture:adopt 登记
@@ -747,6 +776,87 @@ global:
   acceptedUpstreamSnapshot: scripts/architecture/upstream-snapshot.json
 
 exceptions:
+  # ===== 自部署 fork（selfhost/maintained）新增模块 =====
+  # fork 在未受管根内新增的自部署能力：托管浏览器、官方中转远控、定时/闲时调度核心、
+  # 通用附件存储、私有部署降级、连接韧性/流控、时间线性能与各包测试装配。改动均限于
+  # 新文件与既有文件的显式接线（经公开入口导入），不深导入实现细节；不为此接管整包根。
+  - id: selfhost-server-browser-module
+    rule: unmanaged-new-file
+    paths: [packages/server/src/browser/**]
+    reason: 自部署托管浏览器执行器（Chromium/Firefox 双引擎、命令面、空闲回收），仅经 createConfiguredBrowserExecutor 公开入口装配。
+  - id: selfhost-server-modules
+    rule: unmanaged-new-file
+    paths:
+      [
+        packages/server/src/automationDispatch.ts,
+        packages/server/src/automationDispatchShared.ts,
+        packages/server/src/offPeakDispatch.ts,
+        packages/server/src/staticAssetCompression.ts,
+        packages/server/src/webSocketHeartbeat.ts,
+        packages/server/vitest.config.ts,
+      ]
+    reason: 自部署 server 的调度派发、静态压缩、WS 心跳与测试装配；依赖经 @zcode/services 公开入口。
+  - id: selfhost-relay-module
+    rule: unmanaged-new-file
+    paths: [packages/services/src/web-remote-control/**]
+    reason: 官方中转远控（V2 transport 下沉副本 + 桥/控制协议/状态投影），公开入口 IWebRemoteControlRelayService 与 relayStatusProjection。
+  - id: selfhost-scheduling-core
+    rule: unmanaged-new-file
+    paths:
+      [
+        packages/services/src/session/allWorkspacesTaskView.ts,
+        packages/services/src/session/automation,
+        packages/services/src/window-controller/**,
+        packages/services/src/telemetry/telemetryAccountLoaders.ts,
+        packages/services/src/file/workspaceFileIgnore.ts,
+        packages/services/vitest.config.ts,
+        packages/desktop/src/host/sourceServerOperationLogs.ts,
+        packages/desktop/src/main/embeddedBrowserPermissionUiBridge.ts,
+        packages/desktop/src/main/embeddedBrowserSitePermissionStore.ts,
+      ]
+    reason: 桌面与自部署 server 共用的调度核心、全工作区任务视图、本地窗口 Controller 与只读账号 loader；公开出口经 services/node.ts。
+  - id: selfhost-attachments-module
+    rule: unmanaged-new-file
+    paths:
+      [
+        packages/services/src/prompt-attachment-transfer/arbitraryFileUpload,
+        packages/services/src/prompt-attachment-transfer/retainCommandAttachments.ts,
+      ]
+    reason: 通用附件入站存储与配额/恢复/保留；经 IPromptAttachmentTransferService 既有公开接口扩展。
+  - id: selfhost-private-deployment
+    rule: unmanaged-new-file
+    paths: [packages/shared/src/browserDigest.ts, packages/shared/src/browserSha256Fallback.ts]
+    reason: 非安全上下文的纯 JS SHA-256 降级（ZCODE_PRIVATE_DEPLOYMENT 编译期门控），从 shared 公开入口导出。
+  - id: selfhost-web-modules
+    rule: unmanaged-new-file
+    paths:
+      [
+        packages/web/src/clientFlowControl.ts,
+        packages/web/src/connectionResilience.ts,
+        packages/web/src/webTaskNotification.ts,
+        packages/web/vitest.config.ts,
+      ]
+    reason: Web 端断线重连、前后台投递流控与任务通知；经 @zcode/client 既有帧语义与 IPlatformService 可选方法。
+  - id: selfhost-ui-modules
+    rule: unmanaged-new-file
+    paths:
+      [
+        packages/ui/vitest.config.ts,
+        packages/ui/vitest.setup.ts,
+        packages/ui/src/browser-use/BrowserSitePermissionsPage.tsx,
+        packages/ui/src/hooks/useWebRemoteControlRelayActive.ts,
+        packages/ui/src/lib/clipboard.ts,
+        packages/ui/src/lib/clipboardExecCommandFallback.ts,
+        packages/ui/src/lib/clipboardRead.ts,
+        packages/ui/src/lib/workflowRunLine.ts,
+        packages/ui/src/v4/composer/arbitraryFileUpload.ts,
+        packages/ui/src/v4/historyStepSegments.ts,
+        packages/ui/src/v4/messageLayerMask.ts,
+        packages/ui/src/webRemoteControlRelayUi.ts,
+        packages/ui/src/WorkspaceSidebar/RemoteProjectDetailsPopover.tsx,
+        packages/ui/src/workspace-file-search/workspaceFileSearchFilterBackend.ts,
+      ]
+    reason: UI 侧自部署适配：剪贴板统一入口与降级、附件上传编排、远控状态投影消费、时间线折叠与 mask、测试装配；均为新文件或既有目录内的独立模块。
   - id: side-pane-full-view-shortcut-command-edit
     rule: unmanaged-new-file
     paths: [packages/shared/src/shortcutCommands.ts]
