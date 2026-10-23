@@ -76,6 +76,16 @@ reason=degraded|recovered`）；任一变化都不中断服务。仅幂等请求
 
 `IPromptAttachmentTransferService`通用上传在entry-http启用，完整文件保存在Host数据根的`.zcode/attachments/prompt-files`，单文件<=20MiB，原始字节不写入Git。
 
+## 闭源 Agent 与开源 server 的版本兼容
+
+server（开源）与 Agent（闭源制品）版本独立演进。zcode-protocol 的会话事件 schema 是
+`.strict()`：上游只以**新增可选字段**的方式演进（如 readOnly、sideEffectScope、
+executionStartedAt），旧 Agent 的"少字段"负载可被新 schema 接受；反方向（新 Agent 旧
+server）才可能因未知字段被丢弃——升级时应**先/同时升 server**。createSession 等命令的
+新参数对旧 CLI 的严格解析由 server 侧降级重试兜底。2026-10-24 已在隔离实例验证
+3.16.2 server + 3.15.3 Agent 的 initialize 握手正常（无凭据目录下 Agent 保持
+provider_not_ready 休眠，属预期）；完整回合事件流未在隔离环境覆盖，随实际升级验证。
+
 ## 托管 Firefox
 
 Firefox 使用仓库锁定版本的 Playwright 配套制品，不使用普通系统 Firefox，也不接管用户 profile。先从仓库根安装对应浏览器；禁止安装过程回收其它运行中浏览器的缓存：
