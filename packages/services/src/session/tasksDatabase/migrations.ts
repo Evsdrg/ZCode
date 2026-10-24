@@ -17,6 +17,58 @@ import {
   SOURCE_SERVER_SCHEMA_CHECKSUM_INPUT,
 } from "#src/session/tasksDatabase/source-server-schema-v5.js";
 
+// 闭源旧版（开源仓库发布前）创建的 tasks-index 遗留表是无类型列且不带任何主键/唯一约束；
+// 0001 的 adopt 用 CREATE TABLE IF NOT EXISTS 接管，对已存在的表补不上约束，导致
+// writeRecord 等按 ON CONFLICT(workspace_key, task_id) 形态 upsert 的语句在 prepare 阶段
+// 直接抛 "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"（2026-10-24
+// 自部署实例新会话创建失败的根因）。本清单把 schema-v1 已声明、遗留库缺失的唯一约束以
+// 唯一索引形式回填；字段与 v1 主键一一对应，不再随运行态 schema 变化。
+const legacyUniqueConstraints = [
+  { table: "tasks", columns: ["workspace_key", "task_id"] },
+  { table: "task_groups", columns: ["group_id"] },
+  { table: "task_group_members", columns: ["workspace_key", "task_id"] },
+  { table: "task_group_view_node_orders", columns: ["node_type", "node_key"] },
+  { table: "task_group_workspace_bootstraps", columns: ["workspace_key"] },
+  { table: "automations", columns: ["automation_id"] },
+  { table: "off_peak_tasks", columns: ["off_peak_task_id"] },
+] as const;
+
+// 已存在等价唯一约束（含主键 autoindex）时跳过，新库不会多出冗余索引。
+function ensureLegacyUniqueConstraints(db: DatabaseSync): void {
+  for (const { table, columns } of legacyUniqueConstraints) {
+    const indexes = db.prepare(`PRAGMA index_list(${table})`).all() as {
+      name: string;
+      unique: number;
+      partial: number;
+    }[];
+    const satisfied = indexes.some((index) => {
+      if (!index.unique || index.partial) return false;
+      const indexColumns = db.prepare(`PRAGMA index_info("${index.name}")`).all() as {
+        name: string;
+      }[];
+      return (
+        indexColumns.length > 0 &&
+        indexColumns.length === columns.length &&
+        columns.every((column, position) => indexColumns[position]!.name === column)
+      );
+    });
+    if (satisfied) continue;
+    const indexName = `idx_${table}_${columns.join("_")}_unique`;
+    try {
+      db.exec(`CREATE UNIQUE INDEX ${indexName} ON ${table}(${columns.join(", ")})`);
+    } catch (error) {
+      // 重复行时 fail-closed：迁移失败由 runner 用表级备份恢复；不允许静默跳过把
+      // upsert 写路径留在不可用状态。
+      throw Object.assign(
+        new Error(
+          `Legacy unique constraint backfill failed on ${table}(${columns.join(", ")}): ${String(error)}`,
+        ),
+        { cause: error },
+      );
+    }
+  }
+}
+
 // 冻结历史列声明，不能以实时 Repo/schema 代替，否则新版构建会改变已应用 checksum。
 const columns = [
   ["tasks", "title_overridden", "INTEGER NOT NULL DEFAULT 0"],
@@ -117,6 +169,24 @@ const definitions = [
     touchedTables: ["task_group_admissions"],
     checksumInput: [TASK_GROUP_ADMISSIONS_SQL],
     apply: (db: DatabaseSync) => db.exec(TASK_GROUP_ADMISSIONS_SQL),
+  },
+  {
+    id: "0008_legacy_unique_constraints",
+    touchedTables: [
+      "tasks",
+      "task_groups",
+      "task_group_members",
+      "task_group_view_node_orders",
+      "task_group_workspace_bootstraps",
+      "automations",
+      "off_peak_tasks",
+    ],
+    // checksumInput 必须冻结：legacyUniqueConstraints 变动等同改写历史迁移。
+    checksumInput: [
+      legacyUniqueConstraints.map(({ table, columns }) => `${table}(${columns.join(",")})`),
+      "legacy-unique-backfill-v1",
+    ],
+    apply: ensureLegacyUniqueConstraints,
   },
 ] as const;
 

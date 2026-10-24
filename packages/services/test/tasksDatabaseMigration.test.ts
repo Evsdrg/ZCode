@@ -45,7 +45,7 @@ describe("DB109 App 库统一迁移", () => {
       "tasks_schema_migration",
     ]);
     const ledger = db.prepare("SELECT * FROM tasks_schema_migration").all();
-    expect(ledger).toHaveLength(5);
+    expect(ledger).toHaveLength(6);
     await migrate(db);
     expect(db.prepare("SELECT * FROM tasks_schema_migration").all()).toEqual(ledger);
   });
@@ -264,7 +264,7 @@ describe("DB109 App 库统一迁移", () => {
       Atomics.store(new Int32Array(gate), 0, 1);
       Atomics.notify(new Int32Array(gate), 0);
       expect(await Promise.all(exits)).toEqual([[0], [0]]);
-      expect(db.prepare("SELECT * FROM tasks_schema_migration").all()).toHaveLength(5);
+      expect(db.prepare("SELECT * FROM tasks_schema_migration").all()).toHaveLength(6);
       expect(db.prepare("SELECT * FROM migration_probe").all()).toHaveLength(1);
       expect(db.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
     } finally {
@@ -272,5 +272,93 @@ describe("DB109 App 库统一迁移", () => {
       db.close();
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  // 2026-10-24 事故回归：闭源旧版创建的 tasks-index 遗留表无类型列且无主键/唯一约束，
+  // 0001 adopt 后 writeRecord 的 ON CONFLICT(workspace_key, task_id) 在 prepare 阶段失败，
+  // 表现为自部署 WebUI 无法在工程里创建新会话。
+  const createLegacyTypelessTables = (db: DatabaseSync) => {
+    db.exec(`
+      CREATE TABLE tasks ("workspace_key","workspace_path","workspace_identity","task_id","title","task_status","provider","mode","model","migration_source","forked_from_task_id","created_at","updated_at","unread_at","last_unread_at","pinned","archived","deleted","title_overridden","searchable_text","meta_json","cron_automation_id","off_peak_task_id");
+      CREATE TABLE task_groups ("group_id","title","color","created_at","updated_at");
+      CREATE TABLE task_group_members ("group_id","workspace_key","workspace_path","workspace_identity","task_id","sort_order","added_at","created_at","updated_at");
+      CREATE TABLE task_group_view_node_orders ("node_type","node_key","sort_order","created_at","updated_at");
+      CREATE TABLE task_group_workspace_bootstraps ("workspace_key","group_id","created_at","updated_at");
+      CREATE TABLE automations ("automation_id","title","cron_expr","prompt","model","provider","mode","thought_level","workspace_key","workspace_path","workspace_identity","target_task_id","bot_delivery_target","location_kind","recurring","max_runs","end_at","schedule_rule","schedule_edited_by_user","run_count","scheduled_run_count","enabled","lifecycle_status","next_run_at","last_run_at","running","claimed_at","dispatch_status","dispatch_attempts","retry_at","last_error","created_at","updated_at","model_selection","project_id","host_id","additional_directories");
+      CREATE TABLE off_peak_tasks ("off_peak_task_id","server_ticket_id","title","conversation_id","session_id","prompt","permission_mode","model","thought_level","workspace_key","workspace_path","workspace_identity","status","queued_at","started_at","ended_at","failure_reason","files_changed","settled_at","history_deleted_at","registered_at","schedulable","queue_position","next_poll_at","claim_running","claimed_at","attempt_count","last_error","created_at","updated_at","model_selection","project_id","host_id","additional_directories");
+    `);
+  };
+
+  it("0008：遗留无约束表回填唯一索引后 upsert 可用，重复账本行重跑不重复建", async () => {
+    const db = open();
+    createLegacyTypelessTables(db);
+    await migrate(db);
+    const backfilled = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%_unique' ORDER BY name",
+      )
+      .all();
+    expect(backfilled.map((row) => row.name)).toEqual([
+      "idx_automations_automation_id_unique",
+      "idx_off_peak_tasks_off_peak_task_id_unique",
+      "idx_task_group_members_workspace_key_task_id_unique",
+      "idx_task_group_view_node_orders_node_type_node_key_unique",
+      "idx_task_group_workspace_bootstraps_workspace_key_unique",
+      "idx_task_groups_group_id_unique",
+      "idx_tasks_workspace_key_task_id_unique",
+    ]);
+    const upsert = db.prepare(
+      `INSERT INTO tasks (workspace_key, workspace_path, task_id, title, created_at, updated_at)
+       VALUES ('ws', '/ws', 't1', '标题', 1, 1)
+       ON CONFLICT(workspace_key, task_id) DO UPDATE SET title = excluded.title`,
+    );
+    upsert.run();
+    upsert.run();
+    expect(db.prepare("SELECT title FROM tasks").get()?.title).toBe("标题");
+    db.exec("DELETE FROM tasks_schema_migration WHERE id='0008_legacy_unique_constraints'");
+    await migrate(db);
+    expect(
+      db
+        .prepare(
+          "SELECT count(*) AS total FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%_unique'",
+        )
+        .get(),
+    ).toMatchObject({ total: 7 });
+  });
+
+  it("0008：新库由主键满足约束，不额外建冗余唯一索引", async () => {
+    const db = open();
+    await migrate(db);
+    expect(
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%_unique'")
+        .all(),
+    ).toEqual([]);
+    db.exec("DELETE FROM tasks_schema_migration WHERE id='0008_legacy_unique_constraints'");
+    await migrate(db);
+    expect(
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%_unique'")
+        .all(),
+    ).toEqual([]);
+  });
+
+  it("0008：遗留表存在重复行时 fail-closed，不写账本不动数据", async () => {
+    const db = open();
+    createLegacyTypelessTables(db);
+    db.exec(
+      `INSERT INTO tasks (workspace_key, workspace_path, task_id, title, created_at, updated_at)
+       VALUES ('ws', '/ws', 'dup', 'a', 1, 1), ('ws', '/ws', 'dup', 'b', 2, 2)`,
+    );
+    await expect(migrate(db)).rejects.toThrow(/Legacy unique constraint backfill failed on tasks/);
+    // 整个迁移事务回滚：全新库连账本表都不落盘，重复行原样保留。
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE name='tasks_schema_migration'").get(),
+    ).toBeUndefined();
+    expect(
+      db.prepare("SELECT count(*) AS total FROM tasks WHERE task_id='dup'").get(),
+    ).toMatchObject({
+      total: 2,
+    });
   });
 });

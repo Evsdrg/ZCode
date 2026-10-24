@@ -54,6 +54,7 @@
 - **前台/后台投递流控**：`setClientFlowStateV4`（scope 覆写）+ `web/src/clientFlowControl.ts`；页面隐藏时经CLI既有`v4/connection/flow`置`saturated`暂停打帧，可见时`drained`恢复。不改闭源CLI，不新增帧语义。
 - **定时/闲时任务调度**：`services/src/session/automationScheduler.ts`（桌面与 server 共用的认领/派发编排/结算核心，派发执行域以端口注入）+ `server/src/automationDispatch.ts`、`offPeakDispatch.ts`。自部署 server 本进程起调度器并注入`onAutomationManualRunRequested`，派发档位用`web-remote-replayable`；桌面 scheduler 进程改为复用同一核心。原先该链路只存在于 Electron 形态，自部署 WebUI 的自动化与「立即运行」不会执行。
 - **Web 端非 Electron 路径补齐**：通知权限经`IPlatformService`可选方法申请；`BrowserViewportSurface`按`customElements`判定`webview`可用性；任务完成回推复用已有 Bot 终态订阅。
+- **遗留任务库唯一约束回填**：`services/src/session/tasksDatabase/migrations.ts` 的`0008_legacy_unique_constraints`。闭源旧版创建的`~/.zcode/v2/tasks-index.sqlite`表无类型列且无主键/唯一约束，`0001` adopt 的`CREATE TABLE IF NOT EXISTS`对已存在的表永远补不上约束；当前`writeRecord`/分组仓储按`ON CONFLICT(workspace_key, task_id)`等形态 upsert 会在 prepare 阶段失败，表现为自部署 WebUI 无法创建新会话（2026-10-24 事故）。迁移按 schema-v1 声明的主键列回填唯一索引；已有等价约束（含新库主键 autoindex）时跳过；遗留表存在重复行时 fail-closed 交由表级备份恢复，不静默跳过。自部署实例的生产库已手动补同名索引，迁移重跑会识别为已满足。
 - **测试基建和回归用例**：services/server/ui/web的Vitest配置、纯逻辑与交互测试。合成数据测试属于交付内容，不是要忽略的开发过程。
 - **产品spec、匿名化部署指南、发布检查**：保留可维护决策与验收规则，不提交实际运行日志/抓包/会话摘录。
 
