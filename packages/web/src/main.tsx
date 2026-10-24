@@ -56,6 +56,9 @@ import {
 } from "./share/conversationShareRoute.js";
 import type {
   IPlatformService,
+  LoadCliMcpFromUserDirectoryRequest,
+  LoadCliMcpFromUserDirectoryResult,
+  SaveCliMcpToUserDirectoryRequest,
   WebRemoteControlFailure,
   WebRemoteControlFailureReason,
   WebRemoteControlPlatformMethod,
@@ -513,16 +516,29 @@ async function buildRelayWebRemoteControlStartResult(
   };
 }
 
-function createWebPlatform(options?: {
+export function createWebPlatform(options?: {
   externalWebRemoteControlProxy?: WebRemoteControlPlatformProxy;
   /** 自部署 server 注册的官方中转远控服务；未注册（如桌面 host）时为 undefined。 */
   relayStatusSource?: RelayStatusSource;
   /** 自部署：托管浏览器数据清理服务；桌面/未开启托管浏览器的 host 不提供。 */
   managedBrowserMaintenance?: { clearAllData(): Promise<{ success: boolean; error?: string }> };
+  /**
+   * 自部署：server 侧 MCP 目录服务（IMcpSyncService 形状子集，web 不依赖 services 包）。
+   * desktop attachment 缺席时作为 loadMcpFromUserDirectory/saveMcpToUserDirectory 的
+   * 回退——本地 workspace 在 mcpStore 里恒走 platform 路径（resolveMcpDirectoryService
+   * 对无 identity 的 workspace 返回 null），没有回退时设置页会把用户级 MCP 静默显示成空。
+   */
+  mcpDirectoryService?: {
+    loadMcpFromUserDirectory(
+      payload?: LoadCliMcpFromUserDirectoryRequest,
+    ): Promise<LoadCliMcpFromUserDirectoryResult>;
+    saveMcpToUserDirectory(payload: SaveCliMcpToUserDirectoryRequest): Promise<void>;
+  };
 }): IPlatformService {
   const platformProxy = options?.externalWebRemoteControlProxy;
   const relayStatusSource = options?.relayStatusSource;
   const managedBrowserMaintenance = options?.managedBrowserMaintenance;
+  const mcpDirectoryService = options?.mcpDirectoryService;
   // 官方契约里 start/getStatus 都要回填目标 workspace（对话框靠它判定「同一目标」）。
   // 桌面端按窗口持有 target；这里按「最后一次 start 收到的 context」记录，
   // getStatus 用它投影，语义与桌面按窗口一致（自部署是 server 级单实例）。
@@ -621,17 +637,28 @@ function createWebPlatform(options?: {
       platformProxy
         ? platformProxy.requestPlatformMethod("listSSHConfigAliases")
         : Promise.resolve([]),
-    loadMcpFromUserDirectory: (payload) =>
-      platformProxy
-        ? platformProxy.requestPlatformMethod("loadMcpFromUserDirectory", payload)
-        : Promise.resolve({ servers: [] }),
-    saveMcpToUserDirectory: (payload) =>
-      platformProxy
-        ? platformProxy.requestPlatformMethod("saveMcpToUserDirectory", payload)
+    loadMcpFromUserDirectory: (payload) => {
+      if (platformProxy) {
+        return platformProxy.requestPlatformMethod("loadMcpFromUserDirectory", payload);
+      }
+      // 自部署无 desktop attachment：回退 server RPC，不静默假装空列表。
+      return mcpDirectoryService
+        ? mcpDirectoryService.loadMcpFromUserDirectory(payload)
+        : Promise.resolve({ servers: [] });
+    },
+    saveMcpToUserDirectory: (payload) => {
+      if (platformProxy) {
+        return platformProxy.requestPlatformMethod("saveMcpToUserDirectory", payload);
+      }
+      return mcpDirectoryService
+        ? mcpDirectoryService
+            .saveMcpToUserDirectory(payload)
+            .then(() => ({ success: true as const }))
         : Promise.resolve({
             success: false,
             error: "MCP native directory management requires a desktop attachment",
-          }),
+          });
+    },
     migrateLegacyCommonMcp: (payload) =>
       platformProxy
         ? platformProxy.requestPlatformMethod("migrateLegacyCommonMcp", payload)
@@ -2249,6 +2276,7 @@ async function bootstrapWebApp() {
     const platform = createWebPlatform({
       relayStatusSource: services.webRemoteControlRelayService,
       managedBrowserMaintenance: services.managedBrowserMaintenanceService,
+      mcpDirectoryService: services.mcpSyncService,
     });
     document.title = "ZCode - Web + Server";
 

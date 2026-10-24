@@ -166,3 +166,20 @@ service stub 体系，超出本次范围；其行为已由上述纯逻辑测试�
 已知未决：设置页 MCP 列表不显示用户级（`~/.zcode/cli/config.json`）服务器
 （如 pdf-rag），但 Agent 会话实际已加载可用（工具面正常）；商店加载链路在浏览器侧
 的失败点待查。
+
+### 2026-10-24 MCP 设置页展示修复
+
+根因（已确认）：`mcpStore.resolveMcpDirectoryService` 对无 `workspaceIdentity` 的本地
+workspace 恒返回 null（桌面语义：本地走 platform 路径以执行旧 common MCP 迁移），
+于是读取落在 `createWebPlatform.loadMcpFromUserDirectory`；该实现在 desktop attachment
+（`platformProxy`）缺席时返回 `{servers: []}` 静默假成功。server 端 `IMcpSyncService`
+channel 本身已随 ServiceCollection 自动暴露（`exposeOnChannelServer`，无白名单限制），
+自部署 server 直接调用该 RPC 能返回 pdf-rag——断点只在浏览器 platform 层。
+
+修复：`createWebPlatform` 新增可选 `mcpDirectoryService`（IMcpSyncService 形状子集），
+自部署 bootstrap 注入 `services.mcpSyncService`；`platformProxy` 缺席时
+load/save MCP 目录操作回退该服务，两者都缺席才保持原静默行为。桌面 attachment 场景
+（手机远控等 proxy 存在的形态）不受影响；旧 common MCP 的 localStorage 迁移分支保持
+桌面语义不变。测试 `packages/web/test/webPlatformMcpFallback.test.ts` 覆盖回退与
+原行为两条路径。生效需重建 web 静态产物；保存（增删改 user-scope MCP）同样经此回退
+落到 server 端 `~/.zcode/cli/config.json`。
