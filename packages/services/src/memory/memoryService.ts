@@ -4,6 +4,7 @@ import {
   type ProjectMemoryFileSummary,
   type ProjectMemoryWorkspaceSummary,
 } from "./memory.js";
+import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
@@ -43,6 +44,55 @@ function isProjectMemoryFileName(fileName: string): boolean {
 function resolveWorkspaceLabel(workspaceId: string): string {
   const slug = PROJECT_KEY_SUFFIX_PATTERN.exec(workspaceId)?.[1];
   return slug?.trim() || workspaceId;
+}
+
+// 与 apps/zcode-cli/packages/core/src/memory/project-root.ts 的 scope 目录名算法保持一致；
+// 闭源 agent 使用同一算法。算法若失配只是反查不命中（回退 slug 显示），不会错标。
+function projectMemoryScopeKey(candidate: { workspacePath?: string; workspaceIdentity?: string }): {
+  scopeId: string;
+  label: string;
+} | null {
+  const identity = candidate.workspaceIdentity?.trim();
+  const workspacePath = candidate.workspacePath?.trim();
+  if (!identity && !workspacePath) return null;
+  const keySource = identity || workspacePath!;
+  const hash = createHash("sha256").update(keySource).digest("hex").slice(0, 16);
+  if (identity) {
+    // identity 形如 remote:ssh:<host>:<port>:<user>:<绝对路径>；取首个 / 起的路径段叶子名。
+    const slash = identity.indexOf("/");
+    if (slash >= 0) {
+      const embeddedPath = identity.slice(slash);
+      const leaf = basename(embeddedPath).trim();
+      if (leaf) return { scopeId: `project-${hash}`, label: leaf };
+    }
+    return null;
+  }
+  const slug =
+    basename(workspacePath!)
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "project";
+  return { scopeId: `${slug}-${hash}`, label: basename(workspacePath!).trim() || slug };
+}
+
+async function buildWorkspaceLabelIndex(
+  knownWorkspaces?: () => Promise<{ workspacePath?: string; workspaceIdentity?: string }[]>,
+): Promise<Map<string, string>> {
+  if (!knownWorkspaces) return new Map();
+  try {
+    const candidates = await knownWorkspaces();
+    const labels = new Map<string, string>();
+    for (const candidate of candidates) {
+      const resolved = projectMemoryScopeKey(candidate);
+      if (resolved) labels.set(resolved.scopeId, resolved.label);
+    }
+    return labels;
+  } catch (error) {
+    // 反查是显示增强；候选源故障只回退 slug 显示，不让记忆目录读失败。
+    console.warn("Failed to resolve memory workspace labels:", error);
+    return new Map();
+  }
 }
 
 async function isPlainDirectory(path: string): Promise<boolean> {
@@ -130,8 +180,15 @@ function getMemoryFileName(_agentId: string): string {
 
 /**
  * 创建 Memory 服务实例
+ *
+ * options.listKnownWorkspaces（自部署增强，见 docs/specs/selfhost-memory-label-resolution.md）：
+ * 返回已知工作区候选（本地路径与 identity），用于把 scope 目录名反查成真实工作区名。
+ * 不传时行为与上游一致。
  */
-export function createMemoryService(): IMemoryService {
+export function createMemoryService(options?: {
+  listKnownWorkspaces?: () => Promise<{ workspacePath?: string; workspaceIdentity?: string }[]>;
+}): IMemoryService {
+  const knownWorkspaces = options?.listKnownWorkspaces;
   async function loadMemory(params: {
     workspacePath: string;
     agentId: string;
@@ -213,6 +270,7 @@ export function createMemoryService(): IMemoryService {
   }
 
   async function listProjectMemories(): Promise<ProjectMemoryWorkspaceSummary[]> {
+    const labelIndex = await buildWorkspaceLabelIndex(knownWorkspaces);
     let projectsRoot: string;
     let projectEntries;
     try {
@@ -288,7 +346,7 @@ export function createMemoryService(): IMemoryService {
       files.sort(compareProjectMemoryFiles);
       workspaces.push({
         id: workspaceId,
-        label: resolveWorkspaceLabel(workspaceId),
+        label: labelIndex.get(workspaceId) ?? resolveWorkspaceLabel(workspaceId),
         updatedAt: Math.max(...files.map((file) => file.updatedAt)),
         files,
       });

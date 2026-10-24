@@ -1779,7 +1779,20 @@ export function createLocalServices(options: {
   const hooksService = createHooksService({
     grantWorkspaceHookTrust: (params) => zcodeAgentService.grantWorkspaceHookTrust(params),
   });
-  const memoryService = createMemoryService();
+  // 自部署记忆页标签反查：用任务索引里的事实镜像（distinct 路径/identity）把
+  // identity scope 的 "project" 恒名反解成真实工作区名。见 docs/specs/selfhost-memory-label-resolution.md。
+  const memoryService = createMemoryService({
+    listKnownWorkspaces: async () => {
+      const [workspacePaths, workspaceIdentities] = await Promise.all([
+        taskIndexRepo.listDistinctWorkspacePaths(),
+        taskIndexRepo.listDistinctWorkspaceIdentities(),
+      ]);
+      return [
+        ...workspacePaths.map((workspacePath) => ({ workspacePath })),
+        ...workspaceIdentities.map((workspaceIdentity) => ({ workspaceIdentity })),
+      ];
+    },
+  });
   // 只要当前进程已经装配 Provider Runtime，就由该 Environment 自己的 Selection View
   // 决定执行就绪状态。Desktop-attached remote 也读取远端自己的 Config/Account Facts。
   const modelSelectionReadinessSource = providerRuntime.modelSelection;

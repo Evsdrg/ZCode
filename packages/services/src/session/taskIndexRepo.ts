@@ -1208,6 +1208,19 @@ export class TaskIndexRepo {
       .map((row) => String((row as { workspace_path: string }).workspace_path));
   }
 
+  /** 自部署记忆页标签反查：列出有未删除任务的 distinct workspace_identity（只读镜像，见 docs/specs/selfhost-memory-label-resolution.md）。 */
+  async listDistinctWorkspaceIdentities(): Promise<string[]> {
+    await this.ensureReady();
+    return this.getDatabase()
+      .prepare(
+        `SELECT DISTINCT workspace_identity FROM tasks
+         WHERE deleted = 0 AND workspace_identity IS NOT NULL AND workspace_identity != ''
+         ORDER BY workspace_identity`,
+      )
+      .all()
+      .map((row) => String((row as { workspace_identity: string }).workspace_identity));
+  }
+
   async listTaskMetas(params: {
     workspacePath?: string;
     workspaceIdentity?: string;

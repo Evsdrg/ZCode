@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, symlink, truncate, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -384,5 +385,71 @@ describe("memoryService Project Memory catalog", () => {
     await expect(service.readProjectMemoryFile({ workspaceId, fileName })).rejects.toMatchObject({
       code: "ENOENT",
     });
+  });
+});
+
+describe("memoryService 自部署 scope 标签反查", () => {
+  // 与 apps/zcode-cli/packages/core/src/memory/project-root.ts 同算法，测试独立重算期望值。
+  const scopeIdFor = (keySource: string, identity: boolean): string => {
+    const hash = createHash("sha256").update(keySource).digest("hex").slice(0, 16);
+    if (identity) return `project-${hash}`;
+    const slug = keySource
+      .split("/")
+      .at(-1)!
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-");
+    return `${slug}-${hash}`;
+  };
+
+  it("identity 候选反解为内嵌路径叶子名，本地路径候选反解为 basename", async () => {
+    const identityScope = scopeIdFor("remote:ssh:10.0.0.9:22:cepvor:/opt/helloworld/ESPIDF", true);
+    const pathScope = scopeIdFor("/opt/helloworld/ESPIDF", false);
+    await writeMemoryFile(identityScope, "MEMORY.md", "index");
+    await writeMemoryFile(pathScope, "MEMORY.md", "index");
+
+    const workspaces = await createMemoryService({
+      listKnownWorkspaces: async () => [
+        { workspaceIdentity: "remote:ssh:10.0.0.9:22:cepvor:/opt/helloworld/ESPIDF" },
+        { workspacePath: "/opt/helloworld/ESPIDF" },
+      ],
+    }).listProjectMemories();
+
+    expect(workspaces.map((workspace) => [workspace.id, workspace.label])).toEqual([
+      [pathScope, "ESPIDF"],
+      [identityScope, "ESPIDF"],
+    ]);
+  });
+
+  it("未命中候选、解析不出路径与候选源故障都回退 slug 显示", async () => {
+    const knownScope = scopeIdFor("remote:ssh:10.0.0.9:22:u:/ws/leaf-path", true);
+    await writeMemoryFile("orphan-4444444444444444", "MEMORY.md", "index");
+    await writeMemoryFile(knownScope, "MEMORY.md", "index");
+
+    const withFailures = await createMemoryService({
+      listKnownWorkspaces: async () => [
+        { workspacePath: "/opt/helloworld" },
+        { workspaceIdentity: "opaque-identity-without-path" },
+      ],
+    }).listProjectMemories();
+    expect(withFailures.map((workspace) => [workspace.id, workspace.label])).toEqual([
+      ["orphan-4444444444444444", "orphan"],
+      [knownScope, "project"],
+    ]);
+
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const withBrokenSource = await createMemoryService({
+        listKnownWorkspaces: async () => {
+          throw new Error("resolver unavailable");
+        },
+      }).listProjectMemories();
+      expect(withBrokenSource.map((workspace) => workspace.label).sort()).toEqual([
+        "orphan",
+        "project",
+      ]);
+      expect(consoleWarn).toHaveBeenCalled();
+    } finally {
+      consoleWarn.mockRestore();
+    }
   });
 });
