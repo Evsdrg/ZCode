@@ -154,3 +154,8 @@ blob-report/
 **/zpreview.*
 # Intended source, specs, test fixtures and existing repository skills are not ignored.
 .zcode-runtime
+
+# Rust CUA Linux Helper 构建产物与运行时 socket
+packages/zcode-cua/linux-helper/target/
+packages/zcode-cua/linux-helper/bin/
+*.sock

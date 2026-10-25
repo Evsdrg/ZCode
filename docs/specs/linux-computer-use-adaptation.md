@@ -1,0 +1,342 @@
+# Linux 桌面（Wayland + KDE6）Computer Use 适配
+
+状态：设计草案（未实施；阶段 0 决议已定稿，见 §5 / §11）
+范围：`packages/ui` 设置页电脑控制分区；`packages/shared` CUA 权限类型与协议；
+`packages/services` CUA 权限/能力后端装配；`packages/desktop` 或本机 Host 的 Linux producer。
+目标环境：**Wayland + KDE Plasma 6**（本机 AOSC OS 14 / Linux 7.1 / kwin_wayland 6.7.5）。
+
+## 1. 背景与问题
+
+现状：Computer Use（CUA）在 Linux 桌面**结构性不可用**，且是代码里写死的，不是运行时缺依赖：
+
+| 层 | 证据 | 现状 |
+|---|---|---|
+| 可用性判定 | `packages/ui/src/settings/computerUseAvailability.ts` 的 `resolveComputerUseAvailability`：`isMacDesktop → local-macos(supported:true)`、`isWindowsDesktop → local-windows(supported:true)`、**其余桌面一律 `local-linux(supported:false)`** | Linux 被硬判为不支持 |
+| 设置页 | `ComputerUseSection.tsx:693-697` 走 `settings.computerUse.unsupported.linuxDescription`（「暂不支持 Linux 桌面环境」） | 只渲染一句不可用提示 |
+| 权限服务 | `packages/services/src/node.ts:2021` `getStatus` 首行 `if (process.platform !== "darwin" && !== "win32") return { available:false, reason:"...only macOS and Windows." }` | Linux 直接短路 |
+| 权限类型 | `packages/shared/src/cuaAccessibilitySettings.ts` `CuaPermissionKind = "accessibility" \| "screen_recording"`（mac 语义） | 无 Linux 概念 |
+| 协议 | `packages/shared/src/zcode-protocol-v4/cuaPermission.ts` `platform: z.literal("darwin")` | 线上 schema 只认 darwin |
+| 平台门 | `packages/ui/src/lib/cuaPlatform.ts` 只有 `supportsLocalMacCuaPermissionOnboarding` / `supportsLocalWindowsCuaEntry` | 无 Linux 门 |
+
+而**权限检测与授权 UI、状态缓存、事件驱动刷新这一整套在 Linux 上完全可复用**——它们是平台无关的，缺的只是「Linux 的权限种类」和「Linux 的能力后端」。
+
+前提约定：**权限模型只按 ZCode 自己那套（fail-closed + 受信身份），不引入 codex 的配置模型。**
+
+## 2. 本机能力实测基线（设计依据，非文档推断）
+
+全部为本机实测（详见本轮调研记录）。**目标环境本身就是 Wayland+KDE6，因此做的是 Wayland 原生适配**，
+而不是把 X11 时代的手段（uinput）当正路、把 portal 授权当摩擦。
+
+| 能力 | 本机实测结果 | Wayland 契合度 |
+|---|---|---|
+| **抓屏** | xdg-desktop-portal `ScreenCast`（v5，`AvailableSourceTypes=7` 含**单窗口**、`AvailableCursorModes=7`、`OpenPipeWireRemote` 返回 PipeWire fd）→ 走 PipeWire 帧；`restore_token` 持久授权可用（`PermissionStore[screencast]` 已有 2 条持久授权条目） | ⭐ 协议内正规路径 |
+| **输入注入** | xdg-desktop-portal `RemoteDesktop`（v2，`AvailableDeviceTypes=7` = 键盘+指针+触摸）：`NotifyPointerMotion(Absolute)` / `NotifyPointerButton` / `NotifyPointerAxis` / `NotifyKeyboardKeycode` / `NotifyKeyboardKeysym` / `NotifyTouch*`，以及 **`ConnectToEIS` 返回 EIS fd**；本机已具备 `libei/libeis/liboeffis` 运行库 **+ 开发头文件** | ⭐ 协议内正规路径 |
+| **读 UI 树** | AT-SPI2（`at-spi2-core 2.58.2`，bus `unix:path=/run/user/1000/at-spi/bus_0`）；实测：`org.a11y.Status.IsEnabled=false` 时 `dolphin/konsole` 树不可见，临时置 true 后 `dolphin/VirtualBox/konsole` 树可读 | ✅ 唯一可行（Wayland 未把 a11y 纳入 portal） |
+| **窗口枚举/激活** | KWin DBus：`org.kde.KWin` `/KWin` `queryWindowInfo` / `getWindowInfo(uuid)`；`/Scripting` 可 `loadScript` | ✅ KDE 原生，仅窗口管理，**不能注入事件** |
+| 直调 KWin `ScreenShot2` | 实测 `org.kde.KWin.ScreenShot2.Error.NoAuthorized`（仅 KDE 受信进程如 spectacle 可调） | ✗ 不走 |
+| `/dev/uinput` | 实测可建虚拟设备并注入按键（ESC 关闭了弹窗），需 `/dev/uinput` 写权限 | ⚠️ 仅作 fallback（内核层，绕过协议栈） |
+| xdotool | 只能操作 Xwayland（X11 客户端），**控不了 Wayland 原生窗口** | ✗ 不作主路径 |
+
+结论：**Linux producer 必须拼三套后端**（portal ScreenCast + portal RemoteDesktop + AT-SPI2），
+uinput 仅备用；不存在像 mac AX/CG、win UIA/WGC 那样的单一系统统一 API。
+
+## 3. 核心机制：一次授权长期信任（mega-authorization / restore_token）
+
+ZCode CUA 有**两层**授权，Linux 适配必须分别映射，不能混为一谈：
+
+### 第 1 层：OS 系统权限层（宿主机原生权限）
+
+- mac 对应 TCC（辅助功能 + 屏幕录制），**一次授予、系统层长期有效**，撤销前一直有效。
+- **Linux 对应 KDE portal 的 RemoteDesktop 单 session 授权**（实测 2026-10-25，xdg-desktop-portal 1.22.1 + xdg-desktop-portal-kde 6.7.5）：
+  - **单个 RemoteDesktop session 同时承载抓屏与输入注入**。`RemoteDesktopSession` 继承 `ScreenCastSession`；`ScreenCast.SelectSources` 作用在该 session 上会置 `screenSharingEnabled=true`，`RemoteDesktop.Start` 的返回里带 `streams`。**不要建 ScreenCast + RemoteDesktop 两个独立 session**——那样既不共享授权，也拿不到可持久化的 token（实测：纯 ScreenCast session 的对话框无「允许恢复」选项、不返回 restore_token）。
+  - 真正实现「一次授权、长期信任」有两条正交途径，**我们两者都用**：
+    1. **KDE mega-authorization（首选的免交互机制）**：KDE portal 私有的 `kde-authorized` 权限表。命中即 `isAppMegaAuthorized()` 直接跳过所有对话框与通知。源码注释明写适用于 **headless 与用户不在机器前的场景**，正是 systemd 后端形态。
+       - 写入：`PermissionStore.SetPermission(table="kde-authorized", create=true, id="remote-desktop", app=<app_id>, permissions=["yes"])`（D-Bus `org.freedesktop.impl.portal.PermissionStore`）。
+       - 实测：写入后 PoC **两次连续运行均 0 秒完成、完全无弹框**（抓屏 fd + 注入 F1x 均成功）。
+       - 这是**配置态的一次性授权**：由安装脚本/管理员写一次，之后永久生效；撤销即删除该行（实测 `Delete("kde-authorized","remote-desktop")` 可复原）。
+    2. **restore_token（跨会话复用，兜底/兼容其它 portal）**：`persist_mode=2` 时 `RemoteDesktop.Start` 返回 `restore_token`；**下次把它传给 `RemoteDesktop.SelectDevices`**（不是 SelectSources、不是 restore_data）。前端 1.22.1 `remote_desktop_select_devices_options={types,restore_token,persist_mode}` 会把 token 桥接成后端 `restore_data`。仅在设备类型/屏幕不变时静默恢复；屏幕几何变化会失效并重新询问——与用户观察的“除非屏幕本身改变”一致。
+  - portal 授权按**发起应用的 `app_id`** 记录，持久化在 D-Bus 权限库（本机 `PermissionStore` 已有持久条目为证）。
+  - **命名复用现有语义（已定稿）**：不新造 `screen_cast` / `remote_desktop`，而是复用已有的 `CuaPermissionKind = "accessibility" | "screen_recording"`，语义映射为：
+    - `screen_recording` ⇄ portal 抓屏（ScreenCast 源）
+    - `accessibility` ⇄ portal 输入注入（RemoteDesktop 设备）
+  - 这样做的代价是：`accessibility` 在 mac 指「辅助功能」，在 Linux 实指「输入注入」——语义略有偏移；收益是 UI 层（`computerUseAvailability` / `ComputerUseSection` / 双权限行 / `isCuaPermissionTccGranted` 等）无需为 Linux 新增枚举分支，且线上 `cuaRequestAccessStatusSchema` 的字段名（`accessibility` / `screenRecording`）原样复用，只需放宽 `platform` 字面量。
+  - `restore_token`（单个，随 RemoteDesktop session）与 mega-auth 记录都由 main/Host 侧持有/维护（存于应用配置目录，与工作区无关——同 mac 的 TCC 归属 Helper bundle 而非 workspace）。
+
+### 第 2 层：ZCode 应用 permission（每次工具调用过闸门）
+
+- 与平台无关，**原样复用** `PermissionService`（`packages/zcode-cli/packages/core/src/permission/service.ts`）与
+  `buildProtocolPermissionOptions`（`permission-options.ts`）：
+  - `allow_once`（单次）/ `allow_project`（「Always allow Computer Use in this project」，写 SQLite `project permission`，跨会话持久）/
+    `allow_session`（仅内存）/ `deny`；
+  - `user-once` 表示每次必问。
+- CUA 走「项目级持久」档，落盘点为 `sessionStore.saveProjectPermission`（`sqlite-session-store.ts`）。
+- 该项目级规则的防仿冒：`matchesRuleScope` 只在工具条目携带宿主验证过的 `official_cua` 能力组时才匹配
+  `OFFICIAL_CUA_PERMISSION_RULE_TOOL_NAME`——Linux producer 也必须挂同一 `permissionCapabilityGroup`，否则持久授权无法命中。
+
+**一句话：不是「单次授权永久信任」，而是 OS 权限层一次性（mega-authorization 一次配置 / restore_token 一次确认）+ 应用 permission 层默认逐次确认、可显式升级为项目级持久。**
+
+## 4. 状态所有者与事件顺序
+
+### 4.1 所有者（唯一真相）
+
+| 状态 | 唯一所有者 | 说明 |
+|---|---|---|
+| portal 授权是否已建立 & restore_token | main/Host（Linux producer 的 permission 模块） | 进程内持有 + 持久化到配置目录；UI 不缓存第二份 |
+| 权限展示态 | `packages/ui/src/lib/cuaPermissionStatusStore.ts`（每 workspace 一槽） | 复用现有缓存，新增 Linux 分支 |
+| 应用 permission 规则（allow_project） | `sessionStore`（SQLite `project permission`） | 复用，不改 |
+| 插件总开关 | 现有 `isCuaEnabledForContext` | 复用，不改 |
+
+### 4.2 授权建立时序（主动授权按钮触发）
+
+```
+[用户] 设置页点「授权电脑控制」
+   │
+   ▼
+[UI] ComputerUseSection → platform.requestCuaPermissionOnboarding()（新增，Linux 分支）
+   │  operationId（renderer 生成，单次）
+   ▼
+[main/Host Linux producer] setupRemoteDesktopSession()
+   │  1) RemoteDesktop.CreateSession（**单个 session**）
+   │  2) RemoteDesktop.SelectDevices(types=keyboard|pointer, persist_mode=2, restore_token?)
+   │  3) ScreenCast.SelectSources(同一 session, types=MONITOR, cursor_mode)  → 置 screenSharingEnabled
+   │  4) RemoteDesktop.Start  ──┐  mega-auth 命中则 0 秒免弹框；否则首次弹 RemoteDesktopDialog
+   │                             │  返回 { streams, devices, persist_mode, restore_token }
+   │  5) 保存返回的 restore_token 到配置目录（供下次 SelectDevices 复用）
+   │  6) （installation-time，管理员一次性）SetPermission("kde-authorized","remote-desktop",app_id,["yes"]) 落 mega-auth
+   │  7) 可选：一次显式截图探针（includeFunctionalProbes 语义）
+   ▼
+[main/Host] 返回 { grantedKinds, grantOwner(=app_id), restoreTokens 已存 }
+   │
+   ▼
+[UI] refresh()（事件驱动，与 Focus 刷新同路）→ store 更新展示态 → 按钮变「已授权」
+```
+
+- 顺序约束：**先 ScreenCast 后 RemoteDesktop**（注入需知道目标 stream / 屏几何）。
+- 幂等：同一 `operationId` 只建一次会话；已有有效 restore_token 时直接恢复、不弹框。
+- 失败即 fail-closed：任一步被拒 → 对应 `CuaPermissionKind` 保持未授权，CUA 工具不可用。
+
+### 4.3 权限查询时序（getStatus）
+
+沿用现有事件驱动模型（挂载 / 窗口重获焦点 / 显式 refresh），**不新增轮询**。
+Linux 侧 `getStatus` 不再首行短路，改为：
+1. 插件总开关检查（复用 `shouldUseCuaPermissionService`）；
+2. 检查 `kde-authorized` mega-auth 是否已配置（是 → 直接视为 OS 层已授权）；
+3. 否则检查本地是否持有有效 restore_token 且会话可恢复；
+4. 若需要探针（`options.includeFunctionalProbes` 显式意图）且探针开关允许 → 做**一次**抓屏探针；
+5. 返回 `CuaPermissionStatus`，把 `accessibility/screenRecording` 两字段替换为 Linux 语义（见 §3）。
+
+## 5. app_id / 受信身份（Linux 特有难点，已定稿）
+
+- portal 按发起进程的 **`app_id`** 识别授权主体。**从终端或裸进程启动时 `app_id` 可能为空**，会导致 restore_token 无法稳定绑定、每次重建会话都像"新应用"授权。
+- mac 用 Helper 代码签名 + TCC 绑定；Linux **没有等价统一物**。这是 Linux 权限模型的核心工程点。
+- **已定稿方案（按部署形态分治）**：让 Linux CUA producer 以**稳定的应用身份**常驻，使 portal 看到的 `app_id` 恒定。
+
+### 5.1 桌面安装形态 → 固定 `.desktop`
+
+- 由 `.desktop` 文件启动的应用，systemd 会以 `app-<launcher>-<AppID>-<rand>.scope` 形式起进程，portal 从 unit 名解出 desktop id 作为 `app_id`（前提：对应 `<AppID>.desktop` 存在）。
+- 本机已有 `/usr/share/applications/zcode.desktop`（`Exec=/opt/ZCode/zcode %U`），若从其启动则 `app_id` 即 `zcode`。
+- CUA producer 若作为该 desktop 应用的一部分启动，直接沿用此身份，无需额外注册。
+
+### 5.2 分离式前后端（systemd user 单元，我们当前的部署）→ 必须显式 `Registry.Register`
+
+- 本机形态：`zcode-web-local.service`。
+- ⚠️ **实测更正（前一版有误）**：portal 对 host 应用从 cgroup 的 user unit 名推断 app_id，但**仅当 unit 名以 `app-` 开头**（systemd 桌面启动约定 `app-<launcher>-<AppID>-<rand>.scope`）时才解析；`zcode-web-local.service` **不以 `app-` 开头 → app_id 解析为「空串 `''`」**（**不是**上一个版本写的 unit 名）。实测：`app-...scope` → 解析出 id；`zcode-web-local.service` / 普通 service → `app ''`。
+- 更严格的约束：即使 unit 以 `app-` 开头，解析出 id 后**还必须存在同名 `<app_id>.desktop`**（`g_desktop_app_info_new` 找不到即回退空串）。
+- 因此 systemd 形态**必须显式 `Registry.Register(stable_id)`**。本机确认 portal 暴露 `org.freedesktop.host.portal.Registry`（v1，`Register(sa{sv})`）。
+- ✅ **实测结论（2026-10-25，隔离环境，多组对照实验）**：`Registry.Register` 注册的 id **就是** portal 之后用于 RemoteDesktop 会话的 app_id，**完全覆盖 cgroup 解析**，且**后端 mega-auth 也精确按它匹配**。证据链：
+  1. dbus-monitor 抓到前端→后端 `RemoteDesktop.Start` 的 app_id 参数 = **Register 的 id**（`string "com.zcode.AgentCuaTest"`），而非 cgroup 解析的 `com.zcode.cuaY`。
+  2. cgroup 解析 `com.zcode.cuaY` + Register `com.zcode.AgentCuaTest` + mega-auth 只授 `AgentCuaTest` → **0.1s 免弹框**（证明用 Register id，不是 cgroup id）。
+  3. mega-auth 未授该 id（Register 成功）→ **仍弹框超时**（证明 Register 本身不免弹框，免弹框唯一原因是 mega-auth 命中）。
+  4. 真实 user **service** unit（非 `app-`，最贴近生产 `zcode-web-local.service`）+ Register + mega-auth → **0.1s 免弹框**。
+  5. cgroup id 自身写 mega-auth（不 Register）→ 0.1s 免弹框，且后端收到的 app_id 就是该 cgroup id（证实后台确实按收到的 app_id 查 mega-auth）。
+- **推翻前一版错误判断**：曾写「Register 只改 portal 会话 app_id、不覆盖后端 mega-auth」，实为当时 app_id 未对齐/未写 mega-auth 所致，已被上述实验推翻。
+- ⚠️ Register 前置条件：**必须先存在 `<stable_id>.desktop`**（`~/.local/share/applications/`），否则报 `App info not found for '<id>'`。producer 安装时须一并落地。
+- 结论：systemd 分离式部署可做到**一次 mega-auth 授权 → 永久 0 秒免弹框**（headless 友好），前提是：Register 的 stable_id = mega-auth 写入的 app_id，且同名 `.desktop` 存在。
+- 对齐 ZCode 既有「受信 Helper」概念：
+  - ZCode 受信 Helper ⇄ `Registry.Register` 声明的稳定 `app_id` + mega-auth（kde-authorized）+ restore_token
+  - ZCode fail-closed ⇄ portal 未授权即不可用（查询 PermissionStore / 会话状态）
+  - 不引入 codex 的配置模型。
+
+### 5.3 两种形态的共同约束
+
+- `app_id` 与 mega-auth / restore_token 强绑定：`app_id` 一变，旧记录失效。因此 **stable-id 一旦发布不得更改**，否则需重新授权。
+- 授权记录落在 D-Bus 权限库（本机 `PermissionStore` 已有持久条目为证），按 `app_id` 索引。
+- **kde-authorized mega-auth 建议在安装时一次性写入**（管理员脚本），是 headless/systemd 场景免交互的官方机制；普通交互安装则走首次弹框 + restore_token。
+
+## 6. UI：主动请求授权按钮（本次不实现，先记录）
+
+原因：Wayland 授权**首次必然弹一次系统弹窗**（实测：RemoteDesktopDialog）。因此不像 mac 那样能"静默探测后自动提示"，需要一个**用户主动触发**的授权入口。
+注意：若安装时已写入 mega-auth（`kde-authorized`），首次也可 0 秒免弹框（实测）；但那是管理员/安装阶段动作，**面向普通用户的默认路径仍需按钮**。
+
+设计要点（落到 `ComputerUseSection.tsx` 由 `unsupported.linuxDescription` 分支改造而来）：
+- Linux 可用时，替换「暂不支持」提示卡，展示：
+  - 两个权限行：`screen_recording`（抓屏）/ `accessibility`（输入注入）的当前状态（已授权 / 未授权 / 需要重新授权）；
+  - **「授权电脑控制」按钮** → 调 `platform.requestCuaPermissionOnboarding()`（Linux 分支）；
+  - 「重新授权」入口（restore_token 失效时）；
+  - 授权返回后的恢复链复用现有 `cuaPermissionAction.ts` / `waitForAccessibilityNotStale` 的等价逻辑。
+- 文案明确「首次授权会弹出系统对话框，请允许」，中英双语必须同时补齐（`AGENTS.md` 国际化要求）。
+- 按钮触发的是 OS 层授权（portal），**不是**应用 permission；应用层的 allow_once/allow_project 仍在每次工具调用时由 `PermissionDialog` 处理。
+
+## 7. 能力后端映射（Linux producer 实现契约）
+
+| ZCode CUA 能力 | Linux 实现路径 | 备注 |
+|---|---|---|
+| `getScreenshot` / 帧 | RemoteDesktop session → PipeWire → 像素 | 帧契约复用 `frame-contract`，注意 stride/format 归一；**用同一 RemoteDesktop session 的流**，不单开 ScreenCast session |
+| 读 UI 树 / `elements()` | AT-SPI2（a11y bus；Python `gi.repository.Atspi` 或 D-Bus） | 实测 Qt/KDE 覆盖优秀（dolphin **741** 元素、VirtualBox **877**）；**AT-SPI SCREEN extents 是逻辑点**；GTK 视环境而定；Electron/自绘差 |
+| `click` / 坐标点击 | RemoteDesktop `NotifyPointerMotionAbsolute` + `NotifyPointerButton` | **注入坐标 = 逻辑空间**（实测超逻辑宽报 `Invalid position`）；元素 extents(逻辑) 直接注入；帧像素(物理) 需 ÷DPR |
+| `typeText` / `pressKey` | RemoteDesktop `NotifyKeyboardKeysym` / `NotifyKeyboardKeycode` | keysym 映射到 XKB keysym |
+| 窗口枚举 / `app_ref.window_id` | KWin `queryWindowInfo` + 单窗口源 | 窗口激活可辅以 `/Scripting` |
+| 授权/恢复 | mega-auth（`kde-authorized`）+ restore_token（SelectDevices） | 见 §3；mega-auth 优先 |
+| 抓帧失败 / portal 不可用降级 | `/dev/uinput`（注入）+ 一次性抓屏 backend | **仅 fallback**，默认不启用 |
+
+**AT-SPI 可访问性开关（`org.a11y.Status.IsEnabled`，阶段 2 实测修正）**：
+- 实测：**已在运行的 Qt/GTK 应用，无论 `IsEnabled` 开/关，AT-SPI 树内容完全相同**（dolphin 恒 741、clash-verge 恒 63）——即树上是否有内容不取决于运行时 `IsEnabled`，而取决于**应用启动时**是否构建了 a11y 桥。
+- Qt 应用：`IsEnabled=false` 时仍构建桥（日志 `Read ...toolkit-accessibility`）；且环境设 `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1` 可强制所有新 Qt 应用无条件构建桥（可靠性最高）。
+- GTK 应用：是否随 `IsEnabled` 构建桥有版本差异，GTK3/4 一般需要 `GTK_MODULES=gail:atk-bridge`；Electron 需 `--force-renderer-accessibility`。
+- **部署建议**：CUA producer 的「OS 层授权」步骤中**显式设 `IsEnabled=true` + `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`** 并常驻；这是最低成本的可靠性保障（开销是全局 a11y 树构建），仍尊重「按需开启」作为后续设置项；producer 退出时**恢复原有 `IsEnabled` 值**（fail-closed 且不污染系统）。
+
+## 8. 不变量
+
+1. **权限模型只按 ZCode 现有两套语义**：OS 层（Linux=portal mega-auth / restore_token）+ 应用 permission 层（复用，不改）；不引入 codex 配置项。
+2. **平台代码能力开关优先，绝不按 UA 猜**：Linux 门用 capability（`typeof platform.requestCuaPermissionOnboarding === "function"` 与 producer 存在性）判定，
+   与 mac/win 现有的 capability 门一致；不能用 `navigator.userAgent` 推断 Linux。
+3. **fail-closed**：任一层授权缺失，CUA 工具一律不可用；不得为可用性放宽。
+4. **单一真相**：权限展示态只在 `cuaPermissionStatusStore`；restore_token 只在 main/Host；不在 UI 另起缓存。
+5. **cua-ui a11y bus 授权状态与 workspace 解耦**：OS 授权（restore_token / IsEnabled）是本机属性，不属于某个 workspace（同 TCC 语义）。
+6. **不追求 Wayland 下的 X11 兼容路径**：xdotool/Xwayland 不作主路径；uinput 只作 fallback。
+7. **持久授权必须绑定受信身份**：应用层用 `official_cua` 能力组防仿冒（沿用）；OS 层用稳定 `app_id`（桌面形态=`zcode.desktop`；systemd 形态=`Registry.Register` 的 stable-id=`com.zcode.Agent`）。
+8. **单 session 原则**：抓屏与注入用**同一个 RemoteDesktop session**，不得拆成两个独立 session。
+9. **`CuaPermissionKind` 不新增枚举**：复用 `accessibility` / `screen_recording`，仅做语义映射；线上 schema 只放宽 `platform` 字面量。
+10. **AT-SPI `IsEnabled` 默认常开、可切按需**：默认常开保证开箱可用；按需模式作为后续设置项，不得因切换改变 fail-closed 语义。
+11. **坐标唯一基准（阶段 2.5 实测修正）**：AT-SPI extents = **逻辑点**；portal `Notify*Absolute` 注入 = **逻辑空间**（实测传 >逻辑宽 的值报 `Invalid position`）；portal 抓帧 = **物理像素** = 逻辑 × DPR。因此：**元素 extents(逻辑) 直接注入、无需缩放**；只有用**帧像素**做坐标时要先 ÷DPR 转回逻辑。
+
+## 9. 验收场景（设计目标，其中 PoC 部分已实测）
+
+1. Linux 桌面设置页不再显示「暂不支持」，而是展示 `screen_recording`（抓屏）/ `accessibility`（输入注入）两行 + 「授权电脑控制」按钮。
+2. 点「授权电脑控制」→ 首次弹一次 portal 对话框（或已配 mega-auth 则免弹）；允许后按钮变「已授权」，restore_token 落盘。
+3. 重启 ZCode / 重新进入设置页 → 用 restore_token 或 mega-auth 恢复，**不再弹框**（符合「一次性授权」）。
+4. 授权后 CUA 工具可：截图（整屏/单窗口）、读 UI 树、坐标点击、键盘输入、枚举窗口。（✅ PoC 已证：抓屏 PipeWire fd + 键盘注入 NotifyKeyboardKeysym；✅ 阶段2已证：AT-SPI 读完整 UI 树 741 元素 + 逻辑→物理坐标映射）
+5. 撤销授权（PermissionStore 无条目 / IsEnabled 关）→ `getStatus` 如实返回未授权，工具不可用（fail-closed），提示重新授权。
+6. 应用 permission 层：首次调用工具仍弹 `PermissionDialog`（allow_once / allow_project / deny），选 allow_project 后该项目内免再问（SQLite 持久）。
+7. 应用层项目持久授权不能被子类/第三方 MCP 冒用（`official_cua` 能力组校验）。
+8. 中英双语齐全，无缺 key。
+
+## 10. 分阶段落地（阶段 1 PoC 部分已完成）
+
+- **阶段 0（本文档）**：设计定稿。已确认——(a) `CuaPermissionKind` 复用 `accessibility` / `screen_recording` 语义映射；(b) 受信身份按形态分治：桌面用 `zcode.desktop`、systemd 用 `Registry.Register` 稳定 id=`com.zcode.Agent`；(c) AT-SPI `IsEnabled` 默认常开、预留按需切换项。
+- **阶段 1（能力 PoC）— 已实测通过（2026-10-25，本机 AOSC/KDE6）**：
+  - ✅ 单 RemoteDesktop session：`CreateSession → SelectDevices → ScreenCast.SelectSources → Start` 全 response=0。
+  - ✅ 抓屏：`OpenPipeWireRemote` 返回有效 PipeWire fd（流 node HDMI-A-1，物理 3072×1728 / 逻辑 1536×864 @2x）。
+  - ✅ 输入注入：`NotifyKeyboardKeysym` 成功。
+  - ✅ 免弹框：写入 `kde-authorized` mega-auth 后，连续两次运行 **0 秒完成、完全无弹框**。
+  - ✅ restore_token：`persist_mode=2` 时 Start 返回 restore_token（下次传 SelectDevices）。
+  - ⚠️ 已澄清（见 §5.2）：从 Pi bridge / systemd 启动的进程**可以通过 `Registry.Register` 让 mega-auth 命中**（实测 0.1s 免弹框）；此前不命中是 Register 未落地或缺 `.desktop` 所致。
+- **阶段 2（AT-SPI 读树）— 已实测完成（2026-10-25，本机 KDE6）**：
+  - ✅ 读树途径：`at-spi2-core 2.58.2` + Python `gi.repository.Atspi`（`Atspi.init()` → `get_desktop(0)` 遍历）可用；a11y bus 在 `/run/user/1000/at-spi/bus_0`（`org.a11y.Bus.GetAddress`）。pyatspi2 未装，但 GIR Atspi 够用。
+  - ✅ 投影契约：`AXElement = { index, kind(title=role_name), title(get_name), value(text/value iface), actions(action_iface names[]) }`，`kind`=AT-SPI `role_name`。
+  - ✅ 字段完整度实测：dolphin(741) `kind` 741/741、`actions` 522/741、`extents` 595/741、`title` 570/741；VirtualBox(877) 同样可映射。
+  - ⚠️ **坐标闭环（阶段 2.5 修正）**：阶段 2 曾记「×2 / DPR=2」——**错误**。阶段 2.5 实测本机 DPR=**1.25**，桌面对话逻辑 **3072×1728**、抓帧物理 **3840×2160**（=逻辑×1.25）；且 portal 注入坐标是**逻辑空间**（传 3600 报 `Invalid position`）。故「元素 extents(逻辑) → 注入」**直接可用、不需要缩放**。阶段 2 的 ×2 结论作废。
+  - ✅ `IsEnabled` 开/关对已运行 Qt/GTK 应用的树**无影响**（见 §7 末），部署应设 `IsEnabled=true` + `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`。
+  - ⚠️ 局限：Qt 大量 filler 无语义（可保留作容器，或投影时对无 title/无 action 的容器压缩）；`getAXState()` 的文本树格式与 macOS `kind/title/value/actions` 渲染需在 producer 里自实现（ZCode 契约的 state 文本是 producer 产出）。
+- **阶段 2.5（Linux producer 原型）— 已跑通（2026-10-25，本机 KDE6）**：见 §12。
+- **阶段 3（接线）**：`resolveComputerUseAvailability` 增 `local-linux(supported:true)`；`getStatus` 去 Unix 短路并接 Linux producer；
+  `cuaPlatform.ts` 增 capability 门；协议 `platform` 从 `z.literal("darwin")` 放宽为 `"darwin" | "linux"`（保持向后兼容）。
+- **阶段 4（UI）**：设置页授权按钮 + 双权限行 + 授权返回恢复链（§6）。
+- **阶段 5（降级）**：uinput fallback + 抓屏失败兜底。
+
+## 11. 开放问题
+
+已拍板（阶段 0 结论）：
+- ✅ `CuaPermissionKind` 复用 `accessibility` / `screen_recording` 语义映射（见 §3）。
+- ✅ 受信身份按形态分治：桌面 `zcode.desktop`、systemd `Registry.Register` 稳定 id（见 §5）。
+- ✅ AT-SPI `IsEnabled` 默认常开，预留按需切换项（见 §7 末）。
+- ✅ stable-id 取值：`com.zcode.Agent`。
+
+阶段 1 新发现、待后续处理：
+1. ✅ **mega-auth 与 Registry 的关系（已实测澄清）**：`Registry.Register` 的 id **就是** portal 用于 RemoteDesktop 会话的 app_id，**且后端 mega-auth 精确按它匹配**（dbus-monitor 实证 + 多组隔离对照实验）。systemd 部署可做到一次 mega-auth → 永久 0 秒免弹框。实现前提：Register 的 stable_id == mega-auth 写入的 app_id，且同名 `<stable_id>.desktop` 存在。
+2. **⚠️ 安全决策点（产品级，未定）**：自动写入 mega-auth（`kde-authorized`）= 安装后即可**完全控制桌面而无需任何确认**，实质是预设全权信任。两种选择：
+   - (a) **安装时自动写入** —— headless/无人值守最方便，但默认全权信任、安全面最大；不推荐作默认。
+   - (b) **用户主动授权**（推荐，与 §6 的「授权电脑控制」按钮一致）：用户在设置页点按钮 → 首次弹一次 portal 框并勾选「下次不再询问」→ 由**用户确认**后写入 mega-auth 或保存 restore_token；之后永久免弹框。符合用户明确要求的「主动请求授权」。
+3. 单窗口 vs 整屏抓取的默认源类型；**多屏与 HiDPI 坐标映射已实测（阶段 2.5）：注入=逻辑空间、元素extents=逻辑直接可用、帧像素=物理需÷DPR；多屏叠加当前仅单屏验证，多屏输出偏移待补**。
+4. Linux 下 portal 不可用（非 KDE / 无 portal 的桌面）时是否声明"仅 uinput 降级模式"，以及降级模式的安全边界。
+5. `restore_token` 在屏幕几何变化后失效重问（与 RustDesk “除非屏幕改变”一致）；需在 UX 上说明。
+6. **隔离验证方法（存档备查）**：验证 app_id/mega-auth 全部在隔离环境完成——独立 app_id `com.zcode.AgentCuaTest` / `com.zcode.cuaX/Y` / `com.zcode.NotAuthed` + 独立 `systemd-run --scope`/`--unit` 模拟 cgroup + 临时 `~/.local/share/applications/*.desktop` + 临时打开 portal `G_MESSAGES_DEBUG=all` 观察 `Adding XdpAppInfo ... app '<id>'`。**全程零弹框观测**（只做 `CreateSession` 不 `Start` 即可读 app_id）；测完后已删除全部 mega-auth 条目、desktop、debug drop-in 并重启 portal。生产 `com.zcode.Agent` 及 AT-SPI 状态未被触碰。
+
+阶段 2 新发现、待后续处理：
+7. **producer 契约落点（已核清源码）**：Linux 需要的只是一个 **producer**——按 broker 私有 socket 协议（行分隔 JSON `{id,token,method,input}`）收发，返回 MCP `CallToolResult`（`content` 文本树 + `structuredContent{state_id, elements[]}` + `_meta` app-associations）。三段 broker/bridge/SDK **平台无关可原样复用**；只需换掉 producer 内部实现（mac=AXUIElement / win=UIA / **linux=AT-SPI + portal**）。不实现 `computer-use-client.mjs`（它是通用 SDK）。
+8. **getAXState() 文本树格式需 producer 自实现**：ZCode 契约的树文本（缩进、`kind title value actions` 渲染、diff、`showing A-B of N items`）由 producer 产出，非 AT-SPI 原生；macOS 那份在闭源 Helper 里，Linux 需照契约自写渲染器。`elements()` 表格则直接来自 `structuredContent.elements`（即 AXElement[]）。
+9. **AT-SPI 到 AXElement 的语义差**：`kind` 取 AT-SPI `role_name`（小写带空格，如 `push button`/`menu item`）会与 macOS 的 `AXButton`/`AXMenuItem` 不同；若模型/skill 依赖 `kind` 字面，需做一层归一映射（待定是否必须）。
+10. **filler/容器噪声**：Qt 树中 `filler`/`separator` 占多数（dolphin 741 里 filler 42、separator 39；menu item 445 多为 popup 子项）。producer 可选择在 `elements()` 全量保留（模型可过滤）而 `getAXState()` 只渲染有语义节点，以减少上下文。
+11. **静态 app_id 与 helper 区**：AT-SPI producer 是一个常驻的 Linux 原生进程（Node/Go/Python 均可），以 `Registry.Register("com.zcode.Agent")` 声明的身份运行（需同名 `.desktop`）。它同时是 portal RemoteDesktop 与 AT-SPI 的发起方，地位等同 macOS 的 Helper。
+
+## 12. 阶段 2.5：Linux producer 原型（已跑通）
+
+**产物**：`/tmp/cua-linux-producer/producer.py`（原型，未入库）。Python 栈：`gi.repository.Atspi`（读树）+ `dbus`/`GLib`（portal）+ `Gst`（PipeWire 取帧）+ `PIL`（PNG）。
+
+**架构（对应 §11.7 的 producer 契约）**：
+```
+broker(socket) → producer.py（GLib/selectors 单线程）→ dispatch(method)
+  ├─ list_apps / list_windows / get_app_state   → AT-SPI 读树 → AXElement[]
+  ├─ get_app_state(+include_screenshot)          → portal 抓帧 → base64 PNG（image+image_ref 在 text 前）
+  ├─ left_click / type / key / scroll            → portal NotifyPointer*/NotifyKeyboard*
+  └─ request_access                              → portal ensure()（首次可能弹框）
+```
+协议形状：请求 `{id?,method,params?}`、响应 `{id,ok,result|error}`（与 `broker.d.ts` 的 BrokerRequest/BrokerResponse 一致）。
+
+**实测结果（本机 KDE6 / x86_64 / DPR 1.25）**：
+
+| 项 | 结果 |
+|---|---|
+| `list_apps` | ✅ 返回 22 个 app（含 `_meta` items 关联） |
+| `get_app_state(dolphin)` | ✅ 741 elements、522 可交互、`state_id` 生成、文本树渲染 |
+| `get_app_state(+include_screenshot)` | ✅ 有效 PNG 6190170 bytes、3840×2160、取帧 ~0.9–1.7s；`content` 顺序 image→image_ref→tree |
+| `left_click`（帧物理坐标 (1920,1250)） | ✅ producer ÷1.25 → 逻辑 (1536,1000)；KWin `cursorPos` 精确 (1536,1000) |
+| `key`/`type`（如 Shift_L） | ✅ `NotifyKeyboardKeysym` 注入成功 |
+| `request_access` | ✅ portal ensure() 建立 session（register+select+start+openpipewire） |
+| 未知方法 | ✅ fail-closed 返回 `isError:true` |
+
+**授权（免弹框）**：`host.portal.Registry.Register(app_id)` + 写入 KDE `kde-authorized`/`remote-desktop`/`app_id=["yes"]` 后，`Start` code=0 **免弹框**（隔离用什么 `com.zcode.CuaProbe` 验证）。权限集实际存储在 KDE 后端 `~/.local/share/kde-backend-permissions*`（PermissionStore D-Bus 对象 `/org/freedesktop/impl/portal/PermissionStore` 回读为空但文件有记录，说明 KDE 后端持久化在文件而非该对象）。
+
+**关键坑（已入代码）**：
+1. **单线程必须**：portal 走 GLib 主循环 + D-Bus 信号；与 socket 多线程混用会卡死。原型用 `selectors` 单线程事件循环驱动。
+2. **`Registry.Register` 与 mega-auth 是两条腿**：Register 只改 portal 会话 app_id；免弹框靠 mega-auth 按该 app_id 命中。两者 id 必须一致，且 require `<app_id>.desktop` 存在。
+3. **响应可能很大**（截图 base64 数 MB）：读完请求后要**恢复阻塞**再 sendall，否则 `EAGAIN`。
+
+**未做/后续**：`type` 仅 ASCII keysym（非 ASCII 需 keymap）；`left_click_drag`/`set_value`/`select_text`/`perform_action`/`paste` 未实现；多屏坐标偏移未处理；`frame-contract` 的 image_ref 权威只是文本占位，未做官方帧完整性签名。
+
+**前置结论（阶段 2.5 时的假设，阶段 6 已纠正）**：当时以为 `@zcode/zcode-cua` 是 placeholder 包、Linux 落地要「用真实现重新打包它」。**阶段 6 实测证明这个假设不对**——真正运行的是闭源 agent 自带的 `node-repl-host`（它有真实 BrokerClient），`@zcode/zcode-cua` 的桩只影响开源构建。见 §13。
+
+## 13. 阶段 6：实际接入路径与落地进展（2026-10-25，已纠正阶段 2.5 假设）
+
+### 13.1 关键发现：整条 CUA 链只差「一个平台判断」
+
+实测确认（非推断）：
+- **实际运行的是闭源 agent 自带的 `node-repl-host`**（`/home/cepvor/.zcode/server/agents/glm/packages/node-repl-host/dist/mcp/server.js`，5.07MB，`"not available in this build"` 出现 0 次）——它有**完整真实实现**。
+- 它的 `createComputerUseRuntime` 是一个 **`BrokerClient`**：连 `ZCODE_CUA_PERMISSION_BROKER_SOCKET`，把 `list_apps`/`get_app_state`/`left_click`… 转发给后端 **permission broker Helper**。真正执行引擎在 Helper（mac 原生 app / win 安装包 runtime），Linux 分支 `ensureStandaloneHelperLaunched` 直接 return。
+- **唯一堵点**：`packages/services/src/node.ts` 的 `resolveSpawnEnv` 只在 `darwin || win32` 时给 agent 注入 `ZCODE_CUA_PERMISSION_BROKER_SOCKET`。Linux 不注入 ⇒ BrokerClient 无 socket ⇒ CUA 不挂。
+
+因此 Linux 只缺两样：① 一个 Linux 版 broker Helper（监听 socket、执行工具）；② 把 `node.ts` 的平台判断加上 linux + 起停这个 Helper。**闭源 agent、node-repl-host、broker/bridge、UI 都不用动。**
+
+### 13.2 broker 线协议（从闭源 bundle 挖出，PermissionBrokerClient 侧，IPC_VERSION=3）
+
+NDJSON over unix socket：
+1. 首帧 `{"id":0,"method":"authenticate","params":{"clientApiVersion":3}}` → `{"id":0,"ok":true}`
+2. 业务 `{"id":N,"method":"<m>","params":{...}}` → `{"id":N,"ok":true,"result":...}` 或 `{"id":N,"ok":false,"error":{"message","code","details"}}`
+3. 必须应答 `broker_info`（Helper 启动看门狗 claim 探针）
+4. peer 校验：socket 文件 uid==euid 且非 world-writable（同用户创建即通过）
+5. 真实 method：`list_applications`（裸数组）、`capture_app`（`get_app_state` 底层）、`list_windows`、`screenshot`、`application_info`、`element_at_point`，及动作方法
+
+### 13.3 已完成（阶段 6 步 1-2）
+
+- ✅ **Rust Helper**：`packages/zcode-cua/linux-helper/`（`cargo build --release`，8MB 单二进制，零运行时依赖）。已实现 `authenticate`/`broker_info`/`ping`/`list_applications`/`capture_app`（AT-SPI 读树）。实测：7 个真实 app；`capture_app(dolphin)` 701 元素、`plasmashell` 911 元素、DPR=1.25 逻辑坐标、中文正确。
+- ✅ **服务端接线**：`packages/services/src/cua-permission-broker/linuxCuaHelper.ts`（惰性单例 spawn + ping 探活 + 退出清理 + 稳定 socket `/tmp/zcode-cua-linux-helper-<uid>.sock`），`node.ts` 的 `resolveSpawnEnv` 在 `linux && cuaPluginEnabled` 时注入 helper socket，dispose 时停 helper。
+- ✅ 类型检查 `tsc -p packages/services --noEmit` 通过；`pnpm --filter @zcode/server build` 产物 5.4MB bundle、含新逻辑、无裸 import 污染。
+- ✅ 用真实 Node `net` 客户端精确对拍协议（auth → broker_info → list_applications 裸数组 7 项 → capture_app 701 elements 520ms）。
+
+### 13.4 待完成
+
+- 重启 `zcode-web-local` 让新 dist 生效（会重建 agent 子进程与 node-repl-host，随后注入 Linux helper socket）。
+- 补 `list_windows` / `application_info` / `element_at_point`；动作方法（`left_click`/`type`/`key`/`set_value`/`perform_action`/`scroll`/`paste`）。
+- 抓屏（ScreenCast→PipeWire→PNG）与输入注入（RemoteDesktop，需 portal 授权）。
+- `getStatus`/`computerUseAvailability`/`cuaPlatform`/协议 `platform` literal 的 Linux 分支与 UI 授权按钮。
+

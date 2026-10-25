@@ -658,6 +658,10 @@ import {
   type WindowsCuaRuntime,
 } from "#src/cua-permission-broker/windowsCuaDevRuntime.js";
 import { createCanonicalCuaHelperInstaller } from "./cua-permission-broker/cuaHelperInstaller.js";
+import {
+  disposeLinuxCuaHelper,
+  ensureLinuxCuaHelper,
+} from "./cua-permission-broker/linuxCuaHelper.js";
 import { WindowsCuaHelperHost } from "#src/cua-permission-broker/windowsCuaDevHelperHost.js";
 import {
   getStableCuaPipeName,
@@ -2467,6 +2471,22 @@ export function createLocalServices(options: {
           }
         }
       }
+      // Linux：CUA Helper 由本进程按需 spawn（Rust 实现，AT-SPI 读树 + portal 抓屏/注入），
+      // 注入其 broker socket 让内置 zcode-cua plugin 的 node_repl 宿主能连上——与 mac/win
+      // 唯一的区别只是「谁提供 Helper 进程」。找不到二进制或启动失败时 fail-closed。
+      if (cuaPluginEnabled && process.platform === "linux") {
+        const linuxBrokerSocket = await ensureLinuxCuaHelper();
+        if (linuxBrokerSocket) {
+          cuaProductHelperEnv = {
+            [BROKER_SOCKET_ENV]: linuxBrokerSocket,
+            [ZCODE_CUA_PLUGIN_AUTHORITY_ENV_KEY]: randomBytes(16).toString("hex"),
+          };
+        } else {
+          cuaProductHelperEnv = {
+            [BROKER_UNAVAILABLE_ENV]: "broker_unavailable: linux cua helper could not be started",
+          };
+        }
+      }
       const telemetryEnv = getCapturedZCodeAgentTelemetryEnv();
       const telemetryConfigured = Boolean(
         telemetryEnv.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT || telemetryEnv.OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -3053,6 +3073,8 @@ export function createLocalServices(options: {
   registerManagedCuaHelperHostForDispose(services, {
     stop: async () => {
       await defaultCuaProductHelperLifecycle.dispose();
+      // Linux：一并停掉本进程拉起的 CUA Helper，避免退出后残留进程/socket。
+      await disposeLinuxCuaHelper();
     },
   });
   registerHostApiNetworkTransportForDispose(services, hostApiNetworkTransport);
