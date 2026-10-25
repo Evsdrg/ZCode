@@ -347,6 +347,10 @@ async fn capture_app(
     walk(conn, &a.bname, &a.path, 0, a.pid, wb, &mut ctx).await;
     Ok(json!({
         "snapshot_mode": "full",
+        // 坐标空间声明：KDE Wayland 的 AT-SPI Screen 坐标实为「窗口 client 区局部坐标」
+        // （实测 kdialog/konsole 均报 (0,0) 原点），非屏幕绝对坐标。agent 若需按 bounds
+        // 换算点击坐标，须叠加窗口的真实屏幕位置（KWin clientGeometry）。详见 spec 8.7。
+        "coordinate_space": "window-local",
         "app": {
             "bundle_id": Value::Null, "pid": a.pid, "name": a.name,
             "aumid": Value::Null, "executable_path": Value::Null, "icon_png": Value::Null
@@ -794,18 +798,20 @@ async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) ->
         }
         // 滚动：point + direction + amount(0..100) → pointer axis。
         "scroll" => {
+            // 滚轮语义用离散步进（NotifyPointerAxisDiscrete）：
+            // KDE 对 continuous axis 的小数 delta 实测不生效（现象见 spec 开放问题），
+            // discrete 的整数步进语义与真实滚轮一致。
             let amount = params.get("amount").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let dir = params.get("direction").and_then(|v| v.as_str()).unwrap_or("down");
-            // 每单位约 1/10 行；符号按方向。
-            let steps = (amount / 10.0).clamp(0.1, 10.0);
-            let (dx, dy) = match dir {
-                "up" => (0.0, steps),
-                "down" => (0.0, -steps),
-                "left" => (steps, 0.0),
-                "right" => (-steps, 0.0),
-                _ => (0.0, -steps),
+            let mag = (amount / 10.0).round().clamp(1.0, 10.0) as i32;
+            let (horiz, steps) = match dir {
+                "up" => (false, -mag),
+                "down" => (false, mag),
+                "left" => (true, -mag),
+                "right" => (true, mag),
+                _ => (false, mag),
             };
-            match portal::scroll(dx, dy).await {
+            match portal::scroll_discrete(horiz, steps).await {
                 Ok(()) => json!({"ok": true, "result": {"action_sent": true, "dispatch_status": "accepted"}}),
                 Err(e) => fail("action_unavailable", &format!("scroll: {e}"), false),
             }

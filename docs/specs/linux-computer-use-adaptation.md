@@ -9,14 +9,14 @@
 
 现状：Computer Use（CUA）在 Linux 桌面**结构性不可用**，且是代码里写死的，不是运行时缺依赖：
 
-| 层 | 证据 | 现状 |
-|---|---|---|
-| 可用性判定 | `packages/ui/src/settings/computerUseAvailability.ts` 的 `resolveComputerUseAvailability`：`isMacDesktop → local-macos(supported:true)`、`isWindowsDesktop → local-windows(supported:true)`、**其余桌面一律 `local-linux(supported:false)`** | Linux 被硬判为不支持 |
-| 设置页 | `ComputerUseSection.tsx:693-697` 走 `settings.computerUse.unsupported.linuxDescription`（「暂不支持 Linux 桌面环境」） | 只渲染一句不可用提示 |
-| 权限服务 | `packages/services/src/node.ts:2021` `getStatus` 首行 `if (process.platform !== "darwin" && !== "win32") return { available:false, reason:"...only macOS and Windows." }` | Linux 直接短路 |
-| 权限类型 | `packages/shared/src/cuaAccessibilitySettings.ts` `CuaPermissionKind = "accessibility" \| "screen_recording"`（mac 语义） | 无 Linux 概念 |
-| 协议 | `packages/shared/src/zcode-protocol-v4/cuaPermission.ts` `platform: z.literal("darwin")` | 线上 schema 只认 darwin |
-| 平台门 | `packages/ui/src/lib/cuaPlatform.ts` 只有 `supportsLocalMacCuaPermissionOnboarding` / `supportsLocalWindowsCuaEntry` | 无 Linux 门 |
+| 层         | 证据                                                                                                                                                                                                                                         | 现状                    |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| 可用性判定 | `packages/ui/src/settings/computerUseAvailability.ts` 的 `resolveComputerUseAvailability`：`isMacDesktop → local-macos(supported:true)`、`isWindowsDesktop → local-windows(supported:true)`、**其余桌面一律 `local-linux(supported:false)`** | Linux 被硬判为不支持    |
+| 设置页     | `ComputerUseSection.tsx:693-697` 走 `settings.computerUse.unsupported.linuxDescription`（「暂不支持 Linux 桌面环境」）                                                                                                                       | 只渲染一句不可用提示    |
+| 权限服务   | `packages/services/src/node.ts:2021` `getStatus` 首行 `if (process.platform !== "darwin" && !== "win32") return { available:false, reason:"...only macOS and Windows." }`                                                                    | Linux 直接短路          |
+| 权限类型   | `packages/shared/src/cuaAccessibilitySettings.ts` `CuaPermissionKind = "accessibility" \| "screen_recording"`（mac 语义）                                                                                                                    | 无 Linux 概念           |
+| 协议       | `packages/shared/src/zcode-protocol-v4/cuaPermission.ts` `platform: z.literal("darwin")`                                                                                                                                                     | 线上 schema 只认 darwin |
+| 平台门     | `packages/ui/src/lib/cuaPlatform.ts` 只有 `supportsLocalMacCuaPermissionOnboarding` / `supportsLocalWindowsCuaEntry`                                                                                                                         | 无 Linux 门             |
 
 而**权限检测与授权 UI、状态缓存、事件驱动刷新这一整套在 Linux 上完全可复用**——它们是平台无关的，缺的只是「Linux 的权限种类」和「Linux 的能力后端」。
 
@@ -27,15 +27,15 @@
 全部为本机实测（详见本轮调研记录）。**目标环境本身就是 Wayland+KDE6，因此做的是 Wayland 原生适配**，
 而不是把 X11 时代的手段（uinput）当正路、把 portal 授权当摩擦。
 
-| 能力 | 本机实测结果 | Wayland 契合度 |
-|---|---|---|
-| **抓屏** | xdg-desktop-portal `ScreenCast`（v5，`AvailableSourceTypes=7` 含**单窗口**、`AvailableCursorModes=7`、`OpenPipeWireRemote` 返回 PipeWire fd）→ 走 PipeWire 帧；`restore_token` 持久授权可用（`PermissionStore[screencast]` 已有 2 条持久授权条目） | ⭐ 协议内正规路径 |
-| **输入注入** | xdg-desktop-portal `RemoteDesktop`（v2，`AvailableDeviceTypes=7` = 键盘+指针+触摸）：`NotifyPointerMotion(Absolute)` / `NotifyPointerButton` / `NotifyPointerAxis` / `NotifyKeyboardKeycode` / `NotifyKeyboardKeysym` / `NotifyTouch*`，以及 **`ConnectToEIS` 返回 EIS fd**；本机已具备 `libei/libeis/liboeffis` 运行库 **+ 开发头文件** | ⭐ 协议内正规路径 |
-| **读 UI 树** | AT-SPI2（`at-spi2-core 2.58.2`，bus `unix:path=/run/user/1000/at-spi/bus_0`）；实测：`org.a11y.Status.IsEnabled=false` 时 `dolphin/konsole` 树不可见，临时置 true 后 `dolphin/VirtualBox/konsole` 树可读 | ✅ 唯一可行（Wayland 未把 a11y 纳入 portal） |
-| **窗口枚举/激活** | KWin DBus：`org.kde.KWin` `/KWin` `queryWindowInfo` / `getWindowInfo(uuid)`；`/Scripting` 可 `loadScript` | ✅ KDE 原生，仅窗口管理，**不能注入事件** |
-| 直调 KWin `ScreenShot2` | 实测 `org.kde.KWin.ScreenShot2.Error.NoAuthorized`（仅 KDE 受信进程如 spectacle 可调） | ✗ 不走 |
-| `/dev/uinput` | 实测可建虚拟设备并注入按键（ESC 关闭了弹窗），需 `/dev/uinput` 写权限 | ⚠️ 仅作 fallback（内核层，绕过协议栈） |
-| xdotool | 只能操作 Xwayland（X11 客户端），**控不了 Wayland 原生窗口** | ✗ 不作主路径 |
+| 能力                    | 本机实测结果                                                                                                                                                                                                                                                                                                                             | Wayland 契合度                               |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| **抓屏**                | xdg-desktop-portal `ScreenCast`（v5，`AvailableSourceTypes=7` 含**单窗口**、`AvailableCursorModes=7`、`OpenPipeWireRemote` 返回 PipeWire fd）→ 走 PipeWire 帧；`restore_token` 持久授权可用（`PermissionStore[screencast]` 已有 2 条持久授权条目）                                                                                       | ⭐ 协议内正规路径                            |
+| **输入注入**            | xdg-desktop-portal `RemoteDesktop`（v2，`AvailableDeviceTypes=7` = 键盘+指针+触摸）：`NotifyPointerMotion(Absolute)` / `NotifyPointerButton` / `NotifyPointerAxis` / `NotifyKeyboardKeycode` / `NotifyKeyboardKeysym` / `NotifyTouch*`，以及 **`ConnectToEIS` 返回 EIS fd**；本机已具备 `libei/libeis/liboeffis` 运行库 **+ 开发头文件** | ⭐ 协议内正规路径                            |
+| **读 UI 树**            | AT-SPI2（`at-spi2-core 2.58.2`，bus `unix:path=/run/user/1000/at-spi/bus_0`）；实测：`org.a11y.Status.IsEnabled=false` 时 `dolphin/konsole` 树不可见，临时置 true 后 `dolphin/VirtualBox/konsole` 树可读                                                                                                                                 | ✅ 唯一可行（Wayland 未把 a11y 纳入 portal） |
+| **窗口枚举/激活**       | KWin DBus：`org.kde.KWin` `/KWin` `queryWindowInfo` / `getWindowInfo(uuid)`；`/Scripting` 可 `loadScript`                                                                                                                                                                                                                                | ✅ KDE 原生，仅窗口管理，**不能注入事件**    |
+| 直调 KWin `ScreenShot2` | 实测 `org.kde.KWin.ScreenShot2.Error.NoAuthorized`（仅 KDE 受信进程如 spectacle 可调）                                                                                                                                                                                                                                                   | ✗ 不走                                       |
+| `/dev/uinput`           | 实测可建虚拟设备并注入按键（ESC 关闭了弹窗），需 `/dev/uinput` 写权限                                                                                                                                                                                                                                                                    | ⚠️ 仅作 fallback（内核层，绕过协议栈）       |
+| xdotool                 | 只能操作 Xwayland（X11 客户端），**控不了 Wayland 原生窗口**                                                                                                                                                                                                                                                                             | ✗ 不作主路径                                 |
 
 结论：**Linux producer 必须拼三套后端**（portal ScreenCast + portal RemoteDesktop + AT-SPI2），
 uinput 仅备用；不存在像 mac AX/CG、win UIA/WGC 那样的单一系统统一 API。
@@ -79,12 +79,12 @@ ZCode CUA 有**两层**授权，Linux 适配必须分别映射，不能混为一
 
 ### 4.1 所有者（唯一真相）
 
-| 状态 | 唯一所有者 | 说明 |
-|---|---|---|
-| portal 授权是否已建立 & restore_token | main/Host（Linux producer 的 permission 模块） | 进程内持有 + 持久化到配置目录；UI 不缓存第二份 |
-| 权限展示态 | `packages/ui/src/lib/cuaPermissionStatusStore.ts`（每 workspace 一槽） | 复用现有缓存，新增 Linux 分支 |
-| 应用 permission 规则（allow_project） | `sessionStore`（SQLite `project permission`） | 复用，不改 |
-| 插件总开关 | 现有 `isCuaEnabledForContext` | 复用，不改 |
+| 状态                                  | 唯一所有者                                                             | 说明                                           |
+| ------------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------- |
+| portal 授权是否已建立 & restore_token | main/Host（Linux producer 的 permission 模块）                         | 进程内持有 + 持久化到配置目录；UI 不缓存第二份 |
+| 权限展示态                            | `packages/ui/src/lib/cuaPermissionStatusStore.ts`（每 workspace 一槽） | 复用现有缓存，新增 Linux 分支                  |
+| 应用 permission 规则（allow_project） | `sessionStore`（SQLite `project permission`）                          | 复用，不改                                     |
+| 插件总开关                            | 现有 `isCuaEnabledForContext`                                          | 复用，不改                                     |
 
 ### 4.2 授权建立时序（主动授权按钮触发）
 
@@ -119,6 +119,7 @@ ZCode CUA 有**两层**授权，Linux 适配必须分别映射，不能混为一
 
 沿用现有事件驱动模型（挂载 / 窗口重获焦点 / 显式 refresh），**不新增轮询**。
 Linux 侧 `getStatus` 不再首行短路，改为：
+
 1. 插件总开关检查（复用 `shouldUseCuaPermissionService`）；
 2. 检查 `kde-authorized` mega-auth 是否已配置（是 → 直接视为 OS 层已授权）；
 3. 否则检查本地是否持有有效 restore_token 且会话可恢复；
@@ -169,6 +170,7 @@ Linux 侧 `getStatus` 不再首行短路，改为：
 注意：若安装时已写入 mega-auth（`kde-authorized`），首次也可 0 秒免弹框（实测）；但那是管理员/安装阶段动作，**面向普通用户的默认路径仍需按钮**。
 
 设计要点（落到 `ComputerUseSection.tsx` 由 `unsupported.linuxDescription` 分支改造而来）：
+
 - Linux 可用时，替换「暂不支持」提示卡，展示：
   - 两个权限行：`screen_recording`（抓屏）/ `accessibility`（输入注入）的当前状态（已授权 / 未授权 / 需要重新授权）；
   - **「授权电脑控制」按钮** → 调 `platform.requestCuaPermissionOnboarding()`（Linux 分支）；
@@ -179,17 +181,18 @@ Linux 侧 `getStatus` 不再首行短路，改为：
 
 ## 7. 能力后端映射（Linux producer 实现契约）
 
-| ZCode CUA 能力 | Linux 实现路径 | 备注 |
-|---|---|---|
-| `getScreenshot` / 帧 | RemoteDesktop session → PipeWire → 像素 | 帧契约复用 `frame-contract`，注意 stride/format 归一；**用同一 RemoteDesktop session 的流**，不单开 ScreenCast session |
-| 读 UI 树 / `elements()` | AT-SPI2（a11y bus；Python `gi.repository.Atspi` 或 D-Bus） | 实测 Qt/KDE 覆盖优秀（dolphin **741** 元素、VirtualBox **877**）；**AT-SPI SCREEN extents 是逻辑点**；GTK 视环境而定；Electron/自绘差 |
-| `click` / 坐标点击 | RemoteDesktop `NotifyPointerMotionAbsolute` + `NotifyPointerButton` | **注入坐标 = 逻辑空间**（实测超逻辑宽报 `Invalid position`）；元素 extents(逻辑) 直接注入；帧像素(物理) 需 ÷DPR |
-| `typeText` / `pressKey` | RemoteDesktop `NotifyKeyboardKeysym` / `NotifyKeyboardKeycode` | keysym 映射到 XKB keysym |
-| 窗口枚举 / `app_ref.window_id` | KWin `queryWindowInfo` + 单窗口源 | 窗口激活可辅以 `/Scripting` |
-| 授权/恢复 | mega-auth（`kde-authorized`）+ restore_token（SelectDevices） | 见 §3；mega-auth 优先 |
-| 抓帧失败 / portal 不可用降级 | `/dev/uinput`（注入）+ 一次性抓屏 backend | **仅 fallback**，默认不启用 |
+| ZCode CUA 能力                 | Linux 实现路径                                                      | 备注                                                                                                                                  |
+| ------------------------------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `getScreenshot` / 帧           | RemoteDesktop session → PipeWire → 像素                             | 帧契约复用 `frame-contract`，注意 stride/format 归一；**用同一 RemoteDesktop session 的流**，不单开 ScreenCast session                |
+| 读 UI 树 / `elements()`        | AT-SPI2（a11y bus；Python `gi.repository.Atspi` 或 D-Bus）          | 实测 Qt/KDE 覆盖优秀（dolphin **741** 元素、VirtualBox **877**）；**AT-SPI SCREEN extents 是逻辑点**；GTK 视环境而定；Electron/自绘差 |
+| `click` / 坐标点击             | RemoteDesktop `NotifyPointerMotionAbsolute` + `NotifyPointerButton` | **注入坐标 = 逻辑空间**（实测超逻辑宽报 `Invalid position`）；元素 extents(逻辑) 直接注入；帧像素(物理) 需 ÷DPR                       |
+| `typeText` / `pressKey`        | RemoteDesktop `NotifyKeyboardKeysym` / `NotifyKeyboardKeycode`      | keysym 映射到 XKB keysym                                                                                                              |
+| 窗口枚举 / `app_ref.window_id` | KWin `queryWindowInfo` + 单窗口源                                   | 窗口激活可辅以 `/Scripting`                                                                                                           |
+| 授权/恢复                      | mega-auth（`kde-authorized`）+ restore_token（SelectDevices）       | 见 §3；mega-auth 优先                                                                                                                 |
+| 抓帧失败 / portal 不可用降级   | `/dev/uinput`（注入）+ 一次性抓屏 backend                           | **仅 fallback**，默认不启用                                                                                                           |
 
 **AT-SPI 可访问性开关（`org.a11y.Status.IsEnabled`，阶段 2 实测修正）**：
+
 - 实测：**已在运行的 Qt/GTK 应用，无论 `IsEnabled` 开/关，AT-SPI 树内容完全相同**（dolphin 恒 741、clash-verge 恒 63）——即树上是否有内容不取决于运行时 `IsEnabled`，而取决于**应用启动时**是否构建了 a11y 桥。
 - Qt 应用：`IsEnabled=false` 时仍构建桥（日志 `Read ...toolkit-accessibility`）；且环境设 `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1` 可强制所有新 Qt 应用无条件构建桥（可靠性最高）。
 - GTK 应用：是否随 `IsEnabled` 构建桥有版本差异，GTK3/4 一般需要 `GTK_MODULES=gail:atk-bridge`；Electron 需 `--force-renderer-accessibility`。
@@ -247,12 +250,14 @@ Linux 侧 `getStatus` 不再首行短路，改为：
 ## 11. 开放问题
 
 已拍板（阶段 0 结论）：
+
 - ✅ `CuaPermissionKind` 复用 `accessibility` / `screen_recording` 语义映射（见 §3）。
 - ✅ 受信身份按形态分治：桌面 `zcode.desktop`、systemd `Registry.Register` 稳定 id（见 §5）。
 - ✅ AT-SPI `IsEnabled` 默认常开，预留按需切换项（见 §7 末）。
 - ✅ stable-id 取值：`com.zcode.Agent`。
 
 阶段 1 新发现、待后续处理：
+
 1. ✅ **mega-auth 与 Registry 的关系（已实测澄清）**：`Registry.Register` 的 id **就是** portal 用于 RemoteDesktop 会话的 app_id，**且后端 mega-auth 精确按它匹配**（dbus-monitor 实证 + 多组隔离对照实验）。systemd 部署可做到一次 mega-auth → 永久 0 秒免弹框。实现前提：Register 的 stable_id == mega-auth 写入的 app_id，且同名 `<stable_id>.desktop` 存在。
 2. **⚠️ 安全决策点（产品级，未定）**：自动写入 mega-auth（`kde-authorized`）= 安装后即可**完全控制桌面而无需任何确认**，实质是预设全权信任。两种选择：
    - (a) **安装时自动写入** —— headless/无人值守最方便，但默认全权信任、安全面最大；不推荐作默认。
@@ -262,18 +267,14 @@ Linux 侧 `getStatus` 不再首行短路，改为：
 5. `restore_token` 在屏幕几何变化后失效重问（与 RustDesk “除非屏幕改变”一致）；需在 UX 上说明。
 6. **隔离验证方法（存档备查）**：验证 app_id/mega-auth 全部在隔离环境完成——独立 app_id `com.zcode.AgentCuaTest` / `com.zcode.cuaX/Y` / `com.zcode.NotAuthed` + 独立 `systemd-run --scope`/`--unit` 模拟 cgroup + 临时 `~/.local/share/applications/*.desktop` + 临时打开 portal `G_MESSAGES_DEBUG=all` 观察 `Adding XdpAppInfo ... app '<id>'`。**全程零弹框观测**（只做 `CreateSession` 不 `Start` 即可读 app_id）；测完后已删除全部 mega-auth 条目、desktop、debug drop-in 并重启 portal。生产 `com.zcode.Agent` 及 AT-SPI 状态未被触碰。
 
-阶段 2 新发现、待后续处理：
-7. **producer 契约落点（已核清源码）**：Linux 需要的只是一个 **producer**——按 broker 私有 socket 协议（行分隔 JSON `{id,token,method,input}`）收发，返回 MCP `CallToolResult`（`content` 文本树 + `structuredContent{state_id, elements[]}` + `_meta` app-associations）。三段 broker/bridge/SDK **平台无关可原样复用**；只需换掉 producer 内部实现（mac=AXUIElement / win=UIA / **linux=AT-SPI + portal**）。不实现 `computer-use-client.mjs`（它是通用 SDK）。
-8. **getAXState() 文本树格式需 producer 自实现**：ZCode 契约的树文本（缩进、`kind title value actions` 渲染、diff、`showing A-B of N items`）由 producer 产出，非 AT-SPI 原生；macOS 那份在闭源 Helper 里，Linux 需照契约自写渲染器。`elements()` 表格则直接来自 `structuredContent.elements`（即 AXElement[]）。
-9. **AT-SPI 到 AXElement 的语义差**：`kind` 取 AT-SPI `role_name`（小写带空格，如 `push button`/`menu item`）会与 macOS 的 `AXButton`/`AXMenuItem` 不同；若模型/skill 依赖 `kind` 字面，需做一层归一映射（待定是否必须）。
-10. **filler/容器噪声**：Qt 树中 `filler`/`separator` 占多数（dolphin 741 里 filler 42、separator 39；menu item 445 多为 popup 子项）。producer 可选择在 `elements()` 全量保留（模型可过滤）而 `getAXState()` 只渲染有语义节点，以减少上下文。
-11. **静态 app_id 与 helper 区**：AT-SPI producer 是一个常驻的 Linux 原生进程（Node/Go/Python 均可），以 `Registry.Register("com.zcode.Agent")` 声明的身份运行（需同名 `.desktop`）。它同时是 portal RemoteDesktop 与 AT-SPI 的发起方，地位等同 macOS 的 Helper。
+阶段 2 新发现、待后续处理：7. **producer 契约落点（已核清源码）**：Linux 需要的只是一个 **producer**——按 broker 私有 socket 协议（行分隔 JSON `{id,token,method,input}`）收发，返回 MCP `CallToolResult`（`content` 文本树 + `structuredContent{state_id, elements[]}` + `_meta` app-associations）。三段 broker/bridge/SDK **平台无关可原样复用**；只需换掉 producer 内部实现（mac=AXUIElement / win=UIA / **linux=AT-SPI + portal**）。不实现 `computer-use-client.mjs`（它是通用 SDK）。8. **getAXState() 文本树格式需 producer 自实现**：ZCode 契约的树文本（缩进、`kind title value actions` 渲染、diff、`showing A-B of N items`）由 producer 产出，非 AT-SPI 原生；macOS 那份在闭源 Helper 里，Linux 需照契约自写渲染器。`elements()` 表格则直接来自 `structuredContent.elements`（即 AXElement[]）。9. **AT-SPI 到 AXElement 的语义差**：`kind` 取 AT-SPI `role_name`（小写带空格，如 `push button`/`menu item`）会与 macOS 的 `AXButton`/`AXMenuItem` 不同；若模型/skill 依赖 `kind` 字面，需做一层归一映射（待定是否必须）。10. **filler/容器噪声**：Qt 树中 `filler`/`separator` 占多数（dolphin 741 里 filler 42、separator 39；menu item 445 多为 popup 子项）。producer 可选择在 `elements()` 全量保留（模型可过滤）而 `getAXState()` 只渲染有语义节点，以减少上下文。11. **静态 app_id 与 helper 区**：AT-SPI producer 是一个常驻的 Linux 原生进程（Node/Go/Python 均可），以 `Registry.Register("com.zcode.Agent")` 声明的身份运行（需同名 `.desktop`）。它同时是 portal RemoteDesktop 与 AT-SPI 的发起方，地位等同 macOS 的 Helper。
 
 ## 12. 阶段 2.5：Linux producer 原型（已跑通）
 
 **产物**：`/tmp/cua-linux-producer/producer.py`（原型，未入库）。Python 栈：`gi.repository.Atspi`（读树）+ `dbus`/`GLib`（portal）+ `Gst`（PipeWire 取帧）+ `PIL`（PNG）。
 
 **架构（对应 §11.7 的 producer 契约）**：
+
 ```
 broker(socket) → producer.py（GLib/selectors 单线程）→ dispatch(method)
   ├─ list_apps / list_windows / get_app_state   → AT-SPI 读树 → AXElement[]
@@ -281,23 +282,25 @@ broker(socket) → producer.py（GLib/selectors 单线程）→ dispatch(method)
   ├─ left_click / type / key / scroll            → portal NotifyPointer*/NotifyKeyboard*
   └─ request_access                              → portal ensure()（首次可能弹框）
 ```
+
 协议形状：请求 `{id?,method,params?}`、响应 `{id,ok,result|error}`（与 `broker.d.ts` 的 BrokerRequest/BrokerResponse 一致）。
 
 **实测结果（本机 KDE6 / x86_64 / DPR 1.25）**：
 
-| 项 | 结果 |
-|---|---|
-| `list_apps` | ✅ 返回 22 个 app（含 `_meta` items 关联） |
-| `get_app_state(dolphin)` | ✅ 741 elements、522 可交互、`state_id` 生成、文本树渲染 |
-| `get_app_state(+include_screenshot)` | ✅ 有效 PNG 6190170 bytes、3840×2160、取帧 ~0.9–1.7s；`content` 顺序 image→image_ref→tree |
-| `left_click`（帧物理坐标 (1920,1250)） | ✅ producer ÷1.25 → 逻辑 (1536,1000)；KWin `cursorPos` 精确 (1536,1000) |
-| `key`/`type`（如 Shift_L） | ✅ `NotifyKeyboardKeysym` 注入成功 |
-| `request_access` | ✅ portal ensure() 建立 session（register+select+start+openpipewire） |
-| 未知方法 | ✅ fail-closed 返回 `isError:true` |
+| 项                                     | 结果                                                                                      |
+| -------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `list_apps`                            | ✅ 返回 22 个 app（含 `_meta` items 关联）                                                |
+| `get_app_state(dolphin)`               | ✅ 741 elements、522 可交互、`state_id` 生成、文本树渲染                                  |
+| `get_app_state(+include_screenshot)`   | ✅ 有效 PNG 6190170 bytes、3840×2160、取帧 ~0.9–1.7s；`content` 顺序 image→image_ref→tree |
+| `left_click`（帧物理坐标 (1920,1250)） | ✅ producer ÷1.25 → 逻辑 (1536,1000)；KWin `cursorPos` 精确 (1536,1000)                   |
+| `key`/`type`（如 Shift_L）             | ✅ `NotifyKeyboardKeysym` 注入成功                                                        |
+| `request_access`                       | ✅ portal ensure() 建立 session（register+select+start+openpipewire）                     |
+| 未知方法                               | ✅ fail-closed 返回 `isError:true`                                                        |
 
 **授权（免弹框）**：`host.portal.Registry.Register(app_id)` + 写入 KDE `kde-authorized`/`remote-desktop`/`app_id=["yes"]` 后，`Start` code=0 **免弹框**（隔离用什么 `com.zcode.CuaProbe` 验证）。权限集实际存储在 KDE 后端 `~/.local/share/kde-backend-permissions*`（PermissionStore D-Bus 对象 `/org/freedesktop/impl/portal/PermissionStore` 回读为空但文件有记录，说明 KDE 后端持久化在文件而非该对象）。
 
 **关键坑（已入代码）**：
+
 1. **单线程必须**：portal 走 GLib 主循环 + D-Bus 信号；与 socket 多线程混用会卡死。原型用 `selectors` 单线程事件循环驱动。
 2. **`Registry.Register` 与 mega-auth 是两条腿**：Register 只改 portal 会话 app_id；免弹框靠 mega-auth 按该 app_id 命中。两者 id 必须一致，且 require `<app_id>.desktop` 存在。
 3. **响应可能很大**（截图 base64 数 MB）：读完请求后要**恢复阻塞**再 sendall，否则 `EAGAIN`。
@@ -311,6 +314,7 @@ broker(socket) → producer.py（GLib/selectors 单线程）→ dispatch(method)
 ### 13.1 关键发现：整条 CUA 链只差「一个平台判断」
 
 实测确认（非推断）：
+
 - **实际运行的是闭源 agent 自带的 `node-repl-host`**（`/home/cepvor/.zcode/server/agents/glm/packages/node-repl-host/dist/mcp/server.js`，5.07MB，`"not available in this build"` 出现 0 次）——它有**完整真实实现**。
 - 它的 `createComputerUseRuntime` 是一个 **`BrokerClient`**：连 `ZCODE_CUA_PERMISSION_BROKER_SOCKET`，把 `list_apps`/`get_app_state`/`left_click`… 转发给后端 **permission broker Helper**。真正执行引擎在 Helper（mac 原生 app / win 安装包 runtime），Linux 分支 `ensureStandaloneHelperLaunched` 直接 return。
 - **唯一堵点**：`packages/services/src/node.ts` 的 `resolveSpawnEnv` 只在 `darwin || win32` 时给 agent 注入 `ZCODE_CUA_PERMISSION_BROKER_SOCKET`。Linux 不注入 ⇒ BrokerClient 无 socket ⇒ CUA 不挂。
@@ -320,6 +324,7 @@ broker(socket) → producer.py（GLib/selectors 单线程）→ dispatch(method)
 ### 13.2 broker 线协议（从闭源 bundle 挖出，PermissionBrokerClient 侧，IPC_VERSION=3）
 
 NDJSON over unix socket：
+
 1. 首帧 `{"id":0,"method":"authenticate","params":{"clientApiVersion":3}}` → `{"id":0,"ok":true}`
 2. 业务 `{"id":N,"method":"<m>","params":{...}}` → `{"id":N,"ok":true,"result":...}` 或 `{"id":N,"ok":false,"error":{"message","code","details"}}`
 3. 必须应答 `broker_info`（Helper 启动看门狗 claim 探针）
@@ -345,13 +350,13 @@ NDJSON over unix socket：
 
 从闭源 `node-repl-host/dist/mcp/server.js` 反查出每个工具的底层 broker method：
 
-| 工具 | 底层 method | 需要 portal？ |
-|---|---|---|
-| `left_click`（元素目标）/ `perform_action` | `element_perform_action` | ❌ 纯 AT-SPI Action.do_action |
-| `set_value`（元素目标） | `element_set_value` | ❌ EditableText / Value 接口 |
-| `select_text` | `element_select_text` | ❌ Text.set_selection |
-| `left_click`（坐标）/ `scroll`（坐标）/ `drag` | `click` / `scroll` / `drag` | ✅ 需 RemoteDesktop |
-| `type`（app 级/全局）/ `key` / `paste` | `type` / `key` / `paste` | ✅ 需 RemoteDesktop |
+| 工具                                           | 底层 method                 | 需要 portal？                 |
+| ---------------------------------------------- | --------------------------- | ----------------------------- |
+| `left_click`（元素目标）/ `perform_action`     | `element_perform_action`    | ❌ 纯 AT-SPI Action.do_action |
+| `set_value`（元素目标）                        | `element_set_value`         | ❌ EditableText / Value 接口  |
+| `select_text`                                  | `element_select_text`       | ❌ Text.set_selection         |
+| `left_click`（坐标）/ `scroll`（坐标）/ `drag` | `click` / `scroll` / `drag` | ✅ 需 RemoteDesktop           |
+| `type`（app 级/全局）/ `key` / `paste`         | `type` / `key` / `paste`    | ✅ 需 RemoteDesktop           |
 
 **结论**：模型「观察 → 按元素 index 操作」的主路径（click/perform/set_value/select_text）**零授权即可工作**——它们都是 AT-SPI 语义动作。只有「坐标点击 / 全局键盘 / 滚动 / 拖拽 / 截图」需要 portal。
 
@@ -379,7 +384,6 @@ NDJSON over unix socket：
 - `cargo build --release` 通过、无警告；安装到 `/usr/local/bin/cua-linux-helper`（旧版备份 `.bak-stage1`）。
 - 重启 `zcode-web-local` 后 helper ready；生产 socket 实测：8 app、`capture_app(dolphin)` 735 元素、`element_perform_action(SetFocus/AXPress)`、`element_select_text`、`list_windows`、`application_info` 全部 `ok:true`；`click`（坐标）正确 fail-closed `action_unavailable`。
 
-
 ## 15. 阶段 5：UI 门控与 getStatus Linux 分支（2026-10-25，已完成）
 
 ### 15.1 宿主平台贯通（关键：浏览器 UA 不等于宿主）
@@ -401,6 +405,7 @@ server 进程 process.platform
 ### 15.2 判定逻辑（纯函数，已单测）
 
 `resolveComputerUseAvailability` 新增 `isLinuxDesktop` 入参：
+
 - `isLinuxDesktop: true` → `{kind:"local-linux", supported:true}`（承认受支持）
 - 远端优先级最高：远端 workspace 即使 `isLinuxDesktop` 也判 remote/unsupported
 - 仅 `isDesktop`（无平台细分，Electron Linux 桌面且未细分）→ 仍 `local-linux/unsupported`（保持既有语义，避免回归）
@@ -413,6 +418,7 @@ server 进程 process.platform
 `authenticate` + 调 `permission_status`，取回 `{accessibility, screen_recording, grant_owner, needs_grant}`。
 
 `node.ts` 的 `cuaPermissionService.getStatus` 在 `process.platform==="linux"` 分支：
+
 - 插件未启用 → `available:false`（与 mac/win 一致）
 - `ensureLinuxCuaHelper()` 起 Helper，再 `probeLinuxCuaPermissionStatus()`
 - 返回 `platform:"linux"`、`accessibility`（AT-SPI，能读树即 granted）、`screenRecording`（portal ScreenCast，阶段 4 前如实 denied）
@@ -431,7 +437,7 @@ Helper 新增 `permission_status` 应答：`accessibility=granted`（AT-SPI 可�
 
 ### 15.5 剩余（阶段 4：portal 抓屏 + 输入注入 + 主动授权按钮）
 
-- Helper 侧用 `ashpd` 接 `ScreenCast`（PipeWire 抓帧）与 `RemoteDesktop`（Notify* 坐标/键盘注入、ConnectToEIS）。
+- Helper 侧用 `ashpd` 接 `ScreenCast`（PipeWire 抓帧）与 `RemoteDesktop`（Notify\* 坐标/键盘注入、ConnectToEIS）。
 - 补 `click`/`scroll`/`drag`/`type`/`key`/`paste` 的 portal 实现（当前 fail-closed `action_unavailable`）。
 - `permission_status` 改从 portal `PermissionStore`/会话状态读真值；`request_access` 走 portal 授权（一次弹窗 + restore_token 持久化）。
 - UI：设置页新增「请求授权」按钮（用户明确要求：主动触发 portal 一次弹窗），并显示 screen_recording 授权状态。
@@ -488,12 +494,14 @@ systemd journal。
 ### 17.4 实测结论（关键）
 
 portal 调用链**已验证通到系统授权窗**：helper 日志显示
+
 ```
 [portal] build_session: RemoteDesktop::new
 [portal] build_session: create_session
 [portal] build_session: select_devices (restore_token=false)
 [portal] build_session: start (会弹系统授权窗，等待用户确认)
 ```
+
 `start` 之后停住等待用户确认；portal-kde 日志在同秒记录到请求（`AtSpiAdaptor::applicationInterface`）。
 即：**链路正确，缺的是一次人工确认**。`AvailableDeviceTypes=7`（键盘+指针+触摸全支持）。
 
@@ -518,6 +526,7 @@ KDE `kde-authorized` 才拿到免弹框授权）。当前正式 helper 走的是
 ### 18.2 ScreenCast 接线（与 RemoteDesktop 同一会话）
 
 三个 KDE 特有事实（全部实测）：
+
 1. **ashpd 的 Screencast 必须与 RemoteDesktop 共享同一 D-Bus 连接**
    （`Screencast::with_connection(desktop.connection().clone())`）——独立连接 select_sources 后
    start 不返回 streams。
@@ -531,8 +540,9 @@ KDE `kde-authorized` 才拿到免弹框授权）。当前正式 helper 走的是
 3072×1728 是逻辑坐标。
 
 官方来源核对（2026-10-25 补，修正此前仅凭实测的表述）：
+
 - **stream 参数 = PipeWire node id**：官方 XML `@stream: The PipeWire stream node the
-  coordinate is relative to`；KDE remotedesktop.cpp:369 按 nodeId 匹配 ScreencastingStream，
+coordinate is relative to`；KDE remotedesktop.cpp:369 按 nodeId 匹配 ScreencastingStream，
   screencasting.cpp 确证 Start 响应 streams 元组第一元素就是 m_nodeid。ashpd 报 `id: None`
   只因该字段接口 v6 起废弃（官方推荐 pipewire-serial），但 KDE 实现仍按 node id 匹配——
   对 KDE 用 node id 是正确值。
@@ -578,15 +588,15 @@ unloadScript + 删除，避免同名脚本只加载一次。
 
 ### 18.6 端到端验证矩阵（全部实测通过）
 
-| 能力 | 结果 |
-|---|---|
-| list_applications | 10 apps |
-| capture_app(kdialog) | 7 元素 |
-| element_set_value → 读回 | ✅ 'FINAL-1'（a11y 写路径闭环） |
-| screenshot | ✅ 8.1MB PNG（3840×2160） |
-| permission_status | ✅ granted / needs_grant:false |
-| KWin 激活 | ✅ ZCODE-ACTIVATED（stackingOrder 顶层） |
-| click+type（视觉一致目标） | ✅ 各段分别验证（指针=绝对坐标 / 键盘=焦点窗口） |
+| 能力                       | 结果                                                                        |
+| -------------------------- | --------------------------------------------------------------------------- |
+| list_applications          | 10 apps                                                                     |
+| capture_app(kdialog)       | 7 元素                                                                      |
+| element_set_value → 读回   | ✅ 'FINAL-1'（a11y 写路径闭环）                                             |
+| screenshot                 | ✅ 8.1MB PNG（3840×2160）                                                   |
+| permission_status          | ✅ granted / needs_grant:false                                              |
+| KWin 激活                  | ✅ ZCODE-ACTIVATED（stackingOrder 顶层）                                    |
+| click+type（视觉一致目标） | ⚠️ 已被 §19 推翻：motion/keyboard 分段有效，但 button 在 KDE 6.7.5 实际无效 |
 
 ### 18.7 已知限制（开放问题）
 
@@ -597,3 +607,107 @@ unloadScript + 删除，避免同名脚本只加载一次。
   （3072×1728）——窗口级 stream 时 position 即其在 workspace 的偏移，可作配准的官方数据源。
 - type/key 不带坐标/元素目标，无法自动定位焦点窗口——依赖 agent 先 click（激活）再 type。
 - 拖拽（drag）/element_scroll/hold_key 未实现（fail-closed）。
+
+## 19. button/axis 注入缺陷调查与官方源码全景核对（2026-10-26）
+
+### 19.1 触发：全链路「应该工作」但 click 无可观察效果
+
+阶段 4.5 验证时 click 返回 ok 但多次实验观察不到点击效果。按「官方文档与源码优先」
+方法论做了全链路核对与运行时观测，结论出乎意料：**D-Bus 与 wl 层全部正常，
+button 事件确实到达 KWin，但在 KDE 6.7.5 上不产生效果**。
+
+### 19.2 官方源码核对全景（本轮拉取核对的所有一手来源）
+
+| 层              | 来源                                                                       | 核对结果                                                                                                                                                                                                                               |
+| --------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| portal 接口定义 | flatpak/xdg-desktop-portal `data/org.freedesktop.portal.RemoteDesktop.xml` | `NotifyPointerButton(button, state)`：button=Linux evdev code（BTN_LEFT=0x110=272），state=1 press/0 release；`NotifyPointerAxis(dx,dy)`=smooth 设备 motion 向量语义，无符号约定文档                                                   |
+| portal 参考测试 | 同仓库 `tests/test_remotedesktop.py`                                       | 调用形状 `(session, {}, button, state)` 与 ashpd 一致                                                                                                                                                                                  |
+| broker（中转）  | flatpak/xdg-desktop-portal `src/remote-desktop.c`                          | 所有 Notify\* 均 fire-and-forget 转发给 impl，**Ok 返回≠impl 处理**；button handler 无额外过滤                                                                                                                                         |
+| impl（KDE）     | KDE/xdg-desktop-portal-kde **v6.7.5 tag**（与本机同版本）                  | `NotifyPointerButton→requestPointerButtonPress(quint32)→m_fakeInput->button(linuxButton,…)` 原样透传，无 Qt 枚举映射；与 master 一致                                                                                                   |
+| KWin 协议后端   | KDE/kwin **v6.7.5 tag** `src/backends/fakeinput/fakeinputbackend.cpp`      | button 处理：authenticate 守卫 + pressedButtons 状态机（press 查重入/release 查不存在）+ `buttonToQtMouseButton`（`src/mousebuttons.cpp`：**BTN_LEFT→Qt::LeftButton 映射明确存在**）；与 master diff 仅 keysym 细节，button 路径零差异 |
+| wl 协议         | wayland.xml（本机 /usr/share）+ KWin `org_kde_kwin_fake_input` v6          | axis 无方向符号文档；fake-input 协议声明「Regular clients must not use」，KWin 不对普通客户端广播（实测直连 bind 失败）——portal 是唯一合法通道                                                                                         |
+| GNOME 对照      | GNOME/mutter RemoteDesktop 实现                                            | discrete 版官方源码写死 `steps>0 → CLUTTER_SCROLL_DOWN`（正=向下）；mutter 走 libinput 虚拟设备注入（与 KDE fake-input 完全不同路径）                                                                                                  |
+| ashpd 0.13.13   | 本机 cargo registry 源码                                                   | `notify_pointer_button(session, button, state, options)` D-Bus 参数序与 XML 一致；KeyState Pressed=1/Released=0 与规范一致                                                                                                             |
+
+### 19.3 运行时观测（决定性证据）
+
+1. **dbus-monitor**：helper 的 click → broker → portal-kde 的 `NotifyPointerButton`
+   调用**确实发出且到达**（同批 NotifyPointerMotionAbsolute/NotifyKeyboardKeysym 均到达）。
+2. **WAYLAND_DEBUG=1 重启 portal-kde**（临时 override，事后已撤销）抓到 wl 层流量：
+   ```
+   -> org_kde_kwin_fake_input#50.authenticate("xdg-desktop-portal-kde", "Remote desktop session input")
+   -> org_kde_kwin_fake_input#50.pointer_motion_absolute(1527.0, 890.0)
+   -> org_kde_kwin_fake_input#50.button(272, 1)
+   -> org_kde_kwin_fake_input#50.button(272, 0)
+   -> org_kde_kwin_fake_input#50.keyboard_keysym(97, 1/0)
+   ```
+   **button(272) press/release 成对发出**，与 motion/keysym 同一连接、同一 FakeInput 对象。
+3. **效果分化**（同连接！）：
+   - `pointer_motion_absolute` ✅ 生效（KWin `workspace.cursorPos` 精确等于注入坐标）
+   - `keyboard_keysym` ✅ 生效（AT-SPI SetFocus 聚焦后 type，输入框值读回一致，多次复现）
+   - `button` ❌ 无效——**决定性实验**：点击 kdialog 标题栏关闭按钮（窗口装饰由 KWin
+     直接处理，不经应用；button 生效则窗口必关）→ 窗口不关。首次点击（portal-kde
+     重启后、全新 FakeInput device、pressedButtons 必为空）同样无效。
+   - `axis`（continuous 与 discrete 均试）❌ 无可观察效果（测试时光标在可滚动区域上，
+     目标窗口经 KWin 确认在前台）。
+
+### 19.4 已排除的假设（全部有证据）
+
+| 假设                                                            | 排除证据                                                                                      |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| button 编码错（应传 Qt 值 1 而非 evdev 272）                    | KWin `mousebuttons.cpp` 明确映射 BTN_LEFT(272)→Qt::LeftButton；且 portal XML 规定 evdev 编码  |
+| portal-kde 版本差异（6.7.5 用旧 KWayland Qt::MouseButton 接口） | 拉 v6.7.5 tag 源码核对：与 master 相同的 quint32 透传；二进制符号含 QtWayland fake-input 类   |
+| D-Bus/wl 层丢包                                                 | dbus-monitor + WAYLAND_DEBUG 双重观测，请求全部到达                                           |
+| pressedButtons 状态机残留（历史未配对 press）                   | portal-kde 重启后**首次** click 即无效                                                        |
+| 坐标错位/窗口遮挡/焦点不对                                      | 决定性实验点的是**标题栏关闭按钮**（KWin 装饰区、窗口经 KWin 脚本确认 active 且在最前）仍无效 |
+| ashpd 参数序/序列化错                                           | ashpd 源码与官方 XML 逐参核对一致；keysym 同封装方式生效                                      |
+| KWin 6.7.5 与 master 的 fakeinput 差异                          | v6.7.5 tag diff：button 路径零差异                                                            |
+
+### 19.5 结论与 workaround
+
+**结论**：在本机（KDE Plasma 6.7.5 / KWin 6.7.5 / xdg-desktop-portal-kde 6.7.5）上，
+fake-input 的 button/axis 事件到达 KWin 后不产生效果，而同一设备同一连接的
+motion_absolute/keyboard_keysym 正常。静态源码核对未发现缺陷，根因未定位
+（疑 KWin 运行时问题，待上游 bug 报告/修复或 KWin 升级后复测）。KDE Bugzilla
+检索（fake input / remote desktop / portal click）未找到已报告的相同问题。
+
+**对 CUA 能力面的实际影响有限**，因为主交互路径不依赖 button 注入：
+
+| 操作       | 主路径                                                                     | 状态                                                                                         |
+| ---------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| 点击元素   | `element_perform_action`（AT-SPI AXPress/Press，D-Bus 直达，不经输入注入） | ✅ 已验证（FINAL-1 实验）                                                                    |
+| 输入文本   | AT-SPI SetFocus/grab_focus 聚焦 + `keyboard_keysym` 注入                   | ✅ 已验证（TODAY-1/FINAL-1）                                                                 |
+| 设值       | `element_set_value`（AT-SPI EditableText/Value）                           | ✅ 已验证                                                                                    |
+| 移动光标   | `pointer_motion_absolute`                                                  | ✅ 已验证（cursorPos 精确）                                                                  |
+| 激活窗口   | KWin scripting（stackingOrder 顶层）                                       | ✅ 已验证（ZCODE-ACTIVATED）                                                                 |
+| 抓屏       | ScreenCast + PipeWire（gst-launch）                                        | ✅ 已验证（3840×2160 PNG）                                                                   |
+| 坐标级点击 | portal button                                                              | ❌ 本机失效（click 仍发出全部事件；motion+激活生效，button 无效——如实 fail-open 记录于响应） |
+| 滚动       | portal axis discrete                                                       | ❌ 本机失效（同上；scroll 改 discrete 语义正确，等待 KWin 修复后自然恢复）                   |
+
+**工程决定**：
+
+- `click`/`scroll` 保留现实现（协议正确、其它合成器/未来 KWin 版本可用），不做本机
+  特判——button 无效是环境缺陷而非协议错误；spec 如实记录。
+- agent 工作流应优先走元素级动作（这也正是 mac/win CUA 的推荐路径，坐标点击是兜底）。
+
+### 19.6 坐标空间勘误（capture_app 契约）
+
+本轮同时确证：**KDE Wayland 的 AT-SPI `CoordType.Screen` extents 实为窗口 client 区
+局部坐标**（kdialog/konsole/plasmashell 面板元素均以 (0,0) 或面板局部原点报告；
+KWin 真实几何 (1464,814) 对照 AT-SPI (0,0)）。因此：
+
+- `capture_app` 结果新增 `"coordinate_space": "window-local"` 字段如实声明；
+- agent 若需按 bounds 换算屏幕点击坐标，须叠加窗口真实屏幕位置（KWin clientGeometry）；
+- 完整修复（helper 内经 KWin 几何配准把 bounds 转成屏幕坐标）与 `element_at_point`
+  配准是同一件事，留待后续（见 18.7）。
+
+### 19.7 本轮方法论教训
+
+1. **「返回 ok」≠「生效」**：portal 全链 fire-and-forget，每层都可能在下游静默丢弃。
+   验证注入类能力必须设计**有确定性可观察效果**的实验（如点标题栏关闭按钮）。
+2. **对照组污染**：多个同名测试窗口（kdialog×2 重叠）导致读回错误对象，浪费两轮。
+   测试载体必须唯一且可判别（caption 带唯一 token）。
+3. **版本核对**：对照源码必须拉**与本机同版本的 tag**（v6.7.5），master 可能已变。
+4. `pkill -f` 会匹配到执行命令的 shell 自身 cmdline（本轮再次踩中，exit 143）；
+   `pkill -x` 对 >15 字符进程名因 comm 截断而失效。一律 `pgrep -af | grep -v pgrep`
+   人工过滤后按 pid 杀。

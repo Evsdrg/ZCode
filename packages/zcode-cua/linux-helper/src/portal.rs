@@ -15,7 +15,7 @@
 use std::os::fd::AsRawFd;
 use std::sync::OnceLock;
 
-use ashpd::desktop::remote_desktop::{DeviceType, KeyState, RemoteDesktop, SelectDevicesOptions};
+use ashpd::desktop::remote_desktop::{Axis, DeviceType, KeyState, RemoteDesktop, SelectDevicesOptions};
 use ashpd::desktop::screencast::{
     CursorMode, OpenPipeWireRemoteOptions, Screencast, SelectSourcesOptions, SourceType,
 };
@@ -46,9 +46,10 @@ enum Cmd {
         clicks: u32,
         resp: oneshot::Sender<Result<(), String>>,
     },
-    Scroll {
-        dx: f64,
-        dy: f64,
+    /// 离散滚动（滚轮步进语义）：axis + steps。
+    ScrollDiscrete {
+        axis: Axis,
+        steps: i32,
         resp: oneshot::Sender<Result<(), String>>,
     },
     /// keysym 序列：每个 (keysym, pressed)。
@@ -292,11 +293,11 @@ async fn handle(cmd: Cmd, state: &mut Option<PortalSession>) {
             .await;
             let _ = resp.send(r);
         }
-        Cmd::Scroll { dx, dy, resp } => {
-            if let Err(e) = ensure(state).await {
-                let _ = resp.send(Err(format!("needs_grant: {e}")));
-                return;
-            }
+        Cmd::ScrollDiscrete {
+            axis,
+            steps,
+            resp,
+        } => {
             let s = match state.as_mut() {
                 Some(s) => s,
                 None => {
@@ -306,9 +307,9 @@ async fn handle(cmd: Cmd, state: &mut Option<PortalSession>) {
             };
             let r = s
                 .desktop
-                .notify_pointer_axis(&s.session, dx, dy, Default::default())
+                .notify_pointer_axis_discrete(&s.session, axis, steps, Default::default())
                 .await
-                .map_err(|e| format!("axis: {e}"));
+                .map_err(|e| format!("axis_discrete: {e}"));
             let _ = resp.send(r);
         }
         Cmd::Keyseq { events, resp } => {
@@ -372,8 +373,19 @@ pub async fn click(x: f64, y: f64, button: i32, clicks: u32) -> Result<(), Strin
     .await?
 }
 
-pub async fn scroll(dx: f64, dy: f64) -> Result<(), String> {
-    send_cmd(|resp| Cmd::Scroll { dx, dy, resp }).await?
+/// 离散滚动（滚轮步进）。axis: 0=Horizontal 1=Vertical（portal Axis 枚举）。
+pub async fn scroll_discrete(axis_is_horizontal: bool, steps: i32) -> Result<(), String> {
+    let axis = if axis_is_horizontal {
+        Axis::Horizontal
+    } else {
+        Axis::Vertical
+    };
+    send_cmd(|resp| Cmd::ScrollDiscrete {
+        axis,
+        steps,
+        resp,
+    })
+    .await?
 }
 
 pub async fn key_events(events: Vec<(i32, bool)>) -> Result<(), String> {
