@@ -335,8 +335,47 @@ NDJSON over unix socket：
 
 ### 13.4 待完成
 
-- 重启 `zcode-web-local` 让新 dist 生效（会重建 agent 子进程与 node-repl-host，随后注入 Linux helper socket）。
-- 补 `list_windows` / `application_info` / `element_at_point`；动作方法（`left_click`/`type`/`key`/`set_value`/`perform_action`/`scroll`/`paste`）。
-- 抓屏（ScreenCast→PipeWire→PNG）与输入注入（RemoteDesktop，需 portal 授权）。
+- ~~补 `list_windows` / `application_info` / `element_at_point`；动作方法（`left_click`/`type`/`key`/`set_value`/`perform_action`/`scroll`/`paste`）~~ → **见 13.5（元素级动作已完成；坐标/全局输入注入待阶段 4）**
+- 抓屏（ScreenCast→PipeWire→PNG）与坐标/全局输入注入（RemoteDesktop，需 portal 授权）。
 - `getStatus`/`computerUseAvailability`/`cuaPlatform`/协议 `platform` literal 的 Linux 分支与 UI 授权按钮。
+
+## 14. 阶段 6 步 3：元素级 a11y 动作（2026-10-25，已完成）
+
+### 14.1 关键架构发现：动作分两类，只有一类需要 portal
+
+从闭源 `node-repl-host/dist/mcp/server.js` 反查出每个工具的底层 broker method：
+
+| 工具 | 底层 method | 需要 portal？ |
+|---|---|---|
+| `left_click`（元素目标）/ `perform_action` | `element_perform_action` | ❌ 纯 AT-SPI Action.do_action |
+| `set_value`（元素目标） | `element_set_value` | ❌ EditableText / Value 接口 |
+| `select_text` | `element_select_text` | ❌ Text.set_selection |
+| `left_click`（坐标）/ `scroll`（坐标）/ `drag` | `click` / `scroll` / `drag` | ✅ 需 RemoteDesktop |
+| `type`（app 级/全局）/ `key` / `paste` | `type` / `key` / `paste` | ✅ 需 RemoteDesktop |
+
+**结论**：模型「观察 → 按元素 index 操作」的主路径（click/perform/set_value/select_text）**零授权即可工作**——它们都是 AT-SPI 语义动作。只有「坐标点击 / 全局键盘 / 滚动 / 拖拽 / 截图」需要 portal。
+
+### 14.2 native token 约定
+
+`capture_app` 为每个 element 填 `native = "<bus_name>|<object_path>"`（AT-SPI 对象在 a11y bus 上的唯一定位）。`element_*` 动作方法据此反查对象并调用对应接口。
+
+### 14.3 已实现并实测（生产 socket）
+
+- ✅ `list_windows`（窗口 index/title/bounds）、`application_info`（app 身份）
+- ✅ `element_perform_action`（`AX` 前缀归一：SDK 传 `AXPress`，AT-SPI 实际 `Press`，已做去前缀比对）
+- ✅ `element_set_value`（优先 `EditableText.set_text_contents`，退化 `Value.set_current_value`；不可设置时 fail-closed `not_settable` + `action_sent=false`）
+- ✅ `element_select_text`（`Text.set_selection`）
+- ✅ 坐标/全局输入注入一律 fail-closed `action_unavailable`（待阶段 4）
+- ✅ 并发修复：每连接独立线程 + 独立 `AccessibilityConnection`（原单线程串行 accept 会被一条长连接阻塞，实际有多个 node-repl-host 连接）。
+
+### 14.4 已知限制（诚实记录）
+
+- **`element_at_point` 在本机 Wayland+Qt 下 hit-test 不可靠**：`Component.GetAccessibleAtPoint` 对非全屏窗口返回固定对象（`:1.5|/accessible/11`），与真实落点不符。已按窗口面积升序缓解（避免全屏窗口吃掉所有点），但仍不能可靠定位。→ 主路径是元素 index 动作，坐标 hit-test 仅 best-effort。
+- `element.value` 投影对多数 Qt 文本元素返回 null（Value 接口仅数值控件，Text 接口未遍历取串）；`editable` 靠 role 启发式。
+- `kind` 用 AT-SPI `role_name`（如 `push button`），与 macOS `AXButton` 字面不同；动作名已做 `AX` 前缀归一，但 role 字面若模型依赖需另做映射。
+
+### 14.5 验证
+
+- `cargo build --release` 通过、无警告；安装到 `/usr/local/bin/cua-linux-helper`（旧版备份 `.bak-stage1`）。
+- 重启 `zcode-web-local` 后 helper ready；生产 socket 实测：8 app、`capture_app(dolphin)` 735 元素、`element_perform_action(SetFocus/AXPress)`、`element_select_text`、`list_windows`、`application_info` 全部 `ok:true`；`click`（坐标）正确 fail-closed `action_unavailable`。
 
