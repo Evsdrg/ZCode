@@ -546,6 +546,10 @@ pub fn capture_frame(state: &Option<PortalSession>) -> Result<Vec<u8>, String> {
             "-q",
             "pipewiresrc",
             &format!("fd={raw}"),
+            // 按官方文档核对过（gst-inspect 属性文档）：target-object 官方推荐但只接受
+            // "source name/serial"，node id 传给它在本机 PipeWire 0.3 实测报
+            // "target not found"；path 属性虽标 deprecated，其语义正是 node id 且实测
+            // 可靠。故用 path。迁移路径：升级 PipeWire 1.x 后改用 serial 作 target-object。
             &format!("path={node_id}"),
             "!",
             "videoconvert",

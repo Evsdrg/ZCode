@@ -530,9 +530,28 @@ KDE `kde-authorized` 才拿到免弹框授权）。当前正式 helper 走的是
 放弃），base64 返回 MCP image content。实测 8.1MB PNG / 3840×2160（物理）——portal stream 的
 3072×1728 是逻辑坐标。
 
+官方来源核对（2026-10-25 补，修正此前仅凭实测的表述）：
+- **stream 参数 = PipeWire node id**：官方 XML `@stream: The PipeWire stream node the
+  coordinate is relative to`；KDE remotedesktop.cpp:369 按 nodeId 匹配 ScreencastingStream，
+  screencasting.cpp 确证 Start 响应 streams 元组第一元素就是 m_nodeid。ashpd 报 `id: None`
+  只因该字段接口 v6 起废弃（官方推荐 pipewire-serial），但 KDE 实现仍按 node id 匹配——
+  对 KDE 用 node id 是正确值。
+- **pipewiresrc 的目标属性**：gst 官方属性文档里 `path` 已标 deprecated（推荐
+  target-object "source name/serial"）。实测 target-object 传 node id 在本机 PipeWire 0.3
+  报 target not found（它只接受 name/serial）；path 语义正是 node id 且可靠。故用 path，
+  迁移路径：PipeWire 1.x 后改 serial 作 target-object。
+- **Screencast 须与 RemoteDesktop 同 session**：官方 XML "Persistent remote desktop screen
+  cast sessions can only be handled via the RemoteDesktop interface"——独立连接不返回
+  streams 是该设计的直接体现（ashpd 层共享 D-Bus 连接即可）。
+
 ### 18.3 Wayland 坐标语义（重大修正，解释此前所有"注入 ok 但无效"）
 
-- **指针注入 = 全屏绝对坐标**（stream 是整个 Monitor），与焦点窗口无关；
+- **指针注入 = stream 的逻辑坐标空间 + stream 几何偏移**（官方语义，已对照源码）：
+  官方规范 org.freedesktop.portal.RemoteDesktop.xml 写明 "(x, y) represents the new pointer
+  position in the streams logical coordinate space (see the logical_size stream property)"；
+  KDE 实现 waylandintegration.cpp:297 做 `pos + stream->geometry().x/y` 平移。
+  本实现只选单个整屏 Monitor stream（position=(0,0)），故等价于全屏逻辑坐标——
+  多显示器 / 窗口级 stream 场景需要按 position 平移（尚未支持）。
   此前 click 无效纯粹是**坐标错**：AT-SPI 报的 `CoordType::Screen` 在 KDE Wayland 下是
   **窗口内局部坐标**（kdialog 实际在 (1464,814)，AT-SPI 报 (0,0,200,103)——原点=窗口内容区）。
 - **键盘注入 = seat 焦点窗口**（grab_focus 后 type 立即生效的实验佐证）。
@@ -574,5 +593,7 @@ unloadScript + 删除，避免同名脚本只加载一次。
 - `element_at_point`：AT-SPI Screen 坐标在 KDE Wayland 不可信（窗口局部坐标）。正确实现需要
   「KWin 真实几何 ↔ AT-SPI 局部坐标」配准（KWin JS callDBus 回报 helper 的 D-Bus 服务，或
   journal 通道），工程量大，留待后续。当前返回 best-effort（可能错位）。
+  官方核对新增线索：portal stream 元数据含 `position`（本机 (0,0)）与 `logical_size`
+  （3072×1728）——窗口级 stream 时 position 即其在 workspace 的偏移，可作配准的官方数据源。
 - type/key 不带坐标/元素目标，无法自动定位焦点窗口——依赖 agent 先 click（激活）再 type。
 - 拖拽（drag）/element_scroll/hold_key 未实现（fail-closed）。
