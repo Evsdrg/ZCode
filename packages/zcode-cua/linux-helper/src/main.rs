@@ -14,6 +14,8 @@
 // native token 约定：`<bus_name>|<object_path>`（AT-SPI 对象在 a11y bus 上唯一定位），
 // 由 capture_app 填入每个 element 的 native 字段，供 element_* 动作方法反查对象。
 
+mod portal;
+
 use atspi::connection::AccessibilityConnection;
 use atspi::proxy::accessible::AccessibleProxy;
 use atspi::proxy::action::ActionProxy;
@@ -627,12 +629,57 @@ fn fail(code: &str, message: &str, action_sent: bool) -> Value {
 }
 
 /// 坐标级输入注入尚未实现（需 portal）。fail-closed。
-fn portal_unimplemented(method: &str) -> Value {
+fn portal_unavailable(method: &str, err: &str) -> Value {
     fail(
         "action_unavailable",
-        &format!("{method}: coordinate/global input injection requires xdg-desktop-portal RemoteDesktop, not yet implemented"),
+        &format!("{method}: {err}"),
         false,
     )
+}
+
+/// 从 params.point 取逻辑坐标（x,y）。
+fn point_of(params: &Value) -> Option<(f64, f64)> {
+    let p = params.get("point")?;
+    let x = p.get("x").and_then(|v| v.as_f64())?;
+    let y = p.get("y").and_then(|v| v.as_f64())?;
+    Some((x, y))
+}
+
+fn button_code(params: &Value) -> i32 {
+    match params
+        .get("button")
+        .and_then(|v| v.as_str())
+        .unwrap_or("left")
+    {
+        "right" => portal::BTN_RIGHT,
+        "middle" => portal::BTN_MIDDLE,
+        _ => portal::BTN_LEFT,
+    }
+}
+
+/// 解析 key 工具的组合键字符串（如 "ctrl+a"、"shift+tab"、"return"）为 keysym 事件序列。
+fn parse_chord(text: &str) -> Result<Vec<(i32, bool)>, String> {
+    let parts: Vec<&str> = text.split('+').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+    if parts.is_empty() {
+        return Err("empty key text".into());
+    }
+    let (mods, key) = parts.split_at(parts.len() - 1);
+    let mut ev = Vec::new();
+    let mut mod_ks = Vec::new();
+    for m in mods {
+        let ks = portal::modifier_keysym(m)
+            .ok_or_else(|| format!("unknown modifier {m:?}"))?;
+        mod_ks.push(ks);
+        ev.push((ks, true));
+    }
+    let key_ks = portal::named_key_keysym(key[0])
+        .ok_or_else(|| format!("unknown key {:?}", key[0]))?;
+    ev.push((key_ks, true));
+    ev.push((key_ks, false));
+    for ks in mod_ks.into_iter().rev() {
+        ev.push((ks, false));
+    }
+    Ok(ev)
 }
 
 async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) -> Value {
@@ -681,17 +728,84 @@ async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) ->
         "element_perform_action" => element_perform_action(ac, params).await,
         "element_set_value" => element_set_value(ac, params).await,
         "element_select_text" => element_select_text(ac, params).await,
-        // 系统级授权状态：Linux 上 AT-SPI 可访问性恒可用（能读树即 granted）；
-        // 屏幕录制/远程桌面需 xdg-desktop-portal 授权，阶段 4 接 portal 前先如实报 denied。
-        "permission_status" => json!({"ok": true, "result": {
-            "accessibility": "granted",
-            "screen_recording": "denied",
-            "grant_owner": "xdg-desktop-portal",
-            "needs_grant": true
-        }}),
-        // 坐标/全局输入注入：待阶段 4 接 portal
-        "click" | "scroll" | "element_scroll" | "drag" | "type" | "key" | "paste" | "hold_key"
-        | "hold_key_to_app" | "screenshot" => portal_unimplemented(method),
+        // 系统级授权状态：accessibility=AT-SPI（能读树即 granted）；screen_recording/输入注入
+        // =xdg-desktop-portal RemoteDesktop（已授权会话存在即 granted）。
+        "permission_status" => {
+            let granted = portal::has_session().await;
+            json!({"ok": true, "result": {
+                "accessibility": "granted",
+                "screen_recording": if granted { "granted" } else { "denied" },
+                "grant_owner": "xdg-desktop-portal",
+                "needs_grant": !granted
+            }})
+        }
+        // 主动请求授权（UI 的「请求授权」按钮 → 触发一次 portal 弹窗，restore_token 持久化）。
+        "request_access" => match portal::ensure_session().await {
+            Ok(()) => json!({"ok": true, "result": {"granted": true}}),
+            Err(e) => fail("action_unavailable", &format!("request_access: {e}"), false),
+        },
+        "reset_access" => {
+            portal::reset_session().await;
+            json!({"ok": true, "result": {"granted": false}})
+        }
+        // 坐标点击：point(逻辑坐标) → absolute motion + button press/release。
+        "click" => {
+            let (x, y) = match point_of(params) {
+                Some(p) => p,
+                None => return fail("action_unavailable", "click: missing point", false),
+            };
+            let button = button_code(params);
+            let clicks = params.get("clicks").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
+            match portal::click(x, y, button, clicks).await {
+                Ok(()) => json!({"ok": true, "result": {"action_sent": true, "dispatch_status": "accepted"}}),
+                Err(e) => fail("action_unavailable", &format!("click: {e}"), false),
+            }
+        }
+        // 滚动：point + direction + amount(0..100) → pointer axis。
+        "scroll" => {
+            let amount = params.get("amount").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let dir = params.get("direction").and_then(|v| v.as_str()).unwrap_or("down");
+            // 每单位约 1/10 行；符号按方向。
+            let steps = (amount / 10.0).clamp(0.1, 10.0);
+            let (dx, dy) = match dir {
+                "up" => (0.0, steps),
+                "down" => (0.0, -steps),
+                "left" => (steps, 0.0),
+                "right" => (-steps, 0.0),
+                _ => (0.0, -steps),
+            };
+            match portal::scroll(dx, dy).await {
+                Ok(()) => json!({"ok": true, "result": {"action_sent": true, "dispatch_status": "accepted"}}),
+                Err(e) => fail("action_unavailable", &format!("scroll: {e}"), false),
+            }
+        }
+        // 键盘组合键：text 如 "ctrl+a"/"return"。
+        "key" => {
+            let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            match parse_chord(text) {
+                Ok(events) => match portal::key_events(events).await {
+                    Ok(()) => json!({"ok": true, "result": {"action_sent": true, "dispatch_status": "accepted"}}),
+                    Err(e) => fail("action_unavailable", &format!("key: {e}"), false),
+                },
+                Err(e) => fail("action_unavailable", &format!("key: {e}"), false),
+            }
+        }
+        // 文本输入（app 级/全局）：text → keysym 序列。非 ASCII 暂不支持。
+        "type" | "paste" => {
+            let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            let events = portal::text_to_key_events(text);
+            if events.is_empty() && !text.is_empty() {
+                return fail("action_unavailable", &format!("{method}: text not representable as keysyms (non-ASCII)"), false);
+            }
+            match portal::key_events(events).await {
+                Ok(()) => json!({"ok": true, "result": {"action_sent": true, "dispatch_status": "accepted"}}),
+                Err(e) => fail("action_unavailable", &format!("{method}: {e}"), false),
+            }
+        }
+        // 其余需 portal/未实现的方法：fail-closed（保持诚实）。
+        "element_scroll" | "drag" | "hold_key" | "hold_key_to_app" | "screenshot" => {
+            portal_unavailable(method, "not implemented on Linux")
+        }
         other => json!({"ok": false, "error": format!("method not implemented: {other}")}),
     }
 }

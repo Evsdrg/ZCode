@@ -435,3 +435,27 @@ Helper 新增 `permission_status` 应答：`accessibility=granted`（AT-SPI 可�
 - 补 `click`/`scroll`/`drag`/`type`/`key`/`paste` 的 portal 实现（当前 fail-closed `action_unavailable`）。
 - `permission_status` 改从 portal `PermissionStore`/会话状态读真值；`request_access` 走 portal 授权（一次弹窗 + restore_token 持久化）。
 - UI：设置页新增「请求授权」按钮（用户明确要求：主动触发 portal 一次弹窗），并显示 screen_recording 授权状态。
+
+## 16. 阶段 4：portal 输入注入后端（2026-10-25，代码完成，注入待人工授权验证）
+
+### 16.1 实现
+
+新增 `src/portal.rs`（`ashpd 0.13`，features `tokio,remote_desktop,screencast`，与 atspi 的 zbus 5 同版本）：
+
+- **专用线程 + 多线程 runtime 持有 portal 会话**：portal 会话绑定创建它的 tokio reactor，不能跨 runtime await。故起独立线程（`mpsc` 命令串行驱动），与「每连接 current-thread runtime 读树」完全隔离——portal 不可用不影响 a11y。
+- 会话建立：`RemoteDesktop::new` → `create_session` → `select_devices(Keyboard|Pointer, persist=ExplicitlyRevoked)` → `start`，`restore_token` 落 `/tmp/zcode-cua-portal-<uid>.token`（一次授权后免弹）。
+- 注入：`click`=NotifyPointerMotionAbsolute + NotifyPointerButton(evdev 0x110/111/112)；`scroll`=NotifyPointerAxis；`key`=组合键解析为 keysym 序列；`type`/`paste`=文本转 keysym（仅 ASCII，非 ASCII 需输入法，暂 fail-closed）。
+- `request_access`=建立会话（触发一次 portal 弹窗）；`reset_access`=清会话与 token；`permission_status` 的 `screen_recording`/注入授权=是否有活会话。
+
+### 16.2 已验证
+
+- 未授权时：`permission_status` 返回 `screen_recording:denied, needs_grant:true`；`click`/`key`/`type` 一律 fail-closed `action_unavailable`（message 含 `needs_grant`），不误发事件。
+- 已授权注入与抓屏的端到端验证**尚未做**——它需要一次人工确认的 portal 授权弹窗，未在自动会话中触发（避免弹窗打扰）。这是本阶段唯一未验证项，需用户点「请求授权」或在交互会话里跑一次。
+
+### 16.3 抓屏（ScreenCast）状态
+
+`ashpd` screencast feature 已引入，但 PipeWire 帧获取（`open_pipe_wire_remote` → 消费 PipeWire node → PNG）尚未接入；`screenshot`/`capture_app+screenshot` 的 `image` 仍为空。后续在 portal.rs 里补 ScreenCast 会话 + PipeWire 读取。
+
+### 16.4 UI 授权按钮（按用户要求，主动触发）
+
+用户明确要求：Wayland 授权需一次弹窗，应在 ZCode 启用该功能时提供「主动请求授权」按钮。设计：设置页 Linux CUA 区加一个按钮，调 helper `request_access`（经 getStatus 侧或新 RPC），显示授权态。此项 UI 未实现，留作下一步。
