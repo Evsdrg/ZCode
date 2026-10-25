@@ -20,6 +20,9 @@ export interface ComputerUseAvailabilityInput {
   isDesktop?: boolean;
   isMacDesktop?: boolean;
   isWindowsDesktop?: boolean;
+  // 本机宿主是 Linux 桌面（自部署 WebUI 下由 server-info.hostPlatform==="linux" 推导）。
+  // 与 isDesktop 解耦：WebUI 在浏览器里但宿主是本机 Linux 桌面时，CUA 后端仍真实可用。
+  isLinuxDesktop?: boolean;
   remoteSessionId?: string | null;
   remoteTarget?: RemoteTarget | null;
   workspaceIdentity?: string | null;
@@ -29,6 +32,7 @@ export function resolveComputerUseAvailability({
   isDesktop = false,
   isMacDesktop = false,
   isWindowsDesktop = false,
+  isLinuxDesktop = false,
   remoteSessionId,
   remoteTarget,
   workspaceIdentity,
@@ -52,9 +56,10 @@ export function resolveComputerUseAvailability({
       supported: false,
     };
   }
-  if (!isDesktop) return { kind: "web", supported: false };
   if (isMacDesktop) return { kind: "local-macos", supported: true };
   if (isWindowsDesktop) return { kind: "local-windows", supported: true };
+  if (isLinuxDesktop) return { kind: "local-linux", supported: true };
+  if (!isDesktop) return { kind: "web", supported: false };
   return { kind: "local-linux", supported: false };
 }
 

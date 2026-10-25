@@ -662,6 +662,7 @@ import {
   disposeLinuxCuaHelper,
   ensureLinuxCuaHelper,
 } from "./cua-permission-broker/linuxCuaHelper.js";
+import { probeLinuxCuaPermissionStatus } from "./cua-permission-broker/linuxCuaPermissionStatus.js";
 import { WindowsCuaHelperHost } from "#src/cua-permission-broker/windowsCuaDevHelperHost.js";
 import {
   getStableCuaPipeName,
@@ -2023,6 +2024,49 @@ export function createLocalServices(options: {
       workspaceIdentity?: string,
       queryOptions?: CuaPermissionStatusQueryOptions,
     ): Promise<CuaPermissionStatusResult> {
+      // Linux：CUA 后端由本进程按需 spawn 的 Rust Helper 提供（AT-SPI 读树 + 待接的
+      // portal 抓屏/注入）。权限语义映射：accessibility=AT-SPI（能读树即 granted）；
+      // screen_recording=xdg-desktop-portal 的 ScreenCast 授权（阶段 4 接 portal 前如实报 denied）。
+      if (process.platform === "linux") {
+        const linuxContext = workspacePath
+          ? { workspacePath, workspaceIdentity }
+          : undefined;
+        if (
+          !shouldUseCuaPermissionService({
+            cuaEnabled: isCuaEnabledForContext(linuxContext),
+          })
+        ) {
+          return {
+            available: false,
+            reason: "ZCode Computer Use is not enabled (plugin off or not product mode).",
+          };
+        }
+        const linuxSocket = await ensureLinuxCuaHelper();
+        if (!linuxSocket) {
+          return {
+            available: false,
+            reason: "Linux CUA Helper could not be started.",
+            idle: true,
+          };
+        }
+        const linuxReport = await probeLinuxCuaPermissionStatus(linuxSocket);
+        if (!linuxReport) {
+          return {
+            available: false,
+            reason: "ZCode Computer Use is starting up; retry in a moment.",
+            idle: true,
+          };
+        }
+        return {
+          platform: "linux",
+          grantOwner: linuxReport.grant_owner ?? "xdg-desktop-portal",
+          grantOwnerDisplayName: linuxReport.grant_owner ?? "xdg-desktop-portal",
+          accessibility: linuxReport.accessibility,
+          accessibilityProbeOk: linuxReport.accessibility === "granted",
+          screenRecording: linuxReport.screen_recording,
+          screenCaptureProbeOk: false,
+        };
+      }
       if (process.platform !== "darwin" && process.platform !== "win32") {
         return {
           available: false,

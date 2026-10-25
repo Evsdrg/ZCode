@@ -50,6 +50,9 @@ interface ComputerUseSectionProps {
   isDesktop?: boolean;
   isMacDesktop?: boolean;
   isWindowsDesktop?: boolean;
+  // 自部署 WebUI 下，宿主是本机 Linux 桌面时（server-info.hostPlatform==="linux"）置 true。
+  // 与 isDesktop 解耦：CUA 后端真实存在，设置区应可见。
+  isLinuxDesktop?: boolean;
   workspacePath?: string | null;
   workspaceIdentity?: string;
   remoteSessionId?: string | null;
@@ -62,6 +65,7 @@ export function ComputerUseSection({
   isDesktop = false,
   isMacDesktop,
   isWindowsDesktop = false,
+  isLinuxDesktop = false,
   workspacePath,
   workspaceIdentity,
   remoteSessionId,
@@ -84,11 +88,16 @@ export function ComputerUseSection({
     (isMacDesktop ?? supportsLocalMacCuaPermissionOnboarding(platform)) &&
     isLocalWorkspace;
   const supportsLocalWindowsWorkspace = isWindowsDesktop && isLocalWorkspace;
-  const supportsComputerUseSettings = supportsLocalMacWorkspace || supportsLocalWindowsWorkspace;
+  // Linux 桌面：与 Windows 一样复用插件总开关，无 TCC/Helper 权限行；
+  // 其系统级授权（xdg-desktop-portal）由独立的「请求授权」按钮负责（后续实现）。
+  const supportsLocalLinuxWorkspace = isLinuxDesktop && isLocalWorkspace;
+  const supportsComputerUseSettings =
+    supportsLocalMacWorkspace || supportsLocalWindowsWorkspace || supportsLocalLinuxWorkspace;
   const availability = resolveComputerUseAvailability({
     isDesktop: isDesktop || isWindowsDesktop || supportsLocalMacWorkspace,
     isMacDesktop: isMacDesktop || supportsLocalMacWorkspace,
     isWindowsDesktop,
+    isLinuxDesktop: isLinuxDesktop || supportsLocalLinuxWorkspace,
     remoteSessionId,
     remoteTarget,
     workspaceIdentity,

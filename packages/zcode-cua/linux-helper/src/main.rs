@@ -681,6 +681,14 @@ async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) ->
         "element_perform_action" => element_perform_action(ac, params).await,
         "element_set_value" => element_set_value(ac, params).await,
         "element_select_text" => element_select_text(ac, params).await,
+        // 系统级授权状态：Linux 上 AT-SPI 可访问性恒可用（能读树即 granted）；
+        // 屏幕录制/远程桌面需 xdg-desktop-portal 授权，阶段 4 接 portal 前先如实报 denied。
+        "permission_status" => json!({"ok": true, "result": {
+            "accessibility": "granted",
+            "screen_recording": "denied",
+            "grant_owner": "xdg-desktop-portal",
+            "needs_grant": true
+        }}),
         // 坐标/全局输入注入：待阶段 4 接 portal
         "click" | "scroll" | "element_scroll" | "drag" | "type" | "key" | "paste" | "hold_key"
         | "hold_key_to_app" | "screenshot" => portal_unimplemented(method),

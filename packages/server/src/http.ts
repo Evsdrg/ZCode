@@ -204,6 +204,8 @@ function createServerInfo(options: HttpServerOptions): ServerRemoteInfo {
     version: ZCODE_VERSION,
     protocolVersion: SERVER_REMOTE_PROTOCOL_VERSION,
     authRequired: options.authRequired ?? Boolean(readTrimmedEnv("ZCODE_SERVER_TOKEN")),
+    // 宿主进程平台：自部署 WebUI 据此判定本机桌面能力（浏览器 UA 无法反映宿主）。
+    hostPlatform: process.platform,
     workspaces: resolveServerWorkspaces(options),
     compatibility: ZCODE_COMPATIBILITY_MANIFEST,
     migration: { failedPathCount: options.migrationFailedPathCount ?? 0 },

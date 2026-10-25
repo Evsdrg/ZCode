@@ -379,3 +379,59 @@ NDJSON over unix socket：
 - `cargo build --release` 通过、无警告；安装到 `/usr/local/bin/cua-linux-helper`（旧版备份 `.bak-stage1`）。
 - 重启 `zcode-web-local` 后 helper ready；生产 socket 实测：8 app、`capture_app(dolphin)` 735 元素、`element_perform_action(SetFocus/AXPress)`、`element_select_text`、`list_windows`、`application_info` 全部 `ok:true`；`click`（坐标）正确 fail-closed `action_unavailable`。
 
+
+## 15. 阶段 5：UI 门控与 getStatus Linux 分支（2026-10-25，已完成）
+
+### 15.1 宿主平台贯通（关键：浏览器 UA 不等于宿主）
+
+自部署 WebUI 跑在浏览器里，`isDesktop` 恒 undefined，浏览器 UA 也无法反映宿主进程平台。
+而 Linux CUA 后端（Rust Helper）真实跑在**宿主**上。故新增一条宿主平台链路：
+
+```
+server 进程 process.platform
+  → GET /api/server-info 增加 hostPlatform 字段（shared serverRemoteInfoBaseShape，optional）
+  → web main.tsx resolveWebBootstrap 读取 → WebBootstrapResult.hostPlatform
+  → <Root hostPlatform=...> → RootInner → settingsLayerProps.hostPlatform → <SettingsPage>
+  → createSettingsPageConfig({ isLinuxDesktop: hostPlatform==="linux" })
+  → <ComputerUseSection isLinuxDesktop>
+```
+
+`hostPlatform` 为 optional：旧 server 不返回时一切保持原样（不误开 CUA）。
+
+### 15.2 判定逻辑（纯函数，已单测）
+
+`resolveComputerUseAvailability` 新增 `isLinuxDesktop` 入参：
+- `isLinuxDesktop: true` → `{kind:"local-linux", supported:true}`（承认受支持）
+- 远端优先级最高：远端 workspace 即使 `isLinuxDesktop` 也判 remote/unsupported
+- 仅 `isDesktop`（无平台细分，Electron Linux 桌面且未细分）→ 仍 `local-linux/unsupported`（保持既有语义，避免回归）
+
+`ComputerUseSection`：`supportsLocalLinuxWorkspace = isLinuxDesktop && isLocalWorkspace`，与 Windows 同构——只展示插件总开关，无 TCC/Helper 权限行（portal 授权由独立「请求授权」按钮负责，见阶段 4/UI 待办）。
+
+### 15.3 服务端 getStatus Linux 分支
+
+`packages/services/src/cua-permission-broker/linuxCuaPermissionStatus.ts`：连 Helper socket 握手
+`authenticate` + 调 `permission_status`，取回 `{accessibility, screen_recording, grant_owner, needs_grant}`。
+
+`node.ts` 的 `cuaPermissionService.getStatus` 在 `process.platform==="linux"` 分支：
+- 插件未启用 → `available:false`（与 mac/win 一致）
+- `ensureLinuxCuaHelper()` 起 Helper，再 `probeLinuxCuaPermissionStatus()`
+- 返回 `platform:"linux"`、`accessibility`（AT-SPI，能读树即 granted）、`screenRecording`（portal ScreenCast，阶段 4 前如实 denied）
+- Helper 起不来 / 探测失败 → fail-closed
+
+Helper 新增 `permission_status` 应答：`accessibility=granted`（AT-SPI 可用）、`screen_recording=denied` + `needs_grant=true`（portal 授权待阶段 4）。
+
+### 15.4 验证
+
+- `pnpm typecheck` 全通过（tsc -b 所有包 + zcode-cua）。
+- `pnpm lint` 0 error（105 warning 全为既有文件）。
+- `computerUseAvailability.test.ts` 9 passed（Linux 支持、远端优先、isDesktop-only 保持 unsupported、isComputerUseRemoteOrLinux 边界）。
+- `pnpm --filter @zcode/server build` → entry-http.js 5.31MB bundle、含 hostPlatform/linuxCuaPermissionStatus、无裸 import。
+- `ZCODE_ENV=production pnpm --filter @zcode/web build` 成功。
+- 重启后：`/api/server-info` 返回 `hostPlatform:"linux"`；helper ready；生产 socket `permission_status` 返回 `accessibility:granted, screen_recording:denied, needs_grant:true`。
+
+### 15.5 剩余（阶段 4：portal 抓屏 + 输入注入 + 主动授权按钮）
+
+- Helper 侧用 `ashpd` 接 `ScreenCast`（PipeWire 抓帧）与 `RemoteDesktop`（Notify* 坐标/键盘注入、ConnectToEIS）。
+- 补 `click`/`scroll`/`drag`/`type`/`key`/`paste` 的 portal 实现（当前 fail-closed `action_unavailable`）。
+- `permission_status` 改从 portal `PermissionStore`/会话状态读真值；`request_access` 走 portal 授权（一次弹窗 + restore_token 持久化）。
+- UI：设置页新增「请求授权」按钮（用户明确要求：主动触发 portal 一次弹窗），并显示 screen_recording 授权状态。

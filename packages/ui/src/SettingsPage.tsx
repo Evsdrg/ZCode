@@ -294,6 +294,7 @@ export function SettingsPage({
   isDesktop,
   isWindowsDesktop,
   isMacDesktop,
+  hostPlatform: hostPlatformProp,
   isWebRemoteControl = false,
   windowsWindowControlsRightPaddingPx: _windowsWindowControlsRightPaddingPx,
   captionWorkspacePath,
@@ -309,6 +310,8 @@ export function SettingsPage({
   isDesktop?: boolean;
   isWindowsDesktop?: boolean;
   isMacDesktop?: boolean;
+  /** 宿主进程平台（自部署 WebUI 由 server-info.hostPlatform 提供），用于本机能力可见性。 */
+  hostPlatform?: string;
   isWebRemoteControl?: boolean;
   windowsWindowControlsRightPaddingPx?: number;
   captionWorkspacePath?: string | null;
@@ -329,8 +332,9 @@ export function SettingsPage({
         isDesktop: Boolean(isDesktop),
         isMacDesktop: Boolean(isMacDesktop),
         isWindowsDesktop: Boolean(isWindowsDesktop),
+        isLinuxDesktop: Boolean(hostPlatformProp === "linux"),
       }),
-    [isDesktop, isMacDesktop, isWindowsDesktop],
+    [isDesktop, isMacDesktop, isWindowsDesktop, hostPlatformProp],
   );
   const isLinuxDesktop = Boolean(isDesktop && !isMacDesktop && !isWindowsDesktop);
   const usesInlineWindowControls = Boolean(isWindowsDesktop || isLinuxDesktop);
@@ -821,6 +825,9 @@ export function SettingsPage({
     useState<ZCodeInteractionBehavior>("queue");
   const [defaultHomeDir, setDefaultHomeDir] = useState("");
   const [hostPlatform, setHostPlatform] = useState("");
+  // 本机桌面能力判定用的宿主平台：优先用 Root 下发的 hostPlatform（自部署 WebUI 的
+  // server-info.hostPlatform），否则回退到 systemService 探测到的值。二者同名，故用别名。
+  const effectiveHostPlatform = hostPlatformProp ?? hostPlatform;
 
   useEffect(() => {
     if (
@@ -2268,6 +2275,10 @@ export function SettingsPage({
                               isDesktop={Boolean(isDesktop)}
                               isMacDesktop={Boolean(isMacDesktop)}
                               isWindowsDesktop={Boolean(isWindowsDesktop)}
+                              isLinuxDesktop={Boolean(
+                                (isDesktop && !isMacDesktop && !isWindowsDesktop) ||
+                                  effectiveHostPlatform === "linux",
+                              )}
                               workspacePath={activeWorkspacePath}
                               workspaceIdentity={activeWorkspaceIdentity}
                               remoteSessionId={activeWorkspaceTab?.remoteSessionId}

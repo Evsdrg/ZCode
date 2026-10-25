@@ -265,6 +265,8 @@ interface WebBootstrapResult {
   initialTaskId?: string;
   restoreSession?: boolean;
   allowOpenWorkspace?: boolean;
+  /** 宿主进程平台（来自 server-info.hostPlatform），用于本机能力可见性判定。 */
+  hostPlatform?: string;
 }
 
 type WebRemoteControlWorkspaceListUpdateListener = (
@@ -844,6 +846,9 @@ async function resolveWebBootstrap(): Promise<WebBootstrapResult> {
       ...(workspace?.path ? { initialWorkspaceAbsPath: workspace.path } : {}),
       ...(workspace?.workspaceIdentity
         ? { initialWorkspaceIdentity: workspace.workspaceIdentity }
+        : {}),
+      ...(typeof serverInfo.hostPlatform === "string"
+        ? { hostPlatform: serverInfo.hostPlatform }
         : {}),
     };
   } catch {
@@ -2294,6 +2299,7 @@ async function bootstrapWebApp() {
             initialTaskId={bootstrap.initialTaskId}
             restoreSession={bootstrap.restoreSession}
             allowOpenWorkspace={bootstrap.allowOpenWorkspace}
+            hostPlatform={bootstrap.hostPlatform}
             preferDirectoryBrowser
             supportsEmbeddedBrowser={false}
             allowRemoteWorkspace={false}

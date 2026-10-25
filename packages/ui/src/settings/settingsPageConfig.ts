@@ -190,14 +190,16 @@ export interface SettingsPageConfigOptions {
   isDesktop?: boolean;
   isMacDesktop?: boolean;
   isWindowsDesktop?: boolean;
+  isLinuxDesktop?: boolean;
 }
 
 export function createSettingsPageConfig({
   isDesktop = false,
   isMacDesktop = false,
   isWindowsDesktop = false,
+  isLinuxDesktop = false,
 }: SettingsPageConfigOptions = {}) {
-  const showComputerUse = isDesktop || isMacDesktop || isWindowsDesktop;
+  const showComputerUse = isDesktop || isMacDesktop || isWindowsDesktop || isLinuxDesktop;
   const settingsSections = BASE_SETTINGS_SECTIONS.filter((section) => {
     if (section.id === "computerUse" && !showComputerUse) return false;
     return isSettingsSectionEnabled(section.id);

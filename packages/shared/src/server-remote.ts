@@ -23,6 +23,9 @@ const serverRemoteInfoBaseShape = {
   version: z.string(),
   protocolVersion: z.literal(SERVER_REMOTE_PROTOCOL_VERSION),
   authRequired: z.boolean(),
+  // 宿主进程所在平台（process.platform）。自部署 WebUI 用它判定本机是否 Linux
+  // 等桌面平台，从而决定 Computer Use 等本机能力的可见性（浏览器 UA 无法反映宿主）。
+  hostPlatform: z.string().optional(),
 };
 
 export const serverRemoteInfoSchema = z.object({

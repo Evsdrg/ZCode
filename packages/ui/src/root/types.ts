@@ -74,6 +74,12 @@ export interface RootProps {
   isMacDesktop?: boolean;
   /** Windows 桌面端需要展示更准确的资源管理器文案 */
   isWindowsDesktop?: boolean;
+  /**
+   * 宿主进程所在平台（自部署 WebUI 由 server-info.hostPlatform 提供）。
+   * 用于在浏览器里判定本机宿主是 Linux 等桌面平台，从而决定 Computer Use
+   * 等本机能力的可见性——浏览器 UA 反映的是客户端而非宿主。
+   */
+  hostPlatform?: string;
   /** 是否恢复上次关闭时的标签页，首个窗口 true，新窗口 false */
   restoreSession?: boolean;
   /** 是否允许访问本地设置服务，远程窗口 false */
@@ -106,6 +112,8 @@ export interface WorkspaceSettingsLayerProps {
   isDesktop?: boolean;
   isMacDesktop?: boolean;
   isWindowsDesktop?: boolean;
+  /** 宿主进程平台（自部署 WebUI 由 server-info.hostPlatform 提供），用于本机能力可见性判定。 */
+  hostPlatform?: string;
   isWebRemoteControl?: boolean;
   windowsWindowControlsRightPaddingPx?: number;
   captionWorkspacePath?: string | null;
