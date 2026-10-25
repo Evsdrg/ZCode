@@ -12,9 +12,13 @@
 // 当前只做 RemoteDesktop（键盘 + 指针）；抓屏（ScreenCast/PipeWire）留待后续。
 // 无 screencast 时 absolute 指针用 stream=0（KDE 实现下即整屏坐标空间）。
 
+use std::os::fd::AsRawFd;
 use std::sync::OnceLock;
 
 use ashpd::desktop::remote_desktop::{DeviceType, KeyState, RemoteDesktop, SelectDevicesOptions};
+use ashpd::desktop::screencast::{
+    CursorMode, OpenPipeWireRemoteOptions, Screencast, SelectSourcesOptions, SourceType,
+};
 use ashpd::desktop::PersistMode;
 use tokio::sync::{mpsc, oneshot};
 
@@ -23,9 +27,14 @@ pub const BTN_LEFT: i32 = 0x110;
 pub const BTN_RIGHT: i32 = 0x111;
 pub const BTN_MIDDLE: i32 = 0x112;
 
-struct PortalSession {
+pub(crate) struct PortalSession {
     desktop: RemoteDesktop,
     session: ashpd::desktop::Session<RemoteDesktop>,
+    /// ScreenCast 流的 portal id（NotifyPointerMotionAbsolute 的 stream 参数）。
+    /// 没有它时 absolute motion 会被 portal 拒为 "Invalid position"。
+    stream_id: Option<u32>,
+    /// ScreenCast 的 PipeWire fd（用于抓帧）。保留在会话里以维持流存活。
+    pipewire_fd: Option<std::os::fd::OwnedFd>,
 }
 
 enum Cmd {
@@ -48,6 +57,8 @@ enum Cmd {
         resp: oneshot::Sender<Result<(), String>>,
     },
     Status(oneshot::Sender<bool>),
+    /// 抓一帧屏幕（PNG 字节）。
+    Capture(oneshot::Sender<Result<Vec<u8>, String>>),
     Reset(oneshot::Sender<()>),
 }
 
@@ -105,6 +116,10 @@ fn ensure_worker() -> &'static mpsc::UnboundedSender<Cmd> {
 }
 
 async fn build_session() -> Result<PortalSession, String> {
+    // 先注册 host 应用身份：非沙箱程序必须向 portal 声明自己的 app_id，否则授权无法
+    // 归属到具体应用（也无法用 restore_token 持久化）。
+    eprintln!("[portal] build_session: register_host_app({APP_ID})");
+    register_app_identity().await?;
     eprintln!("[portal] build_session: RemoteDesktop::new");
     let desktop = RemoteDesktop::new().await.map_err(|e| format!("RemoteDesktop::new: {e}"))?;
     eprintln!("[portal] build_session: create_session");
@@ -126,6 +141,27 @@ async fn build_session() -> Result<PortalSession, String> {
         .map_err(|e| format!("select_devices: {e}"))?
         .response()
         .map_err(|e| format!("select_devices response: {e}"))?;
+    // ScreenCast：与 RemoteDesktop 同一 session。绝对坐标注入必须引用一个 ScreenCast 流，
+    // 否则 portal 拒为 "Invalid position"。这里选整个显示器（Monitor）。
+    eprintln!("[portal] build_session: select_sources (Monitor)");
+    // 与 RemoteDesktop 复用同一 D-Bus 连接：KDE 的 portal-kde 实现里，RemoteDesktop 会话
+    // 内建的 ScreenCast 流状态挂在该连接上；用独立连接（ashpd 示例的写法，适用于 GNOME）
+    // 会让 KDE 侧不返回 streams。
+    let screencast = Screencast::with_connection(desktop.connection().clone())
+        .await
+        .map_err(|e| format!("Screencast::with_connection: {e}"))?;
+    screencast
+        .select_sources(
+            &session,
+            SelectSourcesOptions::default()
+                .set_sources(Some(SourceType::Monitor.into()))
+                .set_cursor_mode(CursorMode::Embedded)
+                .set_multiple(false),
+        )
+        .await
+        .map_err(|e| format!("select_sources: {e}"))?
+        .response()
+        .map_err(|e| format!("select_sources response: {e}"))?;
     eprintln!("[portal] build_session: start (会弹系统授权窗，等待用户确认)");
     let selected = desktop
         .start(&session, None, Default::default())
@@ -134,10 +170,52 @@ async fn build_session() -> Result<PortalSession, String> {
         .response()
         .map_err(|e| format!("start response: {e}"))?;
     eprintln!("[portal] build_session: ok, devices={:?}", selected.devices());
+    // KDE 的 portal-kde 用 PipeWire node id 作为 absolute motion 的 stream 参数
+    // （portal stream id 在 KDE 实现里是 None）。优先取 pipe_wire_node_id。
+    let stream_id = selected.streams().first().map(|s| {
+        s.id()
+            .and_then(|id| id.parse::<u32>().ok())
+            .unwrap_or_else(|| s.pipe_wire_node_id())
+    });
+    eprintln!("[portal] build_session: streams={:?}", selected.streams());
+    eprintln!("[portal] build_session: stream_id={:?}", stream_id);
     if let Some(t) = selected.restore_token() {
         save_token(t);
     }
-    Ok(PortalSession { desktop, session })
+    // 抓帧用的 PipeWire fd（ScreenCast 的 OpenPipeWireRemote）。
+    let pipewire_fd = match screencast
+        .open_pipe_wire_remote(&session, OpenPipeWireRemoteOptions::default())
+        .await
+    {
+        Ok(fd) => {
+            eprintln!("[portal] build_session: pipewire fd acquired");
+            Some(fd)
+        }
+        Err(e) => {
+            eprintln!("[portal] build_session: open_pipe_wire_remote failed: {e}");
+            None
+        }
+    };
+    Ok(PortalSession {
+        desktop,
+        session,
+        stream_id,
+        pipewire_fd,
+    })
+}
+
+/// 确保有可用会话：没有则建一个。
+///
+/// 用户授权过一次后，portal 凭 app_id 记住授权（KDE 实测：注册 app_id 后再次请求不再
+/// 弹窗），所以这里自动建会话不会打扰用户；从未授权时 build_session 会因用户未确认而
+/// 失败，调用方据此返回 needs_grant。
+async fn ensure(state: &mut Option<PortalSession>) -> Result<(), String> {
+    if state.is_some() {
+        return Ok(());
+    }
+    let s = build_session().await?;
+    *state = Some(s);
+    Ok(())
 }
 
 async fn handle(cmd: Cmd, state: &mut Option<PortalSession>) {
@@ -160,6 +238,14 @@ async fn handle(cmd: Cmd, state: &mut Option<PortalSession>) {
         Cmd::Status(resp) => {
             let _ = resp.send(state.is_some());
         }
+        Cmd::Capture(resp) => {
+            if let Err(e) = ensure(state).await {
+                let _ = resp.send(Err(format!("needs_grant: {e}")));
+                return;
+            }
+            let r = capture_frame(state);
+            let _ = resp.send(r);
+        }
         Cmd::Reset(resp) => {
             *state = None;
             let _ = std::fs::remove_file(token_path());
@@ -172,6 +258,10 @@ async fn handle(cmd: Cmd, state: &mut Option<PortalSession>) {
             clicks,
             resp,
         } => {
+            if let Err(e) = ensure(state).await {
+                let _ = resp.send(Err(format!("needs_grant: {e}")));
+                return;
+            }
             let s = match state.as_mut() {
                 Some(s) => s,
                 None => {
@@ -180,8 +270,11 @@ async fn handle(cmd: Cmd, state: &mut Option<PortalSession>) {
                 }
             };
             let r = async {
+                let stream = s.stream_id.ok_or_else(|| {
+                    "no ScreenCast stream id; absolute pointer motion unavailable".to_string()
+                })?;
                 s.desktop
-                    .notify_pointer_motion_absolute(&s.session, 0, x, y, Default::default())
+                    .notify_pointer_motion_absolute(&s.session, stream, x, y, Default::default())
                     .await
                     .map_err(|e| format!("motion_absolute: {e}"))?;
                 for _ in 0..clicks.max(1) {
@@ -200,6 +293,10 @@ async fn handle(cmd: Cmd, state: &mut Option<PortalSession>) {
             let _ = resp.send(r);
         }
         Cmd::Scroll { dx, dy, resp } => {
+            if let Err(e) = ensure(state).await {
+                let _ = resp.send(Err(format!("needs_grant: {e}")));
+                return;
+            }
             let s = match state.as_mut() {
                 Some(s) => s,
                 None => {
@@ -215,6 +312,10 @@ async fn handle(cmd: Cmd, state: &mut Option<PortalSession>) {
             let _ = resp.send(r);
         }
         Cmd::Keyseq { events, resp } => {
+            if let Err(e) = ensure(state).await {
+                let _ = resp.send(Err(format!("needs_grant: {e}")));
+                return;
+            }
             let s = match state.as_mut() {
                 Some(s) => s,
                 None => {
@@ -277,6 +378,11 @@ pub async fn scroll(dx: f64, dy: f64) -> Result<(), String> {
 
 pub async fn key_events(events: Vec<(i32, bool)>) -> Result<(), String> {
     send_cmd(|resp| Cmd::Keyseq { events, resp }).await?
+}
+
+/// 抓一帧屏幕（PNG 字节）。
+pub async fn capture_png() -> Result<Vec<u8>, String> {
+    send_cmd(|resp| Cmd::Capture(resp)).await?
 }
 
 /// 把普通文本转成 keysym 事件序列（仅支持可映射到 keysym 的字符，ASCII 为主）。
@@ -353,4 +459,132 @@ pub fn modifier_keysym(name: &str) -> Option<i32> {
         "super" | "meta" | "win" | "cmd" => 0xFFEB, // Super_L
         _ => return None,
     })
+}
+
+/// portal 用的应用 ID。portal 靠它记录授权归属（非沙箱程序必须显式注册）。
+/// 命名遵循 portal 规范：至少含一个点、长度 ≤ 255。
+pub const APP_ID: &str = "com.zcode.cua-linux-helper";
+
+/// .desktop 文件路径（portal 校验 app_id 时会检查它存在）。
+fn desktop_file_path() -> String {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    format!("{home}/.local/share/applications/{APP_ID}.desktop")
+}
+
+/// 幂等写入 .desktop（缺失才写）。portal 的 Register 要求 app_id 对应的 desktop 文件存在，
+/// 否则注册会失败或授权对话框无法显示应用名/图标。
+fn ensure_desktop_entry() -> Result<(), String> {
+    let path = desktop_file_path();
+    if std::path::Path::new(&path).exists() {
+        return Ok(());
+    }
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("create {}: {e}", parent.display()))?;
+    }
+    let content = format!(
+        "[Desktop Entry]\nType=Application\nName=ZCode Computer Use Helper\nComment=ZCode Computer Use permission broker helper\nExec=/usr/local/bin/cua-linux-helper\nIcon=applications-system\nTerminal=false\nNoDisplay=true\nCategories=Utility;\n"
+    );
+    std::fs::write(&path, content).map_err(|e| format!("write {path}: {e}"))?;
+    Ok(())
+}
+
+/// 注册 host 应用身份（非沙箱程序必须显式注册，portal 才认得我们）。
+///
+/// portal 把「D-Bus 连接 ↔ app_id」绑定一次；同一连接上重复 Register 会报
+/// "Connection already associated with an application ID"。这不是失败——说明已经注册过了，
+/// 按成功处理，否则第二次请求授权会直接报错。
+async fn register_app_identity() -> Result<(), String> {
+    ensure_desktop_entry()?;
+    let app_id = ashpd::AppID::try_from(APP_ID).map_err(|e| format!("AppID: {e}"))?;
+    match ashpd::register_host_app(app_id).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("already associated") {
+                eprintln!("[portal] register_host_app: already registered, continue");
+                Ok(())
+            } else {
+                Err(format!("register_host_app: {msg}"))
+            }
+        }
+    }
+}
+
+/// 抓一帧屏幕，返回 PNG 字节。
+///
+/// 走 gstreamer 子进程（`pipewiresrc fd=N path=<node_id> ! videoconvert ! pngenc ! filesink`）
+/// 而不是在 Rust 里链接 libpipewire：前者零编译期依赖，用户机器只需有 gstreamer（KDE 桌面
+/// 基本自带），后者要求 libpipewire 开发头文件。
+///
+/// path=<node_id> 是必需的：只传 fd 时 pipewiresrc 找不到目标 node，报
+/// `stream error: target not found`（实测 KDE portal-kde）。node id 来自 ScreenCast
+/// Start 返回的 Stream.pipewire_node_id。
+///
+/// 每次调用起一个短生命周期进程：pipewiresrc 收到首帧后 pngenc 写出文件，随即结束。
+pub fn capture_frame(state: &Option<PortalSession>) -> Result<Vec<u8>, String> {
+    let session = state
+        .as_ref()
+        .ok_or_else(|| "no portal session; screen capture unavailable".to_string())?;
+    let fd = session
+        .pipewire_fd
+        .as_ref()
+        .ok_or_else(|| "no PipeWire fd; screen capture unavailable".to_string())?;
+    let node_id = session
+        .stream_id
+        .ok_or_else(|| "no ScreenCast node id; screen capture unavailable".to_string())?;
+    let raw = fd.as_raw_fd();
+    // 子进程要继承这个 fd：Rust 默认给 fd 设 CLOEXEC，必须清掉，否则 gst 看不到它。
+    let flags = unsafe { libc::fcntl(raw, libc::F_GETFD) };
+    if flags >= 0 {
+        unsafe { libc::fcntl(raw, libc::F_SETFD, flags & !libc::FD_CLOEXEC) };
+    }
+    let out = std::env::temp_dir().join(format!("zcode-cua-frame-{}.png", raw));
+    let _ = std::fs::remove_file(&out);
+    let mut child = std::process::Command::new("gst-launch-1.0")
+        .args([
+            "-q",
+            "pipewiresrc",
+            &format!("fd={raw}"),
+            &format!("path={node_id}"),
+            "!",
+            "videoconvert",
+            "!",
+            "pngenc",
+            "!",
+            "filesink",
+            &format!("location={}", out.display()),
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("spawn gst-launch-1.0: {e}"))?;
+    // 等文件出现且大小稳定（pngenc 写完后才完整）
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    let mut last_size = 0u64;
+    let mut stable = 0;
+    let data = loop {
+        if let Ok(meta) = std::fs::metadata(&out) {
+            let size = meta.len();
+            if size > 0 && size == last_size {
+                stable += 1;
+                if stable >= 3 {
+                    break std::fs::read(&out).map_err(|e| format!("read frame: {e}"));
+                }
+            } else {
+                stable = 0;
+            }
+            last_size = size;
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("timed out waiting for screen frame".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(60));
+    };
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_file(&out);
+    data
 }

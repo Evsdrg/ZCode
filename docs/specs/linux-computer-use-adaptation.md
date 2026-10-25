@@ -503,3 +503,76 @@ KDE `kde-authorized` 才拿到免弹框授权）。当前正式 helper 走的是
 且身份为空时 KDE 对话框的主体显示可能不明确。这属于阶段 4.5（受信身份）待办。
 
 **端到端注入验证（授权后 click/key/type 真的生效）尚未完成**——需用户在弹窗上点一次确认。
+
+## 18. 阶段 4.5：受信身份 + 抓屏 + KWin 窗口激活（2026-10-25，已完成并端到端验证）
+
+### 18.1 app_id 受信身份（授权持久化的前提）
+
+- `portal.rs` 注册 `APP_ID = "com.zcode.cua-linux-helper"`：`ashpd::register_host_app` + 幂等写入
+  `~/.local/share/applications/com.zcode.cua-linux-helper.desktop`（portal 要求非沙箱程序显式注册，
+  否则授权对话框无法显示应用身份）。
+- 重复注册报 "Connection already associated with an application ID"——按已注册容错。
+- 实测：KDE portal 对话框显示「ZCode Computer Use Helper」；**授权一次后凭 app_id 记住**，
+  helper 重启 / 会话重建不再弹窗（restore_token KDE 不返回，靠 PermissionStore 的 app 级记忆）。
+
+### 18.2 ScreenCast 接线（与 RemoteDesktop 同一会话）
+
+三个 KDE 特有事实（全部实测）：
+1. **ashpd 的 Screencast 必须与 RemoteDesktop 共享同一 D-Bus 连接**
+   （`Screencast::with_connection(desktop.connection().clone())`）——独立连接 select_sources 后
+   start 不返回 streams。
+2. **absolute 指针注入的 stream 参数用 `pipe_wire_node_id`**（KDE 实现里 portal stream id 为 None）。
+3. **抓帧必须 `pipewiresrc fd=N path=<node_id>`**——只传 fd 报 `stream error: target not found`。
+
+`start` 返回后 `open_pipe_wire_remote` 拿 fd 存入会话；`screenshot` 方法经
+`gst-launch-1.0 pipewiresrc fd=N path=<id> ! videoconvert ! pngenc ! filesink` 子进程抓帧
+（零编译期依赖，不链 libpipewire；尝试过 pipewire crate，需要 libspa-sys pkg-config 头文件，
+放弃），base64 返回 MCP image content。实测 8.1MB PNG / 3840×2160（物理）——portal stream 的
+3072×1728 是逻辑坐标。
+
+### 18.3 Wayland 坐标语义（重大修正，解释此前所有"注入 ok 但无效"）
+
+- **指针注入 = 全屏绝对坐标**（stream 是整个 Monitor），与焦点窗口无关；
+  此前 click 无效纯粹是**坐标错**：AT-SPI 报的 `CoordType::Screen` 在 KDE Wayland 下是
+  **窗口内局部坐标**（kdialog 实际在 (1464,814)，AT-SPI 报 (0,0,200,103)——原点=窗口内容区）。
+- **键盘注入 = seat 焦点窗口**（grab_focus 后 type 立即生效的实验佐证）。
+- 结论：元素 bounds 投影（`capture_app` 的 bounds）在 KDE Wayland 下是窗口局部坐标，
+  不可直接当屏幕坐标用；屏幕绝对坐标只有 KWin（frameGeometry）与 portal 截图可信。
+
+### 18.4 KWin 窗口激活（click 前置）
+
+`kwin.rs`：click(point) 前经 KWin `/Scripting` D-Bus 加载一次性 JS：
+按 `workspace.stackingOrder`（z 序，顶层在前）找覆盖该点的最顶层 normalWindow 并
+`workspace.activeWindow = target`。语义=**视觉一致**（坐标处看到什么窗口就激活/操作什么窗口；
+多窗口遮挡时点击作用于视觉最上层）。激活后焦点落在目标窗口，紧接的 type/key 送达它——
+覆盖 agent 典型 click→type 序列。非 KWin 合成器（GNOME 等）无等价接口，静默跳过（尽力而为）。
+
+调试记录：gdbus loadScript 返回 `(15,)`，id 解析曾因 `split_whitespace` 拿到 `15,)` 而
+parse 失败静默跳过 start——改为提取首个连续数字串。另注意脚本文件名含 pid 且执行后
+unloadScript + 删除，避免同名脚本只加载一次。
+
+### 18.5 permission_status 真值化
+
+`screen_recording` 改为「portal 会话存在」的真实读数（授权后 granted / needs_grant:false）；
+`request_access` 自动建会话（已授权时不弹窗）。`ensure(state)`：注入/抓帧命令发现无会话时
+自动重建（授权记忆使其零打扰）。
+
+### 18.6 端到端验证矩阵（全部实测通过）
+
+| 能力 | 结果 |
+|---|---|
+| list_applications | 10 apps |
+| capture_app(kdialog) | 7 元素 |
+| element_set_value → 读回 | ✅ 'FINAL-1'（a11y 写路径闭环） |
+| screenshot | ✅ 8.1MB PNG（3840×2160） |
+| permission_status | ✅ granted / needs_grant:false |
+| KWin 激活 | ✅ ZCODE-ACTIVATED（stackingOrder 顶层） |
+| click+type（视觉一致目标） | ✅ 各段分别验证（指针=绝对坐标 / 键盘=焦点窗口） |
+
+### 18.7 已知限制（开放问题）
+
+- `element_at_point`：AT-SPI Screen 坐标在 KDE Wayland 不可信（窗口局部坐标）。正确实现需要
+  「KWin 真实几何 ↔ AT-SPI 局部坐标」配准（KWin JS callDBus 回报 helper 的 D-Bus 服务，或
+  journal 通道），工程量大，留待后续。当前返回 best-effort（可能错位）。
+- type/key 不带坐标/元素目标，无法自动定位焦点窗口——依赖 agent 先 click（激活）再 type。
+- 拖拽（drag）/element_scroll/hold_key 未实现（fail-closed）。

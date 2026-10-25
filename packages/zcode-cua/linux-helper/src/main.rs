@@ -14,6 +14,7 @@
 // native token 约定：`<bus_name>|<object_path>`（AT-SPI 对象在 a11y bus 上唯一定位），
 // 由 capture_app 填入每个 element 的 native 字段，供 element_* 动作方法反查对象。
 
+mod kwin;
 mod portal;
 
 use atspi::connection::AccessibilityConnection;
@@ -133,17 +134,26 @@ async fn get_extents(conn: &Conn, bname: &str, path: &str) -> Option<(i32, i32, 
     cp.get_extents(CoordType::Screen).await.ok()
 }
 
-/// 取文本/值接口能读到的当前值（用于 element.value 投影，尽力而为）。
+/// 取元素的可读文本（用于 element.value 投影）。
+///
+/// AT-SPI 的读取接口在 Text 上（EditableText 只有写接口，没有读），故统一走 TextProxy。
 async fn get_text_value(conn: &Conn, bname: &str, path: &str) -> Option<String> {
-    // 先试 Value（数值控件），再试 Text/EditableText 的文本内容。
-    if let Ok(b) = ValueProxy::builder(conn)
+    if let Ok(b) = TextProxy::builder(conn)
         .cache_properties(atspi::zbus::proxy::CacheProperties::No)
         .destination(bname.to_string())
         .and_then(|b| b.path(path.to_string()))
     {
-        if let Ok(vp) = b.build().await {
-            if let Ok(v) = vp.current_value().await {
-                return Some(format!("{}", v));
+        if let Ok(tp) = b.build().await {
+            if let Ok(count) = tp.character_count().await {
+                // 终端/日志类文本可能极长，截断避免单元素拖垮整棵树。
+                if count > 0 {
+                    let end = count.min(4096);
+                    if let Ok(text) = tp.get_text(0, end).await {
+                        if !text.is_empty() {
+                            return Some(text);
+                        }
+                    }
+                }
             }
         }
     }
@@ -682,6 +692,23 @@ fn parse_chord(text: &str) -> Result<Vec<(i32, bool)>, String> {
     Ok(ev)
 }
 
+/// 标准 base64 编码（避免为一个函数引依赖）。
+fn base64_encode(data: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[(n >> 18) as usize & 63] as char);
+        out.push(TABLE[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { TABLE[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { TABLE[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
 async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) -> Value {
     match method {
         "list_applications" => match list_apps(ac).await {
@@ -756,6 +783,10 @@ async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) ->
             };
             let button = button_code(params);
             let clicks = params.get("clicks").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
+            // Wayland 约束：portal 注入只送达 seat 焦点窗口，不是坐标命中的窗口。
+            // 坐标点击前先尽量激活覆盖该坐标的窗口（KWin 脚本接口，尽力而为；
+            // 非 KWin 或失败则跳过——与直接注入同一窗口时行为不变）。
+            let _ = kwin::activate_window_at(x, y).await;
             match portal::click(x, y, button, clicks).await {
                 Ok(()) => json!({"ok": true, "result": {"action_sent": true, "dispatch_status": "accepted"}}),
                 Err(e) => fail("action_unavailable", &format!("click: {e}"), false),
@@ -802,8 +833,23 @@ async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) ->
                 Err(e) => fail("action_unavailable", &format!("{method}: {e}"), false),
             }
         }
+        // 抓屏：portal ScreenCast → PipeWire → gstreamer 转 PNG。
+        "screenshot" => match portal::capture_png().await {
+            Ok(png) => {
+                let b64 = base64_encode(&png);
+                json!({"ok": true, "result": {
+                    "content": [{
+                        "type": "image",
+                        "data": b64,
+                        "mimeType": "image/png"
+                    }],
+                    "structuredContent": Value::Null
+                }})
+            }
+            Err(e) => fail("action_unavailable", &format!("screenshot: {e}"), false),
+        },
         // 其余需 portal/未实现的方法：fail-closed（保持诚实）。
-        "element_scroll" | "drag" | "hold_key" | "hold_key_to_app" | "screenshot" => {
+        "element_scroll" | "drag" | "hold_key" | "hold_key_to_app" => {
             portal_unavailable(method, "not implemented on Linux")
         }
         other => json!({"ok": false, "error": format!("method not implemented: {other}")}),
