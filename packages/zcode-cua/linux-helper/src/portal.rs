@@ -105,12 +105,15 @@ fn ensure_worker() -> &'static mpsc::UnboundedSender<Cmd> {
 }
 
 async fn build_session() -> Result<PortalSession, String> {
+    eprintln!("[portal] build_session: RemoteDesktop::new");
     let desktop = RemoteDesktop::new().await.map_err(|e| format!("RemoteDesktop::new: {e}"))?;
+    eprintln!("[portal] build_session: create_session");
     let session = desktop
         .create_session(Default::default())
         .await
         .map_err(|e| format!("create_session: {e}"))?;
     let restore = load_token();
+    eprintln!("[portal] build_session: select_devices (restore_token={})", restore.is_some());
     let mut opts = SelectDevicesOptions::default()
         .set_devices(DeviceType::Keyboard | DeviceType::Pointer)
         .set_persist_mode(PersistMode::ExplicitlyRevoked);
@@ -123,12 +126,14 @@ async fn build_session() -> Result<PortalSession, String> {
         .map_err(|e| format!("select_devices: {e}"))?
         .response()
         .map_err(|e| format!("select_devices response: {e}"))?;
+    eprintln!("[portal] build_session: start (会弹系统授权窗，等待用户确认)");
     let selected = desktop
         .start(&session, None, Default::default())
         .await
         .map_err(|e| format!("start: {e}"))?
         .response()
         .map_err(|e| format!("start response: {e}"))?;
+    eprintln!("[portal] build_session: ok, devices={:?}", selected.devices());
     if let Some(t) = selected.restore_token() {
         save_token(t);
     }

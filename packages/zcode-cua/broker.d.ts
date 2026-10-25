@@ -147,4 +147,12 @@ export interface ICuaPermissionService {
     workspaceIdentity?: string,
     options?: CuaPermissionRestartOptions,
   ): Promise<CuaPermissionRestartResult>;
+  /**
+   * Linux 专用：主动请求 xdg-desktop-portal 授权（触发一次弹窗，restore_token 持久化）。
+   * mac/win 无此方法（其授权走各自的 onboarding 流）。
+   */
+  requestAccess?(
+    workspacePath?: string,
+    workspaceIdentity?: string,
+  ): Promise<CuaPermissionRestartResult>;
 }

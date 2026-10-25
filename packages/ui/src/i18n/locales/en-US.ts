@@ -8060,6 +8060,13 @@ const enUS: Record<string, string> = {
   "settings.computerUse.composerEntry.requiresEnabled":
     "Turn on Computer Use first to show this button in the composer.",
   "settings.computerUse.composerEntry.saveFailed": "Failed to save: {error}",
+  "settings.computerUse.linuxAccess.label": "Screen capture & input injection access",
+  "settings.computerUse.linuxAccess.description":
+    "On Wayland, screen capture and simulated input require a one-time grant through the system portal (xdg-desktop-portal). Click Request access, then choose what to share and allow control in the system dialog. Only needed once per machine.",
+  "settings.computerUse.linuxAccess.button": "Request access",
+  "settings.computerUse.linuxAccess.requesting": "Waiting for access…",
+  "settings.computerUse.linuxAccess.grantedToast": "Access granted.",
+  "settings.computerUse.linuxAccess.deniedToast": "Access was not granted. You can retry later.",
   "settings.computerUse.pluginDisabledHint":
     "The Computer Use plugin is not enabled. Enable it in Plugins to use Computer Use.",
   "settings.computerUse.unsupported.title": "Computer Use is unavailable here",

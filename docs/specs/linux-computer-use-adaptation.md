@@ -459,3 +459,47 @@ Helper 新增 `permission_status` 应答：`accessibility=granted`（AT-SPI 可�
 ### 16.4 UI 授权按钮（按用户要求，主动触发）
 
 用户明确要求：Wayland 授权需一次弹窗，应在 ZCode 启用该功能时提供「主动请求授权」按钮。设计：设置页 Linux CUA 区加一个按钮，调 helper `request_access`（经 getStatus 侧或新 RPC），显示授权态。此项 UI 未实现，留作下一步。
+
+## 17. 阶段 4 续：UI 主动授权按钮 + requestAccess RPC（2026-10-25）
+
+### 17.1 用户要求
+
+「Wayland 的授权需要一次弹窗，我们应该在 ZCode 中启用这个功能的时候，提供一个主动请求授权的按钮。」
+
+### 17.2 实现
+
+- **协议**：`ICuaPermissionService` 增可选方法 `requestAccess?(workspacePath?, workspaceIdentity?)`。
+  RPC 通道是动态转发的（`ProxyChannel.fromService` / `toService`），无需额外注册。
+- **服务端**（`node.ts` 的 `cuaPermissionService.requestAccess`）：仅 linux；过插件门控 →
+  `ensureLinuxCuaHelper()` → 调 helper 的 `request_access`（超时 120s，等用户在弹窗里操作）。
+- **helper**：`request_access` → portal `RemoteDesktop` 会话建立（弹一次系统授权窗）→
+  成功后落 `restore_token`；`reset_access` 清会话与 token。
+- **UI**（`ComputerUseSection`）：Linux 分区新增一行「屏幕抓取与输入注入授权」，
+  显示 `screen_recording` 状态徽章 + 「请求授权」按钮（授权中显示「等待授权…」）。
+  accessibility（AT-SPI）不需授权，故不展示。
+- **i18n**：zh-CN / en-US 各 6 个 key（label/description/button/requesting/两个 toast）。
+
+### 17.3 诊断改进
+
+helper 的 stderr 原先经 `logger.debug` 转发，而 debug 级在生产环境不落盘，导致 portal
+会话步骤日志全丢。改为 `stdio: ["ignore","ignore","inherit"]`——helper 的 stderr 直接进
+systemd journal。
+
+### 17.4 实测结论（关键）
+
+portal 调用链**已验证通到系统授权窗**：helper 日志显示
+```
+[portal] build_session: RemoteDesktop::new
+[portal] build_session: create_session
+[portal] build_session: select_devices (restore_token=false)
+[portal] build_session: start (会弹系统授权窗，等待用户确认)
+```
+`start` 之后停住等待用户确认；portal-kde 日志在同秒记录到请求（`AtSpiAdaptor::applicationInterface`）。
+即：**链路正确，缺的是一次人工确认**。`AvailableDeviceTypes=7`（键盘+指针+触摸全支持）。
+
+⚠️ 由此暴露一个**尚未解决的身份问题**：Rust helper 进程没有注册 `app_id`
+（阶段 1 的 Python 原型用过 `Registry.Register("com.zcode.CuaProbe")` + `.desktop` +
+KDE `kde-authorized` 才拿到免弹框授权）。当前正式 helper 走的是「每次弹窗」路径，
+且身份为空时 KDE 对话框的主体显示可能不明确。这属于阶段 4.5（受信身份）待办。
+
+**端到端注入验证（授权后 click/key/type 真的生效）尚未完成**——需用户在弹窗上点一次确认。

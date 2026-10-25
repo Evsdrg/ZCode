@@ -165,6 +165,8 @@ export function ComputerUseSection({
   ]);
 
   const [restarting, setRestarting] = useState(false);
+  // Linux 主动授权：请求 xdg-desktop-portal（一次弹窗，restore_token 持久化）。
+  const [requestingAccess, setRequestingAccess] = useState(false);
   // 重启 single-flight：授权返回回调、双击和手动按钮共享同一 operation，不并发轮换 broker 凭据。
   const restartPromiseRef = useRef<Promise<boolean> | null>(null);
   const pendingGrantSessionIdRef = useRef<string | undefined>(undefined);
@@ -618,6 +620,29 @@ export function ComputerUseSection({
   const acc = statusView(availableStatus?.accessibility);
   const screenPerm = statusView(availableStatus?.screenRecording);
 
+  // Linux：主动请求 portal 授权（用户要求——Wayland 授权需一次弹窗，故提供主动按钮）。
+  const onRequestLinuxAccess = useCallback(async () => {
+    if (!cuaPermissionService?.requestAccess || !workspacePath) return;
+    setRequestingAccess(true);
+    try {
+      const result = await cuaPermissionService.requestAccess(
+        path ?? workspacePath,
+        workspaceIdentity,
+      );
+      if (result.ok) {
+        toast(intl.formatMessage({ id: "settings.computerUse.linuxAccess.grantedToast" }));
+        refresh();
+      } else {
+        toast(
+          result.reason ??
+            intl.formatMessage({ id: "settings.computerUse.linuxAccess.deniedToast" }),
+        );
+      }
+    } finally {
+      if (mountedRef.current) setRequestingAccess(false);
+    }
+  }, [cuaPermissionService, path, workspacePath, workspaceIdentity, refresh, intl]);
+
   // 输入框常驻入口的显隐。隐藏开关用 useSettings().update 写入
   // （直连 settingService 只落盘不刷新共享 snapshot，输入框按钮读不到新值）。
   // 乐观更新本地开关，失败回滚并提示。
@@ -754,7 +779,41 @@ export function ComputerUseSection({
         />
       </SettingsGroupCard>
 
-      {/* CUA 未启用时隐藏下方权限配置，只留总开关，避免一堆禁用项。 */}
+      {/* Linux：portal 授权（屏幕抓取 / 输入注入）需一次弹窗，提供主动请求按钮。
+          accessibility（AT-SPI）默认可用，无需授权；这里只处理 portal 授权态。 */}
+      {cuaEnabled && supportsLocalLinuxWorkspace ? (
+        <SettingsGroupCard>
+          <SettingsRow
+            controlLayout="wide"
+            label={intl.formatMessage({ id: "settings.computerUse.linuxAccess.label" })}
+            description={intl.formatMessage({
+              id: "settings.computerUse.linuxAccess.description",
+            })}
+            control={
+              <div className="flex items-center gap-2">
+                <SettingsBadge>
+                  <span className="inline-flex items-center gap-1.5">
+                    <StatusDot tone={screenPerm.tone} />
+                    {screenPerm.text}
+                  </span>
+                </SettingsBadge>
+                <Button
+                  size="sm"
+                  disabled={requestingAccess || availableStatus?.screenRecording === "granted"}
+                  onClick={() => void onRequestLinuxAccess()}
+                >
+                  {intl.formatMessage({
+                    id: requestingAccess
+                      ? "settings.computerUse.linuxAccess.requesting"
+                      : "settings.computerUse.linuxAccess.button",
+                  })}
+                </Button>
+              </div>
+            }
+          />
+        </SettingsGroupCard>
+      ) : null}
+
       {cuaEnabled && supportsLocalMacWorkspace ? (
         <>
           {/* macOS 版本低于 CUA Helper 承诺地板时，授权在低版本系统上无法完成

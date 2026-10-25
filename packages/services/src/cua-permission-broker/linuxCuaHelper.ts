@@ -121,12 +121,10 @@ export async function ensureLinuxCuaHelper(): Promise<string | null> {
       // 忽略：helper 自己也会清理 socket
     }
     const child = spawn(binary, ["--socket", socketPath], {
-      stdio: ["ignore", "ignore", "pipe"],
+      // stderr 继承父进程：helper 的诊断日志（portal 会话步骤等）直接进 systemd journal。
+      // 之前走 logger.debug 转发，但 debug 级在生产环境不落盘，诊断信息会丢。
+      stdio: ["ignore", "ignore", "inherit"],
       detached: false,
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      const text = chunk.toString("utf8").trim();
-      if (text) logger.debug?.(undefined, `[cua-linux-helper] ${text}`);
     });
     child.on("exit", (code, signal) => {
       if (helperProcess === child) {

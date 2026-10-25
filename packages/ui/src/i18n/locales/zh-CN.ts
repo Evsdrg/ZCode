@@ -7649,6 +7649,13 @@ const zhCN: Record<string, string> = {
   "settings.computerUse.composerEntry.requiresEnabled":
     "需先开启电脑控制，才能在输入框显示该按钮。",
   "settings.computerUse.composerEntry.saveFailed": "保存失败：{error}",
+  "settings.computerUse.linuxAccess.label": "屏幕抓取与输入注入授权",
+  "settings.computerUse.linuxAccess.description":
+    "Wayland 下需经系统门户（xdg-desktop-portal）授权一次才能抓屏与模拟输入。点击请求授权后，在弹出的系统窗口中选择共享并允许控制；同一台机器只需授权一次。",
+  "settings.computerUse.linuxAccess.button": "请求授权",
+  "settings.computerUse.linuxAccess.requesting": "等待授权…",
+  "settings.computerUse.linuxAccess.grantedToast": "已获得授权。",
+  "settings.computerUse.linuxAccess.deniedToast": "未获得授权，可稍后重试。",
   "settings.computerUse.pluginDisabledHint": "电脑控制插件未启用。前往插件开启后即可使用电脑控制。",
   "settings.computerUse.unsupported.title": "当前环境暂不支持电脑控制",
   "settings.computerUse.unsupported.remoteDescription":

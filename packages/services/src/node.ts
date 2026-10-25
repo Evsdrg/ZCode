@@ -2249,6 +2249,47 @@ export function createLocalServices(options: {
         };
       }
     },
+    // Linux 专用：主动请求 xdg-desktop-portal 授权（触发一次弹窗，restore_token 持久化）。
+    // 建立会话后再次 getStatus 即会读到 granted。
+    async requestAccess(
+      workspacePath?: string,
+      workspaceIdentity?: string,
+    ): Promise<CuaPermissionRestartResult> {
+      if (process.platform !== "linux") {
+        return { ok: false, reason: "requestAccess is only available on Linux." };
+      }
+      const context = workspacePath ? { workspacePath, workspaceIdentity } : undefined;
+      if (
+        !shouldUseCuaPermissionService({
+          cuaEnabled: isCuaEnabledForContext(context),
+        })
+      ) {
+        return {
+          ok: false,
+          reason: "ZCode Computer Use is not enabled (plugin off or not product mode).",
+        };
+      }
+      const socket = await ensureLinuxCuaHelper();
+      if (!socket) {
+        return { ok: false, reason: "Linux CUA Helper could not be started." };
+      }
+      try {
+        const { requestLinuxCuaAccess } = await import(
+          "./cua-permission-broker/linuxCuaPermissionStatus.js"
+        );
+        const granted = await requestLinuxCuaAccess(socket, 120_000);
+        return granted
+          ? { ok: true }
+          : { ok: false, reason: "Portal authorization was not granted." };
+      } catch (error) {
+        return {
+          ok: false,
+          reason: `Failed to request Computer Use access: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        };
+      }
+    },
   };
   // 动态工作流的用户选择（docs/dynamic-workflow/launch.md「The user's choice」）：本机设置文件是唯一来源，
   // 每次使用时读取。desktop-attached remote Host 读不到桌面的设置，选择由 desktop 推送

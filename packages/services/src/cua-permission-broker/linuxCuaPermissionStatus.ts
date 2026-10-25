@@ -87,3 +87,17 @@ export async function probeLinuxCuaPermissionStatus(
     needs_grant: r.needs_grant === true,
   };
 }
+
+/**
+ * 主动请求 portal 授权（触发一次弹窗）。成功（用户在弹窗里确认）返回 true。
+ * timeoutMs 需足够长（允许用户操作弹窗），默认 120s。
+ */
+export async function requestLinuxCuaAccess(
+  socketPath: string,
+  timeoutMs = 120_000,
+): Promise<boolean> {
+  const reply = await callBrokerOnce(socketPath, "request_access", timeoutMs);
+  if (!reply || reply.ok !== true) return false;
+  const r = reply.result as { granted?: unknown } | null;
+  return r?.granted === true;
+}
