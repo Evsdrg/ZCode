@@ -17,10 +17,15 @@ use std::time::Duration;
 /// 一个 KWin 顶层窗口的真实屏幕几何（逻辑坐标）。
 #[derive(Debug, Clone)]
 pub struct WindowGeometry {
+    /// 窗口类（如 "org.kde.kcalc"）。当前仅用于人工诊断，保留以便后续按类名匹配。
+    #[allow(dead_code)]
     pub resource_class: String,
+    /// 窗口标题。同上，保留。
+    #[allow(dead_code)]
     pub caption: String,
     pub pid: i64,
-    /// frameGeometry：含装饰（标题栏/边框）的外框。
+    /// frameGeometry：含装饰（标题栏/边框）的外框。保留（窗口激活/装饰判定可用）。
+    #[allow(dead_code)]
     pub frame: (f64, f64, f64, f64),
     /// clientGeometry：客户区（不含装饰）。AT-SPI 的 extents 与之同尺寸。
     pub client: (f64, f64, f64, f64),

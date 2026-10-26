@@ -872,19 +872,6 @@ async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) ->
             }
         }
         "element_at_point" => element_at_point(ac, params).await,
-        // 诊断用：单独测 KWin 几何读取（不暴露给 agent 工具面）
-        "debug_window_geometries" => {
-            let t0 = std::time::Instant::now();
-            let g = kwin::list_window_geometries().await;
-            json!({"ok": true, "result": {
-                "elapsed_ms": t0.elapsed().as_millis() as u64,
-                "count": g.len(),
-                "items": g.iter().map(|w| json!({
-                    "class": w.resource_class, "caption": w.caption, "pid": w.pid,
-                    "frame": w.frame, "client": w.client
-                })).collect::<Vec<_>>()
-            }})
-        },
         "element_perform_action" => element_perform_action(ac, params).await,
         "element_set_value" => element_set_value(ac, params).await,
         "element_select_text" => element_select_text(ac, params).await,
@@ -927,9 +914,8 @@ async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) ->
         }
         // 滚动：point + direction + amount(0..100) → pointer axis。
         "scroll" => {
-            // 滚轮语义用离散步进（NotifyPointerAxisDiscrete）：
-            // KDE 对 continuous axis 的小数 delta 实测不生效（现象见 spec 开放问题），
-            // discrete 的整数步进语义与真实滚轮一致。
+            // 滚轮语义用离散步进（NotifyPointerAxisDiscrete）：整数步进与真实滚轮一致，
+            // 避免 continuous axis 小数 delta 在不同合成器上被量化丢失。
             let amount = params.get("amount").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let dir = params.get("direction").and_then(|v| v.as_str()).unwrap_or("down");
             let mag = (amount / 10.0).round().clamp(1.0, 10.0) as i32;

@@ -598,7 +598,12 @@ unloadScript + 删除，避免同名脚本只加载一次。
 | KWin 激活                  | ✅ ZCODE-ACTIVATED（stackingOrder 顶层）                                    |
 | click+type（视觉一致目标） | ⚠️ 已被 §19 推翻：motion/keyboard 分段有效，但 button 在 KDE 6.7.5 实际无效 |
 
-### 18.7 已知限制（开放问题）
+### 18.7 已知限制（开放问题）⚠️ 已被第 20 节推翻——下述坐标相关结论错误，保留作调查历史
+
+> **勘误**：本节「AT-SPI Screen 坐标在 KDE Wayland 不可信（窗口局部坐标）」的说法不成立。
+> 实测是**应用实现差异**（有的报屏幕坐标、有的报局部坐标），已由 `capture_app` 的
+> KWin clientGeometry 逐窗口校准解决。`element_at_point` 也已按同一逻辑做双坐标尝试。
+> 见第 20.3 节。
 
 - `element_at_point`：AT-SPI Screen 坐标在 KDE Wayland 不可信（窗口局部坐标）。正确实现需要
   「KWin 真实几何 ↔ AT-SPI 局部坐标」配准（KWin JS callDBus 回报 helper 的 D-Bus 服务，或
@@ -608,7 +613,7 @@ unloadScript + 删除，避免同名脚本只加载一次。
 - type/key 不带坐标/元素目标，无法自动定位焦点窗口——依赖 agent 先 click（激活）再 type。
 - 拖拽（drag）/element_scroll/hold_key 未实现（fail-closed）。
 
-## 19. button/axis 注入缺陷调查与官方源码全景核对（2026-10-26）
+## 19. button/axis 注入缺陷调查与官方源码全景核对（2026-10-26）⚠️ 调查过程保留，结论已被第 20 节推翻
 
 ### 19.1 触发：全链路「应该工作」但 click 无可观察效果
 
@@ -663,7 +668,12 @@ button 事件确实到达 KWin，但在 KDE 6.7.5 上不产生效果**。
 | ashpd 参数序/序列化错                                           | ashpd 源码与官方 XML 逐参核对一致；keysym 同封装方式生效                                      |
 | KWin 6.7.5 与 master 的 fakeinput 差异                          | v6.7.5 tag diff：button 路径零差异                                                            |
 
-### 19.5 结论与 workaround
+### 19.5 结论与 workaround ⚠️ 已被第 20 节推翻（button/axis 实际正常，是误判）
+
+> **勘误**：本节「fake-input 的 button/axis 到达 KWin 后不产生效果」的结论错误。
+> 真实原因是**测试窗口被 RustDesk 全屏窗口遮挡** + **截图裁剪用了过期窗口坐标**。
+> 已用 kcalc 连续点击「七/八/九」得到 99→997→9978→99789 的决定性验证。见第 20.1 节。
+> 下表「坐标级点击 ❌」「滚动 ❌」两行作废。
 
 **结论**：在本机（KDE Plasma 6.7.5 / KWin 6.7.5 / xdg-desktop-portal-kde 6.7.5）上，
 fake-input 的 button/axis 事件到达 KWin 后不产生效果，而同一设备同一连接的
@@ -681,8 +691,8 @@ motion_absolute/keyboard_keysym 正常。静态源码核对未发现缺陷，根
 | 移动光标   | `pointer_motion_absolute`                                                  | ✅ 已验证（cursorPos 精确）                                                                  |
 | 激活窗口   | KWin scripting（stackingOrder 顶层）                                       | ✅ 已验证（ZCODE-ACTIVATED）                                                                 |
 | 抓屏       | ScreenCast + PipeWire（gst-launch）                                        | ✅ 已验证（3840×2160 PNG）                                                                   |
-| 坐标级点击 | portal button                                                              | ❌ 本机失效（click 仍发出全部事件；motion+激活生效，button 无效——如实 fail-open 记录于响应） |
-| 滚动       | portal axis discrete                                                       | ❌ 本机失效（同上；scroll 改 discrete 语义正确，等待 KWin 修复后自然恢复）                   |
+| 坐标级点击 | portal button                                                              | ~~❌ 本机失效~~ **✅ 已验证正常**（99→997→9978→99789，见 20.1） |
+| 滚动       | portal axis discrete                                                       | ~~❌ 本机失效~~ **✅ 已验证正常**（截图对比 2586px 变化，见 20.6） |
 
 **工程决定**：
 
@@ -690,7 +700,11 @@ motion_absolute/keyboard_keysym 正常。静态源码核对未发现缺陷，根
   特判——button 无效是环境缺陷而非协议错误；spec 如实记录。
 - agent 工作流应优先走元素级动作（这也正是 mac/win CUA 的推荐路径，坐标点击是兜底）。
 
-### 19.6 坐标空间勘误（capture_app 契约）
+### 19.6 坐标空间勘误（capture_app 契约）⚠️ 结论已修正，见第 20.3 节
+
+> **勘误**：本节「AT-SPI Screen extents 实为窗口 client 区局部坐标」是**部分应用的**
+> 行为，不是 KDE Wayland 的普遍规律。腾讯会议/VirtualBox 报真实屏幕坐标。
+> 已改为逐窗口校合并如实标注 `coordinate_space` / `coordinate_source`。见第 20.3 节。
 
 本轮同时确证：**KDE Wayland 的 AT-SPI `CoordType.Screen` extents 实为窗口 client 区
 局部坐标**（kdialog/konsole/plasmashell 面板元素均以 (0,0) 或面板局部原点报告；
@@ -712,11 +726,11 @@ KWin 真实几何 (1464,814) 对照 AT-SPI (0,0)）。因此：
    `pkill -x` 对 >15 字符进程名因 comm 截断而失效。一律 `pgrep -af | grep -v pgrep`
    人工过滤后按 pid 杀。
 
-## 17. 坐标点击与坐标空间：最终结论（2026-10-26）
+## 20. 坐标点击与坐标空间：最终结论（2026-10-26，推翻第 18.7 / 19.5 / 19.6 节）
 
 本节修正前文 8.7 / 16 节的多处错误判断。所有结论均经官方源码 + 可复现实验确认。
 
-### 17.1 坐标点击本身完全正常（此前「失效」是误判）
+### 20.1 坐标点击本身完全正常（此前「失效」是误判）
 
 错误的排除过程：
 1. 以为 button 编码错 → KWin `mousebuttons.cpp` 的 `buttonToQtMouseButton()` 明确把
@@ -736,7 +750,7 @@ KWin 真实几何 (1464,814) 对照 AT-SPI (0,0)）。因此：
 **最终验证**（kcalc，置于最顶层）：连续点击「七」「八」「九」，显示区从 `99` 依次变为
 `997` → `9978` → `99789`。**坐标点击、motion_absolute、button 全链路正常。**
 
-### 17.2 显示缩放（DPR）是必须处理的真实差异
+### 20.2 显示缩放（DPR）是必须处理的真实差异
 
 本机：KWin 逻辑尺寸 `3072×1728`，`devicePixelRatio = 1.25`，portal ScreenCast 上报
 `size = (3072, 1728)`（逻辑），而抓帧 PNG 为 `3840×2160`（物理/raster）。
@@ -749,7 +763,7 @@ KWin 几何全部是逻辑坐标）。`screenshot` 方法现在返回：
  "coordinate_note":"screenshot pixels are physical (raster) pixels; divide by `scale` ..."}
 ```
 
-### 17.3 AT-SPI 坐标不是「一律局部」也不是「一律屏幕」，须逐窗口校准
+### 20.3 AT-SPI 坐标不是「一律局部」也不是「一律屏幕」，须逐窗口校准
 
 实测（同一时刻对比 KWin `clientGeometry`）：
 
@@ -770,14 +784,14 @@ KWin 几何全部是逻辑坐标）。`screenshot` 方法现在返回：
 `coordinate_source: "none"`，让调用方知道 bounds 不可直接用于点击。
 校正成功时标 `coordinate_space: "screen"` / `coordinate_source: "kwin-client-geometry"`。
 
-### 17.4 AT-SPI 调用必须有超时（否则 capture 会挂死）
+### 20.4 AT-SPI 调用必须有超时（否则 capture 会挂死）
 
 部分应用的 accessible 节点永不回 D-Bus（实测 rustdesk 的应用根节点）。**无超时会
 让整次 capture_app 挂 100s+**。已给所有 AT-SPI 调用加 1.5s 超时（`timed()`），
 超时元素跳过而非中断整棵树。同时 `journalctl` 调用加 `timeout 2` 硬兜底（它在
 systemd service cgroup 里曾阻塞 110s）。
 
-### 17.5 Helper 单实例保护
+### 20.5 Helper 单实例保护
 
 `ensureLinuxCuaHelper` 原先在 spawn 前 `rm(socketPath)`。若 `probeHelperSocket`
 因 500ms 超时误判，会删掉仍在服务的旧 helper 的 socket 再起新的，导致 helper 泄漏
@@ -785,7 +799,21 @@ systemd service cgroup 里曾阻塞 110s）。
 `flock(<socket>.lock, LOCK_EX|LOCK_NB)` 做单实例保护，抢不到锁直接退出（退出码 0）。
 已验证：第二个实例立即退出且不影响第一个。
 
-### 17.6 窗口遮蔽的正确语义
+### 20.6 滚动（axis）同样正常
+
+针对第 19.5 节「axis 无效」的结论，用 KWrite（200 行文本）复测：
+
+- 点击文本区聚焦 → `scroll(direction=down, amount=30)` ×3 → 截图对比文本区
+  **2586 个像素发生变化**（对照组 PageDown 仅 45px）；
+- 目视确认：起始行从 `LINE 003` 变为 `LINE 005`，滚动真实生效。
+
+`scroll` 现用 `NotifyPointerAxisDiscrete`（整数步进，与真实滚轮一致），
+`amount` 按 `round(amount/10)` 换算为步数并 clamp 到 1..10。
+
+**注意**：不要用 AT-SPI 的 `text` 元素 `value` 判断滚动位置——它返回的是整个文档的
+缓存内容（长度上限 4096），不随视口移动。判断可见内容变化必须用截图对比。
+
+### 20.7 窗口遮蔽的正确语义
 
 `activate_window_at(x, y)` 按 `stackingOrder`（顶→底）激活「视觉上覆盖该点」的最顶层
 窗口——这是正确行为。**若目标元素被其他窗口遮挡，坐标点击必然打到遮挡窗口**；
