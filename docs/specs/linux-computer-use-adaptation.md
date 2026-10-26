@@ -711,3 +711,83 @@ KWin 真实几何 (1464,814) 对照 AT-SPI (0,0)）。因此：
 4. `pkill -f` 会匹配到执行命令的 shell 自身 cmdline（本轮再次踩中，exit 143）；
    `pkill -x` 对 >15 字符进程名因 comm 截断而失效。一律 `pgrep -af | grep -v pgrep`
    人工过滤后按 pid 杀。
+
+## 17. 坐标点击与坐标空间：最终结论（2026-10-26）
+
+本节修正前文 8.7 / 16 节的多处错误判断。所有结论均经官方源码 + 可复现实验确认。
+
+### 17.1 坐标点击本身完全正常（此前「失效」是误判）
+
+错误的排除过程：
+1. 以为 button 编码错 → KWin `mousebuttons.cpp` 的 `buttonToQtMouseButton()` 明确把
+   `BTN_LEFT(272)` 映射为 `Qt::LeftButton`；portal XML 也定义了 evdev 编码。
+2. 以为 portal-kde 版本差异 → 拉 `xdg-desktop-portal-kde` v6.7.5 tag 与 master 对比，
+   button/motion/axis 路径零差异；`FakeInput` 用 Qt 生成的
+   `QtWayland::org_kde_kwin_fake_input`，参数为 `quint32 linuxButton`，直通。
+3. 以为 KWin 事件过滤器吞事件 → 逐一核对 `EisInputCaptureFilter`（需 activeCapture，
+   本机无）、`MouseKeysPlugin`（只处理键盘）、`EffectsFilter`（m_grabbedMouseEffects 为空）。
+4. 以为 D-Bus/wl 丢包 → dbus-monitor + WAYLAND_DEBUG 证明请求全部到达并发出。
+
+**真正的两次误判原因**：
+- 第一次：目标窗口（kcalc）被 **RustDesk 全屏窗口完全覆盖**；`activate_window_at`
+  按「视觉一致」语义正确激活了 RustDesk，点击自然打到 RustDesk 上。
+- 第二次：截图裁剪用了**过期的窗口坐标**（KWin 之后移动了 kcalc），裁错了区域。
+
+**最终验证**（kcalc，置于最顶层）：连续点击「七」「八」「九」，显示区从 `99` 依次变为
+`997` → `9978` → `99789`。**坐标点击、motion_absolute、button 全链路正常。**
+
+### 17.2 显示缩放（DPR）是必须处理的真实差异
+
+本机：KWin 逻辑尺寸 `3072×1728`，`devicePixelRatio = 1.25`，portal ScreenCast 上报
+`size = (3072, 1728)`（逻辑），而抓帧 PNG 为 `3840×2160`（物理/raster）。
+
+**因此：从截图量出的像素坐标必须除以 `scale` 才是逻辑坐标**（注入、AT-SPI bounds、
+KWin 几何全部是逻辑坐标）。`screenshot` 方法现在返回：
+
+```json
+{"raster_size":[3840,2160], "logical_size":[3072,1728], "scale":1.25,
+ "coordinate_note":"screenshot pixels are physical (raster) pixels; divide by `scale` ..."}
+```
+
+### 17.3 AT-SPI 坐标不是「一律局部」也不是「一律屏幕」，须逐窗口校准
+
+实测（同一时刻对比 KWin `clientGeometry`）：
+
+| 应用 | AT-SPI 窗口 extents | KWin clientGeometry | 性质 |
+|---|---|---|---|
+| 腾讯会议 | (1203,639,722,482) | (1203,639,722,482) | 真实屏幕坐标 |
+| VirtualBox | (837,346,1536,864) | (836.8,345.6,1536,864) | 真实屏幕坐标（≈client） |
+| rustdesk | (0,0,300,490) | (1414,634,300,490) | 局部坐标（原点 0,0） |
+| phone-cam-manager | (0,0,820,720) | (779,794,820,720) | 局部坐标 |
+| kcalc | (0,0,640,480) | (1477,697,640,480) | 局部坐标 |
+
+并且**同一应用内也可能混用**（wemeetapp 有元素报 (0.2,0.2) 也有报 (1828,640)）。
+另外 AT-SPI 用 `INT_MIN` 表示「位置未知」，这类元素的 bounds 必须置 null。
+
+**实现**：`capture_app` 按 **pid + 尺寸匹配** 找到对应 KWin 窗口，用
+`offset = kwin.client_origin − atspi_window_origin` 平移所有元素 bounds；
+尺寸不匹配则不做校正，并在响应里标 `coordinate_space: "atspi-raw"` /
+`coordinate_source: "none"`，让调用方知道 bounds 不可直接用于点击。
+校正成功时标 `coordinate_space: "screen"` / `coordinate_source: "kwin-client-geometry"`。
+
+### 17.4 AT-SPI 调用必须有超时（否则 capture 会挂死）
+
+部分应用的 accessible 节点永不回 D-Bus（实测 rustdesk 的应用根节点）。**无超时会
+让整次 capture_app 挂 100s+**。已给所有 AT-SPI 调用加 1.5s 超时（`timed()`），
+超时元素跳过而非中断整棵树。同时 `journalctl` 调用加 `timeout 2` 硬兜底（它在
+systemd service cgroup 里曾阻塞 110s）。
+
+### 17.5 Helper 单实例保护
+
+`ensureLinuxCuaHelper` 原先在 spawn 前 `rm(socketPath)`。若 `probeHelperSocket`
+因 500ms 超时误判，会删掉仍在服务的旧 helper 的 socket 再起新的，导致 helper 泄漏
+（实测同时存在两个进程）。修复：父进程不再删 socket；helper 自身用
+`flock(<socket>.lock, LOCK_EX|LOCK_NB)` 做单实例保护，抢不到锁直接退出（退出码 0）。
+已验证：第二个实例立即退出且不影响第一个。
+
+### 17.6 窗口遮蔽的正确语义
+
+`activate_window_at(x, y)` 按 `stackingOrder`（顶→底）激活「视觉上覆盖该点」的最顶层
+窗口——这是正确行为。**若目标元素被其他窗口遮挡，坐标点击必然打到遮挡窗口**；
+调用方应先用 `capture_app` 拿到元素 bounds 并确认目标窗口可见，或改用元素级动作
+（`element_perform_action` / `element_set_value`，走 AT-SPI D-Bus，不依赖坐标与焦点）。

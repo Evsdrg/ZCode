@@ -116,7 +116,10 @@ export async function ensureLinuxCuaHelper(): Promise<string | null> {
     if (!binary) return null;
     try {
       await mkdir(dirname(socketPath), { recursive: true });
-      await rm(socketPath, { force: true });
+      // 不要在这里 rm(socketPath)：helper 自己会在 bind 前清理。若在父进程侧删除，
+      // 则「probe 因 500ms 超时误判失败」时会把仍在服务的旧 helper 的 socket 删掉，
+      // 再 spawn 一个新的——旧进程变成无 socket 的僵尸（实测泄漏两个）。
+      // 单实例由 helper 内部的 flock 保证（见 linux-helper/src/main.rs）。
     } catch {
       // 忽略：helper 自己也会清理 socket
     }

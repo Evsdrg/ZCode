@@ -14,6 +14,143 @@
 
 use std::time::Duration;
 
+/// 一个 KWin 顶层窗口的真实屏幕几何（逻辑坐标）。
+#[derive(Debug, Clone)]
+pub struct WindowGeometry {
+    pub resource_class: String,
+    pub caption: String,
+    pub pid: i64,
+    /// frameGeometry：含装饰（标题栏/边框）的外框。
+    pub frame: (f64, f64, f64, f64),
+    /// clientGeometry：客户区（不含装饰）。AT-SPI 的 extents 与之同尺寸。
+    pub client: (f64, f64, f64, f64),
+}
+
+/// 执行一段 KWin JS 脚本并返回它 `print()` 的输出行。
+///
+/// KWin 脚本的 print 只进 journal（kwin_wayland 的 stdout），因此这里用
+/// `journalctl --user --since` 按时间窗捞取。失败返回空 Vec（调用方按
+/// 「无 KWin」处理，fail-open 到不校正）。
+async fn run_script_collect(script: &str, marker: &str) -> Vec<String> {
+    let dir = std::env::temp_dir();
+    // 唯一文件名：KWin 对同名脚本只加载一次（第二次 start 不会重跑）。
+    let uniq = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let path = dir.join(format!("zcode-cua-script-{uniq}.js"));
+    if std::fs::write(&path, script).is_err() {
+        return Vec::new();
+    }
+    // 起始时间戳（留 2 秒余量，避免 journal 写入延迟）。
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs().saturating_sub(2))
+        .unwrap_or(0);
+    let load = std::process::Command::new("gdbus")
+        .args([
+            "call", "--session", "--dest", "org.kde.KWin", "--object-path", "/Scripting",
+            "--method", "org.kde.kwin.Scripting.loadScript", &path.to_string_lossy(),
+        ])
+        .output();
+    let id = match load {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+            .split(|c: char| !c.is_ascii_digit())
+            .find(|s| !s.is_empty())
+            .and_then(|s| s.parse::<u32>().ok()),
+        _ => {
+            let _ = std::fs::remove_file(&path);
+            return Vec::new();
+        }
+    };
+    let started = std::process::Command::new("gdbus")
+        .args([
+            "call", "--session", "--dest", "org.kde.KWin", "--object-path", "/Scripting",
+            "--method", "org.kde.kwin.Scripting.start",
+        ])
+        .output();
+    let ok = matches!(started, Ok(ref o) if o.status.success());
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let mut lines = Vec::new();
+    if ok {
+        // 用 timeout 硬性兜底：journalctl 在 systemd service 的 cgroup 里偶尔会长时间阻塞
+        // （实测曾卡 110s），一旦超时就当作无 KWin，不能让 capture_app / element_at_point
+        // 被拖死。--since 已限定时间窗，-n 再限条数，正常耗时为毫秒级。
+        let out = std::process::Command::new("timeout")
+            .args([
+                "2",
+                "journalctl",
+                "--user",
+                "--since",
+                &format!("@{since}"),
+                "--no-pager",
+                "--output=cat",
+                "-n",
+                "500",
+            ])
+            .output();
+        if let Ok(o) = out {
+            for line in String::from_utf8_lossy(&o.stdout).lines() {
+                if let Some(pos) = line.find(marker) {
+                    lines.push(line[pos + marker.len()..].trim().to_string());
+                }
+            }
+        }
+    }
+    if let Some(id) = id {
+        let _ = std::process::Command::new("gdbus")
+            .args([
+                "call", "--session", "--dest", "org.kde.KWin", "--object-path", "/Scripting",
+                "--method", "org.kde.kwin.Scripting.unloadScript", &id.to_string(),
+            ])
+            .output();
+    }
+    let _ = std::fs::remove_file(&path);
+    lines
+}
+
+/// 读取所有 KWin 顶层普通窗口的真实几何。非 KWin 环境返回空 Vec。
+pub async fn list_window_geometries() -> Vec<WindowGeometry> {
+    let script = r#"var ws = workspace.stackingOrder;
+for (var i = 0; i < ws.length; i++) {
+    var w = ws[i];
+    if (!w.normalWindow) continue;
+    var f = w.frameGeometry;
+    var c = w.clientGeometry;
+    if (!f || !c) continue;
+    print("ZCODEGEOM|" + (w.resourceClass || "") + "\u0001" + (w.caption || "") + "\u0001" +
+          w.pid + "\u0001" +
+          f.x + "," + f.y + "," + f.width + "," + f.height + "\u0001" +
+          c.x + "," + c.y + "," + c.width + "," + c.height);
+}"#;
+    let lines = run_script_collect(script, "ZCODEGEOM|").await;
+    let mut out = Vec::new();
+    for line in lines {
+        let parts: Vec<&str> = line.split('\u{1}').collect();
+        if parts.len() != 5 {
+            continue;
+        }
+        let parse4 = |s: &str| -> Option<(f64, f64, f64, f64)> {
+            let v: Vec<f64> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            (v.len() == 4).then(|| (v[0], v[1], v[2], v[3]))
+        };
+        if let (Some(frame), Some(client)) = (parse4(parts[3]), parse4(parts[4])) {
+            out.push(WindowGeometry {
+                resource_class: parts[0].to_string(),
+                caption: parts[1].to_string(),
+                pid: parts[2].parse().unwrap_or(-1),
+                frame,
+                client,
+            });
+        }
+    }
+    out
+}
+
 /// 激活覆盖逻辑坐标 (x, y) 的 KWin 顶层窗口。返回是否成功激活（None=非 KWin/未找到）。
 ///
 /// 尽力而为：任何失败都吞掉（只打日志），调用方继续走注入。
@@ -87,7 +224,6 @@ if (!target) {{
             return None;
         }
     };
-    eprintln!("[kwin] loadScript ok: {}", String::from_utf8_lossy(&out.stdout).trim());
     // 返回形如 (uint32 42,) 或 (42,)——直接提取第一个连续数字串。
     let stdout = String::from_utf8_lossy(&out.stdout);
     let id = stdout
@@ -107,11 +243,6 @@ if (!target) {{
             "--method", "org.kde.kwin.Scripting.start",
         ])
         .output();
-    eprintln!("[kwin] start: {}", match &start {
-        Ok(o) if o.status.success() => "ok".to_string(),
-        Ok(o) => format!("fail: {}", String::from_utf8_lossy(&o.stderr).trim()),
-        Err(e) => format!("spawn fail: {e}"),
-    });
     let _ = start;
     // 给 KWin 一点时间应用焦点切换，然后卸载脚本（一次性）。
     tokio::time::sleep(Duration::from_millis(120)).await;

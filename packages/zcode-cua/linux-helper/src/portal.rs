@@ -35,6 +35,10 @@ pub(crate) struct PortalSession {
     stream_id: Option<u32>,
     /// ScreenCast 的 PipeWire fd（用于抓帧）。保留在会话里以维持流存活。
     pipewire_fd: Option<std::os::fd::OwnedFd>,
+    /// ScreenCast 流的逻辑尺寸（portal 上报的 size，单位=逻辑像素）。
+    /// 抓帧 raster 尺寸 = 逻辑尺寸 × 桌面缩放比（本机 1.25），故截图坐标
+    /// 需除以 (raster/logical) 才能用于注入。
+    logical_size: Option<(f64, f64)>,
 }
 
 enum Cmd {
@@ -44,6 +48,12 @@ enum Cmd {
         y: f64,
         button: i32,
         clicks: u32,
+        resp: oneshot::Sender<Result<(), String>>,
+    },
+    /// 只移动指针（绝对坐标），不发任何 button。
+    Move {
+        x: f64,
+        y: f64,
         resp: oneshot::Sender<Result<(), String>>,
     },
     /// 离散滚动（滚轮步进语义）：axis + steps。
@@ -58,6 +68,8 @@ enum Cmd {
         resp: oneshot::Sender<Result<(), String>>,
     },
     Status(oneshot::Sender<bool>),
+    /// 查询会话的屏幕逻辑尺寸（建会话以取得）。
+    ScreenInfo(oneshot::Sender<Result<(f64, f64), String>>),
     /// 抓一帧屏幕（PNG 字节）。
     Capture(oneshot::Sender<Result<Vec<u8>, String>>),
     Reset(oneshot::Sender<()>),
@@ -180,6 +192,11 @@ async fn build_session() -> Result<PortalSession, String> {
     });
     eprintln!("[portal] build_session: streams={:?}", selected.streams());
     eprintln!("[portal] build_session: stream_id={:?}", stream_id);
+    let logical_size = selected
+        .streams()
+        .first()
+        .and_then(|s| s.size())
+        .map(|(w, h)| (w as f64, h as f64));
     if let Some(t) = selected.restore_token() {
         save_token(t);
     }
@@ -202,6 +219,7 @@ async fn build_session() -> Result<PortalSession, String> {
         session,
         stream_id,
         pipewire_fd,
+        logical_size,
     })
 }
 
@@ -238,6 +256,17 @@ async fn handle(cmd: Cmd, state: &mut Option<PortalSession>) {
         }
         Cmd::Status(resp) => {
             let _ = resp.send(state.is_some());
+        }
+        Cmd::ScreenInfo(resp) => {
+            if let Err(e) = ensure(state).await {
+                let _ = resp.send(Err(format!("needs_grant: {e}")));
+                return;
+            }
+            let r = state
+                .as_ref()
+                .and_then(|s| s.logical_size)
+                .ok_or_else(|| "no screencast stream size".to_string());
+            let _ = resp.send(r);
         }
         Cmd::Capture(resp) => {
             if let Err(e) = ensure(state).await {
@@ -291,6 +320,22 @@ async fn handle(cmd: Cmd, state: &mut Option<PortalSession>) {
                 Ok::<(), String>(())
             }
             .await;
+            let _ = resp.send(r);
+        }
+        Cmd::Move { x, y, resp } => {
+            if let Err(e) = ensure(state).await {
+                let _ = resp.send(Err(format!("needs_grant: {e}")));
+                return;
+            }
+            let s = state.as_ref().unwrap();
+            let r = match s.stream_id {
+                Some(stream) => s
+                    .desktop
+                    .notify_pointer_motion_absolute(&s.session, stream, x, y, Default::default())
+                    .await
+                    .map_err(|e| format!("motion_absolute: {e}")),
+                None => Err("no ScreenCast stream id".to_string()),
+            };
             let _ = resp.send(r);
         }
         Cmd::ScrollDiscrete {
@@ -373,6 +418,11 @@ pub async fn click(x: f64, y: f64, button: i32, clicks: u32) -> Result<(), Strin
     .await?
 }
 
+/// 只移动指针到绝对坐标（逻辑坐标空间）。
+pub async fn move_pointer(x: f64, y: f64) -> Result<(), String> {
+    send_cmd(|resp| Cmd::Move { x, y, resp }).await?
+}
+
 /// 离散滚动（滚轮步进）。axis: 0=Horizontal 1=Vertical（portal Axis 枚举）。
 pub async fn scroll_discrete(axis_is_horizontal: bool, steps: i32) -> Result<(), String> {
     let axis = if axis_is_horizontal {
@@ -395,6 +445,11 @@ pub async fn key_events(events: Vec<(i32, bool)>) -> Result<(), String> {
 /// 抓一帧屏幕（PNG 字节）。
 pub async fn capture_png() -> Result<Vec<u8>, String> {
     send_cmd(|resp| Cmd::Capture(resp)).await?
+}
+
+/// 屏幕逻辑尺寸（逻辑像素）。抓帧 raster 尺寸除以它 = 缩放比。
+pub async fn screen_logical_size() -> Result<(f64, f64), String> {
+    send_cmd(|resp| Cmd::ScreenInfo(resp)).await?
 }
 
 /// 把普通文本转成 keysym 事件序列（仅支持可映射到 keysym 的字符，ASCII 为主）。

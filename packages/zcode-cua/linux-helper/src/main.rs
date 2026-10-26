@@ -27,8 +27,16 @@ use atspi::proxy::value::ValueProxy;
 use atspi::CoordType;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
+use std::time::Duration;
 use std::os::unix::net::UnixListener;
 use std::path::Path;
+
+// flock(2)：用于 helper 单实例保护（不引入 libc crate 的最小声明）。
+const LOCK_EX: i32 = 2;
+const LOCK_NB: i32 = 4;
+extern "C" {
+    fn flock(fd: i32, operation: i32) -> i32;
+}
 
 const DEFAULT_DEPTH: usize = 12;
 const MAX_ELEMENTS: usize = 4000;
@@ -53,6 +61,15 @@ async fn acc<'a>(conn: &'a Conn, name: &str, path: &str) -> Result<AccessiblePro
         .build()
         .await
         .map_err(|e| e.to_string())
+}
+
+/// AT-SPI 单次调用超时。个别应用的 accessible 对象会永不响应（D-Bus 无回包），
+/// 不设超时会让整次 capture 挂死（实测 rustdesk 的应用节点即如此）。
+const ATSPI_CALL_TIMEOUT: Duration = Duration::from_millis(1500);
+
+/// 跑一个 future，超时/失败都返回 None。
+async fn timed<T>(fut: impl std::future::Future<Output = T>) -> Option<T> {
+    tokio::time::timeout(ATSPI_CALL_TIMEOUT, fut).await.ok()
 }
 
 async fn get_pid(conn: &Conn, bname: &str) -> Option<i64> {
@@ -187,6 +204,7 @@ async fn walk(
     depth: usize,
     owner_pid: i64,
     win_bounds: (i32, i32, i32, i32),
+    offset: (f64, f64),
     ctx: &mut WalkCtx,
 ) {
     if ctx.elements.len() >= MAX_ELEMENTS {
@@ -196,15 +214,38 @@ async fn walk(
         Ok(a) => a,
         Err(_) => return,
     };
-    let role = ap.get_role_name().await.unwrap_or_default();
-    let name = ap.name().await.unwrap_or_default();
-    let actions = get_actions(conn, bname, path).await;
-    let ext = get_extents(conn, bname, path).await;
+    let role = timed(ap.get_role_name()).await.and_then(|r| r.ok()).unwrap_or_default();
+    let name = timed(ap.name()).await.and_then(|r| r.ok()).unwrap_or_default();
+    let actions = timed(get_actions(conn, bname, path)).await.unwrap_or_default();
+    let ext = timed(get_extents(conn, bname, path)).await.flatten();
+    // 坐标校正：AT-SPI 的 Screen 坐标是否真是屏幕坐标因应用实现而异（KDE Wayland 实测：
+    // 腾讯会议/VirtualBox 给真实屏幕坐标，rustdesk/phone-cam-manager/kdialog/consoLe 给
+    // (0,0) 原点局部坐标）。统一用 `atspi + (kwin_client_origin - atspi_window_origin)`
+    // 换算：两种情况都成立（前者偏移为 0，后者偏移为窗口真实位置）。
+    // AT-SPI 用 INT_MIN 表示「位置未知」。这类元素不可按坐标点击，bounds 置 null，
+    // 让 agent 明确知道无法用坐标定位（仍可用元素级动作）。
+    // AT-SPI 用 INT_MIN 表示「位置未知」，另有元素报 0 尺寸/极小负值（不可见装饰）。
+    // 这些元素无法按坐标点击，bounds 置 null，让 agent 明确知道要用元素级动作。
+    const ATSPI_COORD_UNKNOWN: i32 = i32::MIN;
     let bounds = match ext {
-        Some((x, y, w, h)) => json!([x, y, w, h]),
-        None => json!([0, 0, 0, 0]),
+        Some((x, y, w, h))
+            if x > ATSPI_COORD_UNKNOWN
+                && y > ATSPI_COORD_UNKNOWN
+                && w > 0
+                && h > 0
+                && (x as f64 + offset.0) >= -8.0
+                && (y as f64 + offset.1) >= -8.0 =>
+        {
+            json!([
+                x as f64 + offset.0,
+                y as f64 + offset.1,
+                w as f64,
+                h as f64
+            ])
+        }
+        _ => Value::Null,
     };
-    let value = get_text_value(conn, bname, path).await;
+    let value = timed(get_text_value(conn, bname, path)).await.flatten();
     let lower = role.to_lowercase();
     let pressable = actions
         .iter()
@@ -249,7 +290,8 @@ async fn walk(
     if depth >= DEFAULT_DEPTH {
         return;
     }
-    if let Ok(kids) = ap.get_children().await {
+    let kids_opt = timed(ap.get_children()).await;
+    if let Some(Ok(kids)) = kids_opt {
         for k in kids {
             let kn = k.name().map(|x| x.to_string()).unwrap_or_default();
             let kp = k.path().to_string();
@@ -265,7 +307,17 @@ async fn walk(
             } else {
                 use_bname
             };
-            Box::pin(walk(conn, &use_bname, &kp, depth + 1, owner_pid, win_bounds, ctx)).await;
+            Box::pin(walk(
+                conn,
+                &use_bname,
+                &kp,
+                depth + 1,
+                owner_pid,
+                win_bounds,
+                offset,
+                ctx,
+            ))
+            .await;
         }
     }
 }
@@ -340,17 +392,43 @@ async fn capture_app(
         wbounds[2].as_i64().unwrap_or(0) as i32,
         wbounds[3].as_i64().unwrap_or(0) as i32,
     );
+    // 计算坐标偏移：用 KWin 的真实 clientGeometry 校正 AT-SPI 的窗口原点。
+    // 按 pid 匹配（resourceClass 与 AT-SPI app 名不一定同名），拿不到则不校正（offset=0）。
+    let mut offset = (0.0f64, 0.0f64);
+    let mut geom_source = "none";
+    let all_geoms = kwin::list_window_geometries().await;
+    if let Some(g) = all_geoms
+        .into_iter()
+        .find(|g| g.pid == a.pid)
+    {
+        // AT-SPI 报的窗口 extents（若为 (0,0) 则视为局部坐标）
+        let ax = wbounds[0].as_f64().unwrap_or(0.0);
+        let ay = wbounds[1].as_f64().unwrap_or(0.0);
+        // 尺寸一致性校验：AT-SPI 窗口尺寸应等于 client 尺寸（容差 2px）
+        let aw = wbounds[2].as_f64().unwrap_or(0.0);
+        let ah = wbounds[3].as_f64().unwrap_or(0.0);
+        let size_ok = (aw - g.client.2).abs() <= 2.0 && (ah - g.client.3).abs() <= 2.0;
+        if size_ok {
+            offset = (g.client.0 - ax, g.client.1 - ay);
+            geom_source = "kwin-client-geometry";
+        }
+    }
     let mut ctx = WalkCtx {
         elements: Vec::new(),
         lines: Vec::new(),
     };
-    walk(conn, &a.bname, &a.path, 0, a.pid, wb, &mut ctx).await;
+    walk(conn, &a.bname, &a.path, 0, a.pid, wb, offset, &mut ctx).await;
     Ok(json!({
         "snapshot_mode": "full",
-        // 坐标空间声明：KDE Wayland 的 AT-SPI Screen 坐标实为「窗口 client 区局部坐标」
-        // （实测 kdialog/konsole 均报 (0,0) 原点），非屏幕绝对坐标。agent 若需按 bounds
-        // 换算点击坐标，须叠加窗口的真实屏幕位置（KWin clientGeometry）。详见 spec 8.7。
-        "coordinate_space": "window-local",
+        // 坐标空间：bounds 已按 KWin clientGeometry 校正为【屏幕逻辑坐标】（可直接用于
+        // click 的 point）。若 geom_source 为 "none"（无 KWin / 尺寸不匹配 / 非 KDE），
+        // bounds 保持 AT-SPI 原值，可能为窗口局部坐标——此时应改用元素级动作
+        // （element_perform_action / element_set_value），它们不依赖坐标。
+        "coordinate_space": if geom_source == "none" { "atspi-raw" } else { "screen" },
+        "coordinate_source": geom_source,
+        // elements[].bounds 是【逻辑像素】的屏幕坐标，可直接用于 click/scroll 的 point。
+        // 与 screenshot 的关系：截图 raster 坐标 ÷ screenshot.scale = 逻辑坐标。
+        "bounds_note": "bounds are logical-pixel screen coordinates usable directly as click points; for coordinates measured on a screenshot, divide by screenshot scale (e.g. 1.25) first",
         "app": {
             "bundle_id": Value::Null, "pid": a.pid, "name": a.name,
             "aumid": Value::Null, "executable_path": Value::Null, "icon_png": Value::Null
@@ -558,19 +636,25 @@ async fn element_select_text(ac: &AccessibilityConnection, params: &Value) -> Va
     }
 }
 
-/// 命中测试：在各 app 的窗口元素上用 Component.GetAccessibleAtPoint 做原生命中
-/// （O(depth)），命中即返回其 native token，owner_pid 用该 app 的 pid（可靠）。
+/// 命中测试：用 AT-SPI Component.GetAccessibleAtPoint 做原生命中。
+///
+/// 输入是【屏幕逻辑坐标】（agent 从截图/元素 bounds 得来），而 AT-SPI 的
+/// GetAccessibleAtPoint 在 KDE Wayland 下按各应用自己的坐标空间解释：有的应用
+/// 要屏幕坐标，有的要窗口局部坐标。因此逐窗口尝试两个坐标：
+///   1) 原值（屏幕坐标应用直接命中）
+///   2) 平移到该窗口局部坐标（屏幕坐标 − KWin client 原点，命中局部坐标应用）
+/// 命中即返回 native token + 真实 owner_pid。
 async fn element_at_point(ac: &AccessibilityConnection, params: &Value) -> Value {
     let conn = ac.connection();
-    let x = params.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-    let y = params.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let x = params.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let y = params.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let apps = match list_apps(ac).await {
         Ok(a) => a,
-        Err(e) => return json!({"ok": false, "error": e}),
+        Err(e) => return json!({ "ok": false, "error": e }),
     };
-    // 收集所有 app 的窗口 (面积, bname, path, pid)。AT-SPI GetAccessibleAtPoint 不感知
-    // 窗口堆叠顺序（z-order），全屏窗口几何上会覆盖所有点；按面积升序试，让小窗口/真实
-    // 应用先于全屏窗口被命中。
+    // KWin 真实几何：按 pid 索引，用于把屏幕坐标平移成窗口局部坐标。
+    let geoms = kwin::list_window_geometries().await;
+    // 收集所有窗口（面积升序：小窗口优先，避免全屏/桌面窗口抢命中）。
     let mut wins: Vec<(i64, String, String, i64)> = Vec::new();
     for a in &apps {
         let ap = match acc(conn, &a.bname, &a.path).await {
@@ -610,8 +694,29 @@ async fn element_at_point(ac: &AccessibilityConnection, params: &Value) -> Value
             Ok(b) => b.build().await.ok(),
             Err(_) => None,
         };
-        if let Some(cp) = cp {
-            if let Ok(obj) = cp.get_accessible_at_point(x, y, CoordType::Screen).await {
+        let cp = match cp {
+            Some(c) => c,
+            None => continue,
+        };
+        // 该窗口的 AT-SPI 原点与 KWin client 原点，求局部坐标下的查询点。
+        let mut candidates: Vec<(i32, i32)> = vec![(x as i32, y as i32)];
+        if let (Some((ax, ay, aw, ah)), Some(g)) =
+            (get_extents(conn, &bn, &kp).await, geoms.iter().find(|g| g.pid == pid))
+        {
+            // 尺寸匹配才认为这个 KWin 窗口就是该 AT-SPI 窗口（同 pid 多窗口时避误配）。
+            if (aw as f64 - g.client.2).abs() <= 2.0 && (ah as f64 - g.client.3).abs() <= 2.0 {
+                // 局部坐标 = 屏幕坐标 − (KWin client 原点 − AT-SPI 窗口原点)
+                let ox = g.client.0 - ax as f64;
+                let oy = g.client.1 - ay as f64;
+                let lx = (x - ox).round() as i32;
+                let ly = (y - oy).round() as i32;
+                if (lx, ly) != (x as i32, y as i32) {
+                    candidates.push((lx, ly));
+                }
+            }
+        }
+        for (cx, cy) in candidates {
+            if let Ok(obj) = cp.get_accessible_at_point(cx, cy, CoordType::Screen).await {
                 let obn = obj.name().map(|n| n.to_string()).unwrap_or_default();
                 let op = obj.path().to_string();
                 if !obn.is_empty() && !op.is_empty() && op != "/org/a11y/atspi/null" {
@@ -755,7 +860,31 @@ async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) ->
             }
             Err(e) => json!({"ok": false, "error": e}),
         },
+        // 只移动指针（绝对坐标，逻辑像素）。供 agent 精确定位/测试使用。
+        "move_pointer" => {
+            let (x, y) = match point_of(params) {
+                Some(p) => p,
+                None => return fail("action_unavailable", "move_pointer: missing point", false),
+            };
+            match portal::move_pointer(x, y).await {
+                Ok(()) => json!({"ok": true, "result": {"moved": true}}),
+                Err(e) => fail("action_unavailable", &format!("move_pointer: {e}"), false),
+            }
+        }
         "element_at_point" => element_at_point(ac, params).await,
+        // 诊断用：单独测 KWin 几何读取（不暴露给 agent 工具面）
+        "debug_window_geometries" => {
+            let t0 = std::time::Instant::now();
+            let g = kwin::list_window_geometries().await;
+            json!({"ok": true, "result": {
+                "elapsed_ms": t0.elapsed().as_millis() as u64,
+                "count": g.len(),
+                "items": g.iter().map(|w| json!({
+                    "class": w.resource_class, "caption": w.caption, "pid": w.pid,
+                    "frame": w.frame, "client": w.client
+                })).collect::<Vec<_>>()
+            }})
+        },
         "element_perform_action" => element_perform_action(ac, params).await,
         "element_set_value" => element_set_value(ac, params).await,
         "element_select_text" => element_select_text(ac, params).await,
@@ -842,6 +971,15 @@ async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) ->
         // 抓屏：portal ScreenCast → PipeWire → gstreamer 转 PNG。
         "screenshot" => match portal::capture_png().await {
             Ok(png) => {
+                // 截图 raster 尺寸受桌面缩放影响（本机 DPR=1.25：逻辑 3072x1728 → raster
+                // 3840x2160）。所有注入/AT-SPI/KWin 坐标都是逻辑像素，因此 agent 从截图上
+                // 量出的坐标必须除以 scale 才能用。把 scale 与逻辑尺寸一并返回，避免猜测。
+                let raster = png_raster_size(&png);
+                let logical = portal::screen_logical_size().await.ok();
+                let scale = match (raster, logical) {
+                    (Some((rw, _)), Some((lw, _))) if lw > 0.0 => Some(rw as f64 / lw),
+                    _ => None,
+                };
                 let b64 = base64_encode(&png);
                 json!({"ok": true, "result": {
                     "content": [{
@@ -849,7 +987,12 @@ async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) ->
                         "data": b64,
                         "mimeType": "image/png"
                     }],
-                    "structuredContent": Value::Null
+                    "structuredContent": {
+                        "raster_size": raster.map(|(w, h)| json!([w, h])),
+                        "logical_size": logical.map(|(w, h)| json!([w, h])),
+                        "scale": scale,
+                        "coordinate_note": "screenshot pixels are physical (raster) pixels; divide by `scale` to get logical coordinates used by click/AT-SPI bounds"
+                    }
                 }})
             }
             Err(e) => fail("action_unavailable", &format!("screenshot: {e}"), false),
@@ -860,6 +1003,16 @@ async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) ->
         }
         other => json!({"ok": false, "error": format!("method not implemented: {other}")}),
     }
+}
+
+/// 从 PNG 头读取 raster 宽度/高度（IHDR 固定偏移 16..24，大端）。
+fn png_raster_size(png: &[u8]) -> Option<(u32, u32)> {
+    if png.len() < 24 || &png[12..16] != b"IHDR" {
+        return None;
+    }
+    let w = u32::from_be_bytes([png[16], png[17], png[18], png[19]]);
+    let h = u32::from_be_bytes([png[20], png[21], png[22], png[23]]);
+    Some((w, h))
 }
 
 fn main() {
@@ -878,6 +1031,31 @@ fn main() {
         eprintln!("usage: cua-linux-helper --socket <path>");
         std::process::exit(2);
     }
+    // 单实例保护：同一 socket 路径只允许一个 helper。
+    // 用 <socket>.lock 上的 flock 排它锁——拿不到说明已有实例在服务，直接退出（退出码 0，
+    // 让调用方按「已有活 helper」处理，而不是误以为是启动失败）。
+    // 这修掉了「父进程 probe 超时 → 删 socket → 再 spawn」导致的 helper 泄漏。
+    let lock_path = format!("{socket_path}.lock");
+    let lock_file = match std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&lock_path)
+    {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("cannot open lock file {lock_path}: {e}");
+            std::process::exit(1);
+        }
+    };
+    {
+        use std::os::unix::io::AsRawFd;
+        let rc = unsafe { flock(lock_file.as_raw_fd(), LOCK_EX | LOCK_NB) };
+        if rc != 0 {
+            eprintln!("another cua-linux-helper already owns {socket_path}; exiting");
+            std::process::exit(0);
+        }
+    }
+    let _keep_lock = lock_file; // 持有到进程结束
     let _ = std::fs::remove_file(&socket_path);
     if let Some(parent) = Path::new(&socket_path).parent() {
         let _ = std::fs::create_dir_all(parent);
