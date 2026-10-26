@@ -67,6 +67,19 @@ enum Cmd {
         events: Vec<(i32, bool)>,
         resp: oneshot::Sender<Result<(), String>>,
     },
+    /// 拖拽：按下 → 分步移动 → 抬起。modifiers 为需要全程按住的 keysym。
+    Drag {
+        start: (f64, f64),
+        end: (f64, f64),
+        modifiers: Vec<i32>,
+        resp: oneshot::Sender<Result<(), String>>,
+    },
+    /// 按下指定 keysym 并保持 duration_ms，然后释放。可被 CancelHold 打断。
+    HoldKey {
+        keysym: i32,
+        duration_ms: u64,
+        resp: oneshot::Sender<Result<(), String>>,
+    },
     Status(oneshot::Sender<bool>),
     /// 查询会话的屏幕逻辑尺寸（建会话以取得）。
     ScreenInfo(oneshot::Sender<Result<(f64, f64), String>>),
@@ -76,6 +89,11 @@ enum Cmd {
 }
 
 static TX: OnceLock<mpsc::UnboundedSender<Cmd>> = OnceLock::new();
+
+/// 当前是否有 hold_key 正在进行（用于 cancel_input_holds 的跨连接查询）。
+static HOLDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// 取消标志：cancel_input_holds 在另一条连接上置位，hold 循环每 50ms 检查。
+static HOLD_CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn token_path() -> String {
     let uid = libc_getuid();
@@ -357,6 +375,119 @@ async fn handle(cmd: Cmd, state: &mut Option<PortalSession>) {
                 .map_err(|e| format!("axis_discrete: {e}"));
             let _ = resp.send(r);
         }
+        Cmd::Drag {
+            start,
+            end,
+            modifiers,
+            resp,
+        } => {
+            if let Err(e) = ensure(state).await {
+                let _ = resp.send(Err(format!("needs_grant: {e}")));
+                return;
+            }
+            let s = match state.as_mut() {
+                Some(s) => s,
+                None => {
+                    let _ = resp.send(Err("needs_grant".into()));
+                    return;
+                }
+            };
+            let r = async {
+                let stream = s.stream_id.ok_or_else(|| {
+                    "no ScreenCast stream id; absolute pointer motion unavailable".to_string()
+                })?;
+                // 修饰键按下（全程保持）
+                for ks in &modifiers {
+                    s.desktop
+                        .notify_keyboard_keysym(&s.session, *ks, KeyState::Pressed, Default::default())
+                        .await
+                        .map_err(|e| format!("modifier down {ks}: {e}"))?;
+                }
+                // 移到起点 → 按下左键
+                s.desktop
+                    .notify_pointer_motion_absolute(&s.session, stream, start.0, start.1, Default::default())
+                    .await
+                    .map_err(|e| format!("drag move start: {e}"))?;
+                s.desktop
+                    .notify_pointer_button(&s.session, BTN_LEFT, KeyState::Pressed, Default::default())
+                    .await
+                    .map_err(|e| format!("drag button down: {e}"))?;
+                // 分步移动：真实拖拽需要中间 motion，直接跳到终点很多应用不认。
+                const STEPS: u32 = 12;
+                for i in 1..=STEPS {
+                    let t = i as f64 / STEPS as f64;
+                    let x = start.0 + (end.0 - start.0) * t;
+                    let y = start.1 + (end.1 - start.1) * t;
+                    s.desktop
+                        .notify_pointer_motion_absolute(&s.session, stream, x, y, Default::default())
+                        .await
+                        .map_err(|e| format!("drag move step {i}: {e}"))?;
+                    tokio::time::sleep(std::time::Duration::from_millis(16)).await;
+                }
+                s.desktop
+                    .notify_pointer_button(&s.session, BTN_LEFT, KeyState::Released, Default::default())
+                    .await
+                    .map_err(|e| format!("drag button up: {e}"))?;
+                // 释放修饰键（倒序）
+                for ks in modifiers.iter().rev() {
+                    s.desktop
+                        .notify_keyboard_keysym(&s.session, *ks, KeyState::Released, Default::default())
+                        .await
+                        .map_err(|e| format!("modifier up {ks}: {e}"))?;
+                }
+                Ok::<(), String>(())
+            }
+            .await;
+            let _ = resp.send(r);
+        }
+        Cmd::HoldKey {
+            keysym,
+            duration_ms,
+            resp,
+        } => {
+            if let Err(e) = ensure(state).await {
+                let _ = resp.send(Err(format!("needs_grant: {e}")));
+                return;
+            }
+            let s = match state.as_mut() {
+                Some(s) => s,
+                None => {
+                    let _ = resp.send(Err("needs_grant".into()));
+                    return;
+                }
+            };
+            let r = async {
+                s.desktop
+                    .notify_keyboard_keysym(&s.session, keysym, KeyState::Pressed, Default::default())
+                    .await
+                    .map_err(|e| format!("hold down {keysym}: {e}"))?;
+                HOLDING.store(true, std::sync::atomic::Ordering::SeqCst);
+                // 分片等待，每 50ms 检查取消标志（cancel_input_holds 跨连接写入）。
+                let mut left = duration_ms;
+                let mut cancelled = false;
+                while left > 0 {
+                    if HOLD_CANCEL.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                        cancelled = true;
+                        break;
+                    }
+                    let step = left.min(50);
+                    tokio::time::sleep(std::time::Duration::from_millis(step)).await;
+                    left -= step;
+                }
+                HOLDING.store(false, std::sync::atomic::Ordering::SeqCst);
+                s.desktop
+                    .notify_keyboard_keysym(&s.session, keysym, KeyState::Released, Default::default())
+                    .await
+                    .map_err(|e| format!("hold up {keysym}: {e}"))?;
+                if cancelled {
+                    Err("cancelled".to_string())
+                } else {
+                    Ok(())
+                }
+            }
+            .await;
+            let _ = resp.send(r);
+        }
         Cmd::Keyseq { events, resp } => {
             if let Err(e) = ensure(state).await {
                 let _ = resp.send(Err(format!("needs_grant: {e}")));
@@ -440,6 +571,42 @@ pub async fn scroll_discrete(axis_is_horizontal: bool, steps: i32) -> Result<(),
 
 pub async fn key_events(events: Vec<(i32, bool)>) -> Result<(), String> {
     send_cmd(|resp| Cmd::Keyseq { events, resp }).await?
+}
+
+/// 拖拽：start→end，modifiers 为全程按住的 keysym 列表。
+pub async fn drag(
+    start: (f64, f64),
+    end: (f64, f64),
+    modifiers: Vec<i32>,
+) -> Result<(), String> {
+    send_cmd(|resp| Cmd::Drag {
+        start,
+        end,
+        modifiers,
+        resp,
+    })
+    .await?
+}
+
+/// 按住单个 keysym duration_ms 后释放；可被 `cancel_hold()` 打断。
+pub async fn hold_key(keysym: i32, duration_ms: u64) -> Result<(), String> {
+    send_cmd(|resp| Cmd::HoldKey {
+        keysym,
+        duration_ms,
+        resp,
+    })
+    .await?
+}
+
+/// 取消进行中的 hold（由另一条 broker 连接调用 `cancel_input_holds`）。
+/// 返回是否真有 hold 在进行。
+pub fn cancel_hold() -> bool {
+    if HOLDING.load(std::sync::atomic::Ordering::SeqCst) {
+        HOLD_CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
+        true
+    } else {
+        false
+    }
 }
 
 /// 抓一帧屏幕（PNG 字节）。

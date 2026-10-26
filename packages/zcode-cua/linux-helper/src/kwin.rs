@@ -54,7 +54,7 @@ async fn run_script_collect(script: &str, marker: &str) -> Vec<String> {
     // 起始时间戳（留 2 秒余量，避免 journal 写入延迟）。
     let since = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs().saturating_sub(2))
+        .map(|d| d.as_secs().saturating_sub(3))
         .unwrap_or(0);
     let load = std::process::Command::new("gdbus")
         .args([
@@ -79,30 +79,41 @@ async fn run_script_collect(script: &str, marker: &str) -> Vec<String> {
         ])
         .output();
     let ok = matches!(started, Ok(ref o) if o.status.success());
-    tokio::time::sleep(Duration::from_millis(200)).await;
     let mut lines = Vec::new();
     if ok {
+        // 脚本执行是异步的：start 只代表 KWin 接受执行请求，print 输出要等脚本真正跑完。
+        // 之前固定 sleep 200ms 在负载高时会漏读（表现为「无 KWin」静默降级）。
+        // 改为最多轮询 2 秒，一旦出现 marker 就提前返回。
+        tokio::time::sleep(Duration::from_millis(150)).await;
         // 用 timeout 硬性兜底：journalctl 在 systemd service 的 cgroup 里偶尔会长时间阻塞
         // （实测曾卡 110s），一旦超时就当作无 KWin，不能让 capture_app / element_at_point
         // 被拖死。--since 已限定时间窗，-n 再限条数，正常耗时为毫秒级。
-        let out = std::process::Command::new("timeout")
-            .args([
-                "2",
-                "journalctl",
-                "--user",
-                "--since",
-                &format!("@{since}"),
-                "--no-pager",
-                "--output=cat",
-                "-n",
-                "500",
-            ])
-            .output();
-        if let Ok(o) = out {
-            for line in String::from_utf8_lossy(&o.stdout).lines() {
-                if let Some(pos) = line.find(marker) {
-                    lines.push(line[pos + marker.len()..].trim().to_string());
+        for attempt in 0..8 {
+            let out = std::process::Command::new("timeout")
+                .args([
+                    "2",
+                    "journalctl",
+                    "--user",
+                    "--since",
+                    &format!("@{since}"),
+                    "--no-pager",
+                    "--output=cat",
+                    "-n",
+                    "500",
+                ])
+                .output();
+            if let Ok(o) = out {
+                for line in String::from_utf8_lossy(&o.stdout).lines() {
+                    if let Some(pos) = line.find(marker) {
+                        lines.push(line[pos + marker.len()..].trim().to_string());
+                    }
                 }
+            }
+            if !lines.is_empty() {
+                break;
+            }
+            if attempt < 7 {
+                tokio::time::sleep(Duration::from_millis(200)).await;
             }
         }
     }
@@ -120,19 +131,32 @@ async fn run_script_collect(script: &str, marker: &str) -> Vec<String> {
 
 /// 读取所有 KWin 顶层普通窗口的真实几何。非 KWin 环境返回空 Vec。
 pub async fn list_window_geometries() -> Vec<WindowGeometry> {
-    let script = r#"var ws = workspace.stackingOrder;
-for (var i = 0; i < ws.length; i++) {
+    // marker 带 nonce：同一脚本会被 capture_app / element_at_point 频繁调用，
+    // 固定 marker 会读到先前调用的窗口列表（尤其窗口已移动/关闭时）。
+    let nonce = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let marker = format!("ZCODEGEOM{nonce}|");
+    let script = format!(
+        r#"var ws = workspace.stackingOrder;
+for (var i = 0; i < ws.length; i++) {{
     var w = ws[i];
     if (!w.normalWindow) continue;
     var f = w.frameGeometry;
     var c = w.clientGeometry;
     if (!f || !c) continue;
-    print("ZCODEGEOM|" + (w.resourceClass || "") + "\u0001" + (w.caption || "") + "\u0001" +
+    print("{marker}" + (w.resourceClass || "") + "\u0001" + (w.caption || "") + "\u0001" +
           w.pid + "\u0001" +
           f.x + "," + f.y + "," + f.width + "," + f.height + "\u0001" +
           c.x + "," + c.y + "," + c.width + "," + c.height);
-}"#;
-    let lines = run_script_collect(script, "ZCODEGEOM|").await;
+}}"#
+    );
+    let lines = run_script_collect(&script, &marker).await;
     let mut out = Vec::new();
     for line in lines {
         let parts: Vec<&str> = line.split('\u{1}').collect();
@@ -160,6 +184,17 @@ for (var i = 0; i < ws.length; i++) {
 ///
 /// 尽力而为：任何失败都吞掉（只打日志），调用方继续走注入。
 pub async fn activate_window_at(x: f64, y: f64) -> Option<bool> {
+    // marker 带 nonce：journal 是全局共享的，固定 marker + since 时间窗会捞到上一次
+    // 调用（甚至上一个 helper 进程）的同名输出，导致返回过期结果。
+    let nonce = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let marker = format!("ZCODEACT{nonce}|");
     let script = format!(
         r#"var target = null;
 // stackingOrder 从最顶层到底层；选覆盖该点的最上层窗口（与视觉一致：
@@ -176,88 +211,76 @@ for (var i = 0; i < ws.length; i++) {{
     }}
 }}
 if (!target) {{
-    print("ZCODE-NOTFOUND");
+    print("{marker}NOTFOUND");
 }} else if (target === workspace.activeWindow) {{
-    print("ZCODE-WASACTIVE");
+    print("{marker}WASACTIVE");
 }} else {{
     workspace.activeWindow = target;
-    print("ZCODE-ACTIVATED");
+    print("{marker}ACTIVATED");
 }}"#
     );
     // 把坐标注入脚本（数字字面量，避免拼接注入面）。
-    let script = script.replace("x >=", &format!("({x}) >="))
+    let script = script
+        .replace("x >=", &format!("({x}) >="))
         .replace("x <", &format!("({x}) <"))
         .replace("y >=", &format!("({y}) >="))
         .replace("y <", &format!("({y}) <"));
-    let dir = std::env::temp_dir();
-    let path = dir.join(format!("zcode-cua-activate-{}.js", std::process::id()));
-    if let Err(e) = std::fs::write(&path, &script) {
-        eprintln!("[kwin] write script failed: {e}");
-        return None;
+    let lines = run_script_collect(&script, &marker).await;
+    for line in lines {
+        let v = line.trim();
+        if v == "ACTIVATED" || v == "WASACTIVE" {
+            return Some(true);
+        }
+        if v == "NOTFOUND" {
+            return Some(false);
+        }
     }
-    let cleanup = || {
-        let _ = std::fs::remove_file(&path);
-    };
-    // KWin D-Bus 不在 helper 的业务 runtime 里跑（zbus 连接要自己的 reactor），
-    // 这里用同步 gdbus 子进程最省事，失败即返回。
-    let out = std::process::Command::new("gdbus")
-        .args([
-            "call",
-            "--session",
-            "--dest",
-            "org.kde.KWin",
-            "--object-path",
-            "/Scripting",
-            "--method",
-            "org.kde.kwin.Scripting.loadScript",
-            &path.to_string_lossy(),
-        ])
-        .output();
-    let out = match out {
-        Ok(o) if o.status.success() => o,
-        Ok(o) => {
-            eprintln!(
-                "[kwin] loadScript failed: {}",
-                String::from_utf8_lossy(&o.stderr).trim()
-            );
-            cleanup();
-            return None; // 无 KWin 或 D-Bus 不可用
+    None
+}
+
+/// 按 pid 激活该进程的顶层窗口（`hold_key_to_app` 前确保键盘焦点在目标应用）。
+///
+/// Wayland 没有 pid 定向的键盘注入通道：portal 的 keyboard_keysym 只送 seat 焦点
+/// 窗口。因此「向指定应用按住某个键」在 Linux 的等价实现 = 先把该 pid 的窗口提到
+/// 前台，再注入。若非 KWin 或该 pid 无窗口，返回 None（调用方按不可用处理）。
+pub async fn activate_window_by_pid(pid: i64) -> Option<bool> {
+    // 关键：marker 必须带随机 nonce。journal 是全局共享的，固定 marker + since 时间窗
+    // 会捞到上一次调用（甚至上一个 helper 进程）的同名输出，导致返回过期结果。
+    let nonce = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let marker = format!("ZCODEPID{nonce}|");
+    let script = format!(
+        r#"var target = null;
+var ws = workspace.stackingOrder;
+for (var i = 0; i < ws.length; i++) {{
+    var w = ws[i];
+    if (!w.normalWindow) continue;
+    if (w.pid !== {pid}) continue;
+    target = w;
+    break;
+}}
+if (!target) {{
+    print("{marker}NOTFOUND");
+}} else if (target === workspace.activeWindow) {{
+    print("{marker}WASACTIVE");
+}} else {{
+    workspace.activeWindow = target;
+    print("{marker}ACTIVATED");
+}}"#
+    );
+    // 注意：run_script_collect 已把 marker 前缀剥掉（返回的是 marker 之后的内容）。
+    let lines = run_script_collect(&script, &marker).await;
+    for line in lines {
+        let v = line.trim();
+        if !v.is_empty() {
+            return Some(v != "NOTFOUND");
         }
-        Err(e) => {
-            eprintln!("[kwin] spawn gdbus failed: {e}");
-            cleanup();
-            return None;
-        }
-    };
-    // 返回形如 (uint32 42,) 或 (42,)——直接提取第一个连续数字串。
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let id = stdout
-        .split(|c: char| !c.is_ascii_digit())
-        .find(|s| !s.is_empty())
-        .and_then(|s| s.parse::<u32>().ok());
-    let id = match id {
-        Some(i) => i,
-        None => {
-            cleanup();
-            return None;
-        }
-    };
-    let start = std::process::Command::new("gdbus")
-        .args([
-            "call", "--session", "--dest", "org.kde.KWin", "--object-path", "/Scripting",
-            "--method", "org.kde.kwin.Scripting.start",
-        ])
-        .output();
-    let _ = start;
-    // 给 KWin 一点时间应用焦点切换，然后卸载脚本（一次性）。
-    tokio::time::sleep(Duration::from_millis(120)).await;
-    let _ = std::process::Command::new("gdbus")
-        .args([
-            "call", "--session", "--dest", "org.kde.KWin", "--object-path", "/Scripting",
-            "--method", "org.kde.kwin.Scripting.unloadScript",
-            &id.to_string(),
-        ])
-        .output();
-    cleanup();
-    Some(true)
+    }
+    None
 }

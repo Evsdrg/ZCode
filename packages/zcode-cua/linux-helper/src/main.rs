@@ -636,6 +636,168 @@ async fn element_select_text(ac: &AccessibilityConnection, params: &Value) -> Va
     }
 }
 
+/// 元素滚动：AT-SPI 的滚动实现路径。
+///
+/// Qt/KDE 不实现 `Component.ScrollTo`（实测报 No such object path），因此走
+/// **滚动条动作**：找到目标元素所在滚动容器的 `scroll bar` 兄弟节点，调用其
+/// `Increase` / `Decrease` 动作。direction=up/down 用竖直滚动条、left/right 用水平。
+///
+/// amount（0..100）映射为动作重复次数（1..10 次），因为滚动条动作是固定步长的
+/// 「翻一页」，没有像素级接口。已在 KWrite（200 行文本）验证：6 次 Increase
+/// 使文本区产生 1911 像素变化。
+async fn element_scroll(ac: &AccessibilityConnection, params: &Value) -> Value {
+    let conn = ac.connection();
+    let token = match params.get("native").and_then(|v| v.as_str()) {
+        Some(t) => t,
+        None => return fail("action_unavailable", "element_scroll: missing native token", false),
+    };
+    let dir = params
+        .get("direction")
+        .and_then(|v| v.as_str())
+        .unwrap_or("down")
+        .to_lowercase();
+    let amount = params.get("amount").and_then(|v| v.as_f64()).unwrap_or(10.0);
+    let (bname, path) = match parse_native(token) {
+        Some(x) => x,
+        None => return fail("action_unavailable", "element_scroll: invalid native token", false),
+    };
+
+    let vertical = dir != "left" && dir != "right";
+    let increase = dir == "down" || dir == "right";
+    let action_name = if increase { "Increase" } else { "Decrease" };
+    let repeats = ((amount / 10.0).round() as i64).clamp(1, 10);
+
+    // 逐层向上寻找 scroll bar 兄弟节点：目标元素自己可能就是 scroll bar；
+    // 否则看它的父节点下有没有朝向匹配的 scroll bar 子节点。
+    let ap = match AccessibleProxy::builder(conn)
+        .cache_properties(atspi::zbus::proxy::CacheProperties::No)
+        .destination(bname.clone())
+        .and_then(|b| b.path(path.clone()))
+    {
+        Ok(b) => b,
+        Err(e) => return fail("action_unavailable", &format!("element_scroll: accessible proxy: {e}"), false),
+    };
+    let mut cur = match ap.build().await {
+        Ok(p) => p,
+        Err(e) => return fail("action_unavailable", &format!("element_scroll: build: {e}"), false),
+    };
+
+    // 最多向上找 4 层，覆盖 Qt 常见的 filler/layered pane 嵌套。
+    for _ in 0..4 {
+        let kids = match timed(cur.get_children()).await {
+            Some(Ok(k)) => k,
+            _ => Vec::new(),
+        };
+        for k in kids {
+            let kp = k.path().to_string();
+            let kb = k.name().map(|x| x.to_string()).unwrap_or_default();
+            let kb = if kb.is_empty() { bname.clone() } else { kb };
+            let kpx = match ActionProxy::builder(conn)
+                .cache_properties(atspi::zbus::proxy::CacheProperties::No)
+                .destination(kb.clone())
+                .and_then(|b| b.path(kp.clone()))
+            {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            let kpx = match kpx.build().await {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            let role = match timed(cur.get_role_name()).await {
+                Some(Ok(_)) => String::new(),
+                _ => String::new(),
+            };
+            let _ = role;
+            // 检查这个兄弟是不是 scroll bar（用其 accessible role）
+            let accp = match AccessibleProxy::builder(conn)
+                .cache_properties(atspi::zbus::proxy::CacheProperties::No)
+                .destination(kb.clone())
+                .and_then(|b| b.path(kp.clone()))
+            {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            let accp = match accp.build().await {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            let r = match timed(accp.get_role_name()).await {
+                Some(Ok(r)) => r,
+                _ => continue,
+            };
+            if r.to_lowercase() != "scroll bar" {
+                continue;
+            }
+            // 用 extents 判断朝向：高 > 宽 视为竖直滚动条。
+            let ext = match get_extents(conn, &kb, &kp).await {
+                Some(e) => e,
+                None => continue,
+            };
+            let is_vertical_bar = ext.3 > ext.2;
+            if is_vertical_bar != vertical {
+                continue;
+            }
+            let acts = match timed(kpx.get_actions()).await {
+                Some(Ok(a)) => a,
+                _ => continue,
+            };
+            let mut idx: Option<i32> = None;
+            for (i, a) in acts.iter().enumerate() {
+                if a.name.eq_ignore_ascii_case(action_name) {
+                    idx = Some(i as i32);
+                    break;
+                }
+            }
+            let idx = match idx {
+                Some(i) => i,
+                None => continue,
+            };
+            for _ in 0..repeats {
+                if let Err(e) = kpx.do_action(idx).await {
+                    return fail(
+                        "action_unavailable",
+                        &format!("element_scroll: do_action {action_name}: {e}"),
+                        false,
+                    );
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+            }
+            return json!({"ok": true, "result": {
+                "action_sent": true,
+                "dispatch_status": "accepted",
+                "repeats": repeats,
+                "action": action_name,
+            }});
+        }
+        // 向上走一层
+        let parent = match timed(cur.parent()).await {
+            Some(Ok(p)) => p,
+            _ => break,
+        };
+        let pp = parent.path().to_string();
+        let pn = parent.name().map(|x| x.to_string()).unwrap_or_default();
+        let pb = if pn.is_empty() { bname.clone() } else { pn };
+        let np = match AccessibleProxy::builder(conn)
+            .cache_properties(atspi::zbus::proxy::CacheProperties::No)
+            .destination(pb)
+            .and_then(|b| b.path(pp))
+        {
+            Ok(b) => b,
+            Err(_) => break,
+        };
+        cur = match np.build().await {
+            Ok(p) => p,
+            Err(_) => break,
+        };
+    }
+    fail(
+        "action_unavailable",
+        &format!("element_scroll: no scroll bar ({action_name}) found for this element"),
+        false,
+    )
+}
+
 /// 命中测试：用 AT-SPI Component.GetAccessibleAtPoint 做原生命中。
 ///
 /// 输入是【屏幕逻辑坐标】（agent 从截图/元素 bounds 得来），而 AT-SPI 的
@@ -748,15 +910,44 @@ fn fail(code: &str, message: &str, action_sent: bool) -> Value {
 }
 
 /// 坐标级输入注入尚未实现（需 portal）。fail-closed。
-fn portal_unavailable(method: &str, err: &str) -> Value {
-    fail(
-        "action_unavailable",
-        &format!("{method}: {err}"),
-        false,
-    )
-}
 
 /// 从 params.point 取逻辑坐标（x,y）。
+/// 从任意含 x/y 的对象取点（drag 的 start/end 用）。
+fn point_of_value(p: &Value) -> Option<(f64, f64)> {
+    let x = p.get("x").and_then(|v| v.as_f64())?;
+    let y = p.get("y").and_then(|v| v.as_f64())?;
+    Some((x, y))
+}
+
+/// 解析 drag 的修饰键列表。broker 传的是 mac 命名（cmd/opt/ctrl/shift），
+/// Linux 映射：cmd→Super_L、opt→Alt_L、ctrl→Control_L、shift→Shift_L。
+fn parse_modifier_list(v: Option<&Value>) -> Vec<i32> {
+    let mut out = Vec::new();
+    let Some(val) = v else { return out };
+    let text = match val {
+        Value::String(s) => s.clone(),
+        Value::Array(arr) => arr
+            .iter()
+            .filter_map(|x| x.as_str())
+            .collect::<Vec<_>>()
+            .join("+"),
+        _ => return out,
+    };
+    for part in text.split('+').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        let ks = match part.to_lowercase().as_str() {
+            "cmd" | "command" | "super" | "meta" | "win" => 0xFFEB, // Super_L
+            "opt" | "option" | "alt" => 0xFFE9,                     // Alt_L
+            "ctrl" | "control" => 0xFFE3,                           // Control_L
+            "shift" => 0xFFE1,                                      // Shift_L
+            _ => continue,
+        };
+        if !out.contains(&ks) {
+            out.push(ks);
+        }
+    }
+    out
+}
+
 fn point_of(params: &Value) -> Option<(f64, f64)> {
     let p = params.get("point")?;
     let x = p.get("x").and_then(|v| v.as_f64())?;
@@ -918,7 +1109,15 @@ async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) ->
             // 避免 continuous axis 小数 delta 在不同合成器上被量化丢失。
             let amount = params.get("amount").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let dir = params.get("direction").and_then(|v| v.as_str()).unwrap_or("down");
-            let mag = (amount / 10.0).round().clamp(1.0, 10.0) as i32;
+            let (x, y) = match point_of(params) {
+                Some(p) => p,
+                None => return fail("action_unavailable", "scroll: missing point", false),
+            };
+            // KWin fakeinput 的 axis 走的是 deltaV120=0 分支（pointer.cpp: sendAxis），
+            // 即被当作「finger/continuous scroll」的像素级 delta，而不是滚轮格数。
+            // 实测 steps=3 只等于 3 像素（肉眼不可见），必须按像素量级放大：
+            // amount(0..100) → 每单位 40px（amount=10 ≈ 400px，约一屏的 1/4）。
+            let mag = (amount.clamp(1.0, 100.0) * 40.0).round() as i32;
             let (horiz, steps) = match dir {
                 "up" => (false, -mag),
                 "down" => (false, mag),
@@ -926,6 +1125,11 @@ async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) ->
                 "right" => (true, mag),
                 _ => (false, mag),
             };
+            // KWin 的 PointerInterface::sendAxis 直接读 d->focusedSurface，没有就静默丢弃；
+            // 与 notifyPointerMotion/notifyPointerButton 不同，axis 自己不会更新 pointer focus。
+            // 因此滚动前先把指针移到目标点（等价于真实用户把鼠标停在内容上再滚轮）。
+            let _ = portal::move_pointer(x, y).await;
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
             match portal::scroll_discrete(horiz, steps).await {
                 Ok(()) => json!({"ok": true, "result": {"action_sent": true, "dispatch_status": "accepted"}}),
                 Err(e) => fail("action_unavailable", &format!("scroll: {e}"), false),
@@ -983,9 +1187,96 @@ async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) ->
             }
             Err(e) => fail("action_unavailable", &format!("screenshot: {e}"), false),
         },
-        // 其余需 portal/未实现的方法：fail-closed（保持诚实）。
-        "element_scroll" | "drag" | "hold_key" | "hold_key_to_app" => {
-            portal_unavailable(method, "not implemented on Linux")
+        // 元素滚动：AT-SPI 滚动条动作（Qt 不实现 Component.ScrollTo）。
+        "element_scroll" => element_scroll(ac, params).await,
+        // 拖拽：portal RemoteDesktop（按下 → 分步移动 → 抬起，可带修饰键）。
+        "drag" => {
+            let start = params.get("start").and_then(point_of_value);
+            let end = params.get("end").and_then(point_of_value);
+            let (start, end) = match (start, end) {
+                (Some(a), Some(b)) => (a, b),
+                _ => return fail("action_unavailable", "drag: missing start/end point", false),
+            };
+            let modifiers = parse_modifier_list(params.get("modifiers"));
+            match portal::drag(start, end, modifiers).await {
+                Ok(()) => json!({"ok": true, "result": {"action_sent": true, "dispatch_status": "accepted"}}),
+                Err(e) => fail("action_unavailable", &format!("drag: {e}"), false),
+            }
+        }
+        // 按住键：portal keyboard_keysym 按下 → 等待 → 抬起；可被 cancel_input_holds 打断。
+        //
+        // hold_key_to_app：Wayland 无 pid 定向键盘通道（portal 只送 seat 焦点窗口），
+        // 因此等价实现是先用 KWin 把目标 pid 的窗口提到前台再注入。若目标无法前置
+        // （非 KWin / 窗口不存在），fail-closed 返回 action_unavailable，绝不把按键
+        // 发给错误的窗口。
+        "hold_key" | "hold_key_to_app" => {
+            if method == "hold_key_to_app" {
+                let pid = params
+                    .get("app_ref")
+                    .and_then(|v| v.get("pid"))
+                    .and_then(|v| v.as_i64());
+                let Some(pid) = pid else {
+                    return fail(
+                        "action_unavailable",
+                        "hold_key_to_app: app_ref.pid required on Linux (keyboard targets the focused window)",
+                        false,
+                    );
+                };
+                match kwin::activate_window_by_pid(pid).await {
+                    Some(true) => {}
+                    Some(false) => {
+                        return fail(
+                            "action_unavailable",
+                            &format!("hold_key_to_app: no window for pid {pid}"),
+                            false,
+                        )
+                    }
+                    None => {
+                        return fail(
+                            "action_unavailable",
+                            "hold_key_to_app: cannot focus target window (KWin scripting unavailable)",
+                            false,
+                        )
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+            }
+            let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            let duration = params.get("duration").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            if duration <= 0.0 {
+                return json!({"ok": true, "result": {"action_sent": false, "reason": "zero_duration"}});
+            }
+            // hold_key 的 text 可能是修饰键名（shift/ctrl/alt/super）、命名键（return/tab/…）
+            // 或单个字符。按此顺序解析。
+            let keysym = match portal::modifier_keysym(text)
+                .or_else(|| portal::named_key_keysym(text))
+                .or_else(|| {
+                    let mut it = text.chars();
+                    let c = it.next()?;
+                    if it.next().is_none() {
+                        portal::char_to_keysym(c)
+                    } else {
+                        None
+                    }
+                })
+            {
+                Some(k) => k,
+                None => return fail("action_unavailable", &format!("hold_key: unsupported key {text:?}"), false),
+            };
+            let ms = (duration * 1000.0).clamp(0.0, 30_000.0) as u64;
+            match portal::hold_key(keysym, ms).await {
+                Ok(()) => json!({"ok": true, "result": {"action_sent": true, "dispatch_status": "accepted", "held_seconds": ms as f64 / 1000.0}}),
+                Err(e) if e == "cancelled" => json!({"ok": false, "error": {
+                    "message": "hold_key cancelled", "code": "cancelled",
+                    "details": {"action_sent": true, "reason": "cancelled"}
+                }}),
+                Err(e) => fail("action_unavailable", &format!("hold_key: {e}"), false),
+            }
+        }
+        // 控制通道：取消进行中的 hold（broker 在另一条连接上调用）。
+        "cancel_input_holds" => {
+            let had = portal::cancel_hold();
+            json!({"ok": true, "result": {"cancelled": had}})
         }
         other => json!({"ok": false, "error": format!("method not implemented: {other}")}),
     }

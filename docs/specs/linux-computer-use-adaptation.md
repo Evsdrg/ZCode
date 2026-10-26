@@ -819,3 +819,106 @@ systemd service cgroup 里曾阻塞 110s）。
 窗口——这是正确行为。**若目标元素被其他窗口遮挡，坐标点击必然打到遮挡窗口**；
 调用方应先用 `capture_app` 拿到元素 bounds 并确认目标窗口可见，或改用元素级动作
 （`element_perform_action` / `element_set_value`，走 AT-SPI D-Bus，不依赖坐标与焦点）。
+
+## 21. 补齐 drag / element_scroll / hold_key / cancel_input_holds
+
+第 20 节之后仍 fail-closed 的四个方法在本节补齐。契约全部来自闭源
+`zcode-node-repl-host/dist/mcp/server.js` 的实际调用点（不是推测）：
+
+| 方法 | params | 调用点 |
+|---|---|---|
+| `drag` | `{start:{x,y}, end:{x,y}, modifiers, app_ref?, frame_provenance?}` | `leftClickDragTool` 114254-114275 |
+| `element_scroll` | `{native, direction, amount}` | `scrollTool` 114122-114132（仅 `strategy!=="event"` 且有 native 时） |
+| `hold_key` | `{text, duration, session_key}` | 114943-114955 |
+| `hold_key_to_app` | 同上 + `{app_ref, strategy?}` | 同上（`hasAppRef` 时） |
+| `cancel_input_holds` | `{session_key}` | `callBrokerControl`（**另一条 broker 连接**，2s 超时） |
+
+### 21.1 `element_scroll`：走 AT-SPI 滚动条动作
+
+Qt/KDE **不实现 `Component.ScrollTo`**（实测对所有层都返回
+`atspi_error: No such object path`）。可行路径是**滚动条动作**：在目标元素所在滚动容器内
+找 `scroll bar` 兄弟节点，调用其 `Increase` / `Decrease`：
+
+- 目标元素自身可能就是 scroll bar；否则向上最多找 4 层，逐层检查子节点角色；
+- 朝向用 `extents` 判定（高 > 宽 = 竖直），`direction=up/down` 用竖直条、`left/right` 用水平条；
+- `amount`(0..100) → 动作重复次数 `clamp(round(amount/10), 1, 10)`。
+
+实测（KWrite 200 行）：6 次 `Increase` 使文本区产生 1911 像素变化。
+
+### 21.2 `drag`：portal 按下 → 分步移动 → 抬起
+
+`NotifyPointerMotionAbsolute` 到起点 → `NotifyPointerButton(BTN_LEFT, Pressed)` →
+12 步插值移动（每步 16ms）→ `Released`。修饰键（mac 命名 cmd/opt/ctrl/shift）
+映射为 keysym（super/alt/ctrl/shift），全程按住、结束倒序释放。
+
+实测：拖 KWrite 标题栏 (1564,640)→(1200,500)，窗口从 (1554,786) 移动到 (1101,594)，
+位移方向与量级完全一致。
+
+### 21.3 `hold_key` 与 `cancel_input_holds`：跨连接取消
+
+`hold_key` 按下 keysym → 分片等待（每 50ms 检查取消标志）→ 释放。
+`cancel_input_holds` 来自**另一条 broker 连接**（BrokerClient 每次 `call` 都新建
+`PermissionBrokerClient`），因此用 `static AtomicBool` 做跨线程/跨连接通信，
+helper 的「每连接独立线程」模型正好支持。
+
+实测：10 秒 hold 在 1.5 秒时被另一连接取消，立即返回 `cancelled`（<0.05s）。
+
+### 21.4 `hold_key_to_app`：Linux 无 pid 定向键盘
+
+Wayland 的 `keyboard_keysym` 只送 **seat 焦点窗口**，没有 per-app 定向通道。
+等价实现 = 先用 KWin 脚本按 pid 把目标窗口提到前台，再注入；无法前置则
+**fail-closed**（绝不把按键发给错误窗口）。
+
+实测：不存在的 pid 正确返回 `no window for pid 999999`；真实 pid 连续 3 次成功。
+
+### 21.5 `scroll` 的真实语义：像素级 delta（重要修正）
+
+第 20.6 节说「用 `NotifyPointerAxisDiscrete`，amount 按 round(amount/10) 换算步数」——
+**这个结论是错的**，本轮实测推翻。
+
+根因在 KWin `src/wayland/pointer.cpp::PointerInterface::sendAxis`：
+
+```cpp
+if (deltaV120) {
+    updateAccumulators(...);          // 高精度滚轮（120 基准）
+} else {
+    valueAxisLowRes = delta;          // ← fakeinput 永远走这里
+}
+...
+} else {
+    // Finger or continuous scroll
+    d->send_axis(resource, timestamp, orientation, wl_fixed_from_double(delta));
+}
+```
+
+`fakeinputbackend.cpp` 恒传 `deltaV120 = 0`，因此 KWin 把 axis 当作
+**finger/continuous scroll 的像素级 delta**，而不是滚轮格数。
+`steps=3` 只等于 3 像素——肉眼完全不可见，这才是「axis 无效」的真正原因
+（第 19.5 节的「KWin 缺陷」结论已在第 20 节撤回，本节补上机制解释）。
+
+修复：`amount`(0..100) → 像素 delta `amount * 40`（amount=10 ≈ 400px）。
+实测 amount=44 → 文本区 6406 像素变化，反向 3942 像素变化。
+
+### 21.6 KWin 脚本读回的三个坑
+
+1. **fixed marker + journal 时间窗 = 读到上一次的输出**。`journalctl --since @t` 是
+   全局的，同进程/前进程的同名 marker 会串。修复：marker 带 `pid + nanos` nonce。
+2. **`start` 是异步的**，固定 `sleep(200ms)` 在高负载下会漏读。修复：最多轮询 2 秒
+   （150ms 起，每 200ms 一次），出现 marker 立即返回。
+3. **`unloadScript` 传的是脚本 id**（不是路径），且必须在读完之后调用。
+
+`activate_window_at` 同时从「fire-and-forget 返回 Some(true)」改为读回真实结果
+（`ACTIVATED`/`WASACTIVE`/`NOTFOUND`），使 `click` 的窗口激活可验证。
+
+### 21.7 验证矩阵
+
+全部 23 个方法在真实生产 socket 上逐项通过（kwrite / plasmashell / krunner 真实应用）：
+
+```
+authenticate ✅  broker_info ✅  list_applications ✅(5 apps)  capture_app ✅(663 elements)
+list_windows ✅(20)  application_info ✅  element_at_point ✅  element_perform_action ✅
+element_set_value ✅  element_select_text ✅  move_pointer ✅  click ✅
+scroll ✅  element_scroll ✅  drag ✅  key ✅  type ✅  hold_key ✅
+hold_key_to_app ✅  cancel_input_holds ✅  screenshot ✅  permission_status ✅
+ping ✅  未知方法正确 fail-closed ✅
+```

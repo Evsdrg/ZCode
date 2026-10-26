@@ -42,15 +42,21 @@ NDJSON，每行一条消息：
 | `element_select_text` | 选文本（`text_range:[start,end]`） | AT-SPI |
 | `move_pointer` | 绝对移动光标 | portal RemoteDesktop |
 | `click` | `point{x,y}` + `button`(left/right/middle) + `clicks` | portal RemoteDesktop |
-| `scroll` | `direction`(up/down/left/right) + `amount`(0-100，按 10 折算步数) | portal（discrete） |
+| `scroll` | 坐标滚动：`point{x,y}` + `direction` + `amount`(0-100 → 像素 delta) | portal（权授权）|
+| `element_scroll` | 元素滚动：`native` + `direction` + `amount`(0-100 → 滚动条动作次数) | AT-SPI（零授权）|
 | `key` | 组合键字符串，如 `ctrl+a` / `return` / `shift+tab` | portal |
 | `type` / `paste` | 文本 → keysym 序列（仅 ASCII，非 ASCII fail-closed） | portal |
 | `screenshot` | PNG + `{raster_size,logical_size,scale,coordinate_note}` | portal ScreenCast |
 | `permission_status` | `{accessibility,screen_recording,grant_owner,needs_grant}` | portal |
 | `request_access` | 主动触发 portal 授权（一次弹窗，之后凭 app_id 记忆） | portal |
+| `drag` | `start{x,y}` → `end{x,y}` + 可选 `modifiers`(cmd/opt/ctrl/shift；Linux 映射 super/alt/ctrl/shift) | portal |
+| `hold_key` | `text` + `duration`(0..30s) + `session_key`；可按 Esc 等长按 | portal |
+| `hold_key_to_app` | 同上 + `app_ref{pid}`；Linux 无 pid 定向键盘，先 KWin 前置目标窗口，失败即 fail-closed | portal + KWin |
+| `cancel_input_holds` | `session_key`；从另一条 broker 连接打断进行中的 hold | — |
+| `reset_access` | 撤销 portal 授权并清 restore_token | portal |
 | `reset_access` | 撤销授权并清 restore_token | portal |
 
-未实现（fail-closed `action_unavailable`）：`drag`、`element_scroll`、`hold_key`、`hold_key_to_app`。
+全部 23 个方法均已实现，无 fail-closed 占位。
 
 ### 坐标契约（重要）
 
@@ -94,4 +100,4 @@ sudo install -m 0755 target/release/cua-linux-helper /usr/local/bin/cua-linux-he
 - ✅ portal：抓屏（PNG，带 scale 元信息）、光标移动、点击、滚动、键盘、文本
 - ✅ 授权：`request_access` 一次弹窗 + app_id 记忆，`permission_status` 真值化
 - ✅ KWin：窗口几何校准、按坐标激活顶层窗口
-- ⏳ `drag` / `element_scroll` / `hold_key` / `hold_key_to_app` 未实现（fail-closed）
+- ✅ 全部方法已实现并实测通过
