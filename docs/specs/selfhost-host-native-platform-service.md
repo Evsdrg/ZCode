@@ -170,11 +170,16 @@ export interface IHostNativeService {
 
 1. **`execFile` 不能用**：文件管理器/编辑器是长期进程，`execFile` 会等退出并缓冲输出，把 RPC 挂死。
    改用 `spawn({ detached: true, stdio: "ignore" })` + 只等 `spawn` 事件 + 3 秒兜底。
-2. **`openInFileManager(文件路径)` 打开父目录**：与 Electron `shell.showItemInFolder` 的「定位到该项」语义一致。
+2. **`openInFileManager` 完全对齐 Electron `shell.openPath`**：目录 → 打开并进入；文件 → 用默认应用打开该文件。
+   早期草稿写成「打开父目录」是错的（那是 `shell.showItemInFolder`，Electron 只在自己的「导出日志」流程里用）。
 3. **`openInEditor` 拒绝 `remoteTarget`**：自部署 server 就是宿主，传了远端目标说明调用方误判，
    直接拒绝比误开本机文件安全。`OpenInEditorOptions.pathKind` 不参与判定。
-4. **`getInstalledEditors` 的 `filePath` 语义**：缺省只列「编辑器」（任何文件都能开）；
-   传了路径才追加扩展名匹配的文档/媒体应用——与桌面端「可选文件路径只扩展文件菜单」一致。
+4. **`getInstalledEditors` 在 Linux 上不传 `filePath` 时恒为空**：
+   Electron 的 `getEditorDefsForCurrentPlatform()` 在 Linux 上只返回 `getFileApplicationDefs()`，
+   而 `getBaseInstalledEditors` 会 `filter(!("fileExtensions" in def))` 把它们全部滤掉。
+   所以 Linux 没有「通用编辑器」概念；`openInEditor` 也只支持按扩展名匹配的文档/媒体应用
+   （`evince` / `okular` / `firefox` / `wps*` / `libreoffice-*` / `vlc` / `mpv`）。
+   这点必须与 Electron 保持一致，不能自作主张多加 `code` / `dolphin`。
 5. **图标缺失返回空串而不是过滤掉该项**：本服务没有 Electron 的通用文件图标兜底，
    宁可少一个图标也不要少一个可用入口。
 6. **`.desktop` 文件名不一致**：VS Code 官方包是 `com.microsoft.VSCode.desktop`（Debian 另有 `code.desktop`），
@@ -186,22 +191,22 @@ export interface IHostNativeService {
 | --- | --- |
 | `pnpm typecheck` | exit 0 |
 | `pnpm lint` | 0 error / 105 既有 warning |
-| 单测 `hostNativeFiles.test.ts` / `hostNativeOpenTarget.test.ts` / `hostNativeService.test.ts` | 19 passed |
+| 单测 `hostNativeFiles` / `hostNativeOpenTarget` / `hostNativeService` / `hostNativeEditors` | 26 passed |
 | 单测 `webPlatformHostNative.test.ts` | 3 passed |
 | 生产 `/api/server-info` | `capabilities.hostNative: true` |
-| 生产 RPC `host-native.getInstalledEditors` | `dolphin`（有图标）、`vscode`；0.1ms |
+| 生产 RPC `host-native.getInstalledEditors`（不传路径） | `[]`（与 Electron Linux 一致）；0.1ms |
+| 生产 RPC `host-native.getInstalledEditors("/tmp/x.pdf")` | 列出本机已装的 pdf 应用 |
 | 生产 RPC `host-native.listSSHConfigAliases` | 1 条（`winpc`） |
 | 生产 RPC `host-native.createTempTextAttachment` | 700 B，落盘路径正确 |
 | 生产 RPC `host-native.openInEditor("rm -rf /")` | `unknown editor`（不做命令拼接） |
-| 生产 RPC `host-native.openInEditor("dolphin", "/no/such")` | `path_not_found` |
+| 生产 RPC `host-native.openInEditor("evince", "/no/such.pdf")` | `unsupported file application target` |
 | 真实浏览器长文本粘贴 16000 字符 | 附件「粘贴文本 · 1 行」正常生成，服务端 0.6ms，落盘 16000 B |
 | `host-native.isDockerAvailable` | `false`（本机 docker 命令在但 daemon 不可用，符合预期） |
 
-7. **`openInEditor` 比桌面端更严格**：桌面端只有「文档应用」分支 stat 校验文件、编辑器分支不校验；
-   本服务对编辑器也校验路径存在（不存在返回 `path_not_found`）。理由：Linux 下把不存在的路径交给
-   `dolphin` / `code` 会打开一个空白窗口，用户看不出发生了什么；显式报错更符合「失败必须显式」。
-8. **`getInstalledEditors` 缓存**：不带 `filePath` 时用进程级缓存（应用安装状态在生命周期内不变）；
-   带 `filePath` 时重新计算（扩展名组合不受限）。
+7. **`openInEditor` 的校验顺序与错误串镜像 Electron**：
+   `unknown editor: <id>` → `unsupported file application target`（远端目标 / 目录 / 非绝对路径 /
+   扩展名不匹配 / 目标不是文件）→ `application is not installed`。
+8. **`openInEditor` 不接受任意命令**：`editorId` 必须命中定义表，杜绝 RPC 边界上的命令注入。
 
 GUI 打开（`openInFileManager` / `openInEditor` 的成功分支）**未在用户桌面上实际触发**，
 避免弹出窗口干扰正在进行的会议：已核对前置条件（`xdg-open` / `gio` / `dolphin` / `code` 均存在、

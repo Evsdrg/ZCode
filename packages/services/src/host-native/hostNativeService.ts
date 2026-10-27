@@ -12,7 +12,7 @@ import type { IHostNativeService, HostNativeOpenResult } from "./contract.js";
 import { createTempTextAttachment } from "./tempTextAttachment.js";
 import { materializeWorkflowArtifactFile } from "./workflowArtifactFile.js";
 import { openInEditor, openInFileManager } from "./openTarget.js";
-import { getCachedInstalledEditors, getInstalledEditors } from "./editors.js";
+import { getInstalledEditors } from "./editors.js";
 import { listSSHConfigAliasesFromLocalConfig } from "../system/sshConfigAlias.js";
 import {
   isDockerAvailable as probeDockerAvailable,
@@ -76,10 +76,8 @@ export function createHostNativeService(
     },
 
     getInstalledEditors(filePath?: string): Promise<EditorInfo[]> {
-      // 传了文件路径时按扩展名扩展文档/媒体应用，这条分支不走缓存（扩展名组合不受限）。
-      return filePath
-        ? getInstalledEditorsImpl(filePath, env)
-        : getCachedInstalledEditors(env);
+      // 语义与 Electron 一致：不传路径时返回空（Linux 无通用编辑器），传路径时按扩展名匹配。
+      return getInstalledEditorsImpl(filePath, env);
     },
 
     createTempTextAttachment(

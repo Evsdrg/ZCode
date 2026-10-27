@@ -1,63 +1,58 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { extname, join } from "node:path";
+import { join } from "node:path";
 import type { EditorInfo } from "@zcode/shared";
 import {
-  EDITOR_DISPLAY_NAMES,
-  EDITOR_LAUNCH_DEFS,
-  resolveExecutable,
+  LINUX_FILE_APPLICATION_DEFS,
+  matchesFileApplication,
+  resolveFileApplicationPath,
 } from "./openTarget.js";
 
 /**
- * 列出本机已安装、且本服务能打开的编辑器/应用。
+ * 列出本机已安装的编辑器/应用。
  *
- * 与桌面端 `packages/desktop/src/main/editors.ts` 的差别：桌面端用 `app.getFileIcon()` 取图标，
- * 这里改为解析 `.desktop` 文件的 `Icon=` 字段。这样既不依赖 Electron，也能覆盖 Linux 上
- * 绝大多数应用。
+ * **严格镜像 Electron `getInstalledEditors`（Linux）**：
+ * - 不传 `filePath` → `getEditorDefsForCurrentPlatform()` 返回的全都带 `fileExtensions`，
+ *   而 `getBaseInstalledEditors` 会 `filter(!("fileExtensions" in def))`，所以结果**恒为空**。
+ *   这与 Electron 完全一致：Linux 上没有「通用编辑器」概念（`finder`/`explorer` 是 mac/win 的）。
+ * - 传 `filePath` → 只列扩展名匹配且已安装的文档/媒体应用（`PreviewPane` 的「打开方式」）。
  *
- * 语义对齐：`filePath` 缺省时只列「编辑器」（任何文件都能开）；传了 `filePath` 时，
- * 额外列入扩展名匹配的文档/媒体应用——与桌面端「可选文件路径只扩展文件菜单」一致。
- *
- * 只列「定义表里存在 + PATH 里能找到可执行文件」的项，保证列出来的每一项都能真的打开。
+ * 图标：桌面端用 Electron `app.getFileIcon()`；这里改为解析 `.desktop` 的 `Icon=` 字段，
+ * 不依赖 Electron，覆盖 Linux 上绝大多数应用。取不到时返回空串（不因此丢掉一个可用入口）。
  */
 export async function getInstalledEditors(
   filePath?: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<EditorInfo[]> {
-  const extension = filePath ? extname(filePath).replace(/^\./u, "").toLowerCase() : "";
-  const desktopIconIndex = await readDesktopIconIndex(env);
-  const editors: EditorInfo[] = [];
+  if (!filePath) return [];
 
-  for (const [id, def] of Object.entries(EDITOR_LAUNCH_DEFS)) {
-    if (def.fileExtensions) {
-      // 文档/媒体应用：只有明确请求了匹配扩展名的文件时才出现。
-      if (!extension || !def.fileExtensions.includes(extension)) continue;
-    }
-    if (!(await resolveExecutable(def.executable, env))) continue;
+  const iconIndex = await readDesktopIconIndex(env);
+  const editors: EditorInfo[] = [];
+  for (const def of LINUX_FILE_APPLICATION_DEFS) {
+    if (!matchesFileApplication(def, filePath)) continue;
+    if (!(await resolveFileApplicationPath(def, env))) continue;
     editors.push({
-      id,
-      name: EDITOR_DISPLAY_NAMES[id] ?? id,
-      iconDataUrl: desktopIconIndex.get(id) ?? "",
+      id: def.id,
+      name: def.name,
+      iconDataUrl: iconIndex.get(def.id) ?? "",
     });
   }
-
   return editors;
 }
 
 /**
- * 建立「图标 data URL」索引。
+ * 建立「文件应用 id → 图标 data URL」索引。
  *
- * 只做目录扫描与文件读取，不启动任何应用。图标缺失时该字段为空串——消费方按需降级，
- * 但不会因为缺图标而丢掉一个可用入口（本服务没有 Electron 的通用文件图标兜底）。
+ * 只做目录扫描与文件读取，不启动任何应用。
  */
 async function readDesktopIconIndex(env: NodeJS.ProcessEnv): Promise<Map<string, string>> {
   const index = new Map<string, string>();
   const dataDirs = xdgDataDirs(env);
   const applicationDirs = dataDirs.map((dir) => join(dir, "applications"));
 
-  for (const id of Object.keys(EDITOR_LAUNCH_DEFS)) {
+  for (const def of LINUX_FILE_APPLICATION_DEFS) {
     let found: string | null = null;
-    for (const name of desktopFileNamesForId(id)) {
+    for (const name of desktopFileNamesForId(def.id)) {
       found = await findDesktopEntry(applicationDirs, `${name}.desktop`);
       if (found) break;
     }
@@ -65,7 +60,7 @@ async function readDesktopIconIndex(env: NodeJS.ProcessEnv): Promise<Map<string,
     const iconName = parseDesktopIcon(found);
     if (!iconName) continue;
     const dataUrl = await resolveIconDataUrl(iconName, dataDirs);
-    if (dataUrl) index.set(id, dataUrl);
+    if (dataUrl) index.set(def.id, dataUrl);
   }
 
   return index;
@@ -79,28 +74,34 @@ function xdgDataDirs(env: NodeJS.ProcessEnv): string[] {
 }
 
 /**
- * 编辑器 id → 候选 .desktop 文件名（不含扩展名）。
+ * 文件应用 id → 候选 .desktop 文件名（不含扩展名）。
  *
- * 同一个应用在不同发行版里的 .desktop 文件名不统一（VS Code 官方包用反向域名
- * `com.microsoft.VSCode.desktop`，Debian 另有 `code.desktop`），因此按顺序逐个找，
- * 命中第一个就用。
+ * 同一个应用在不同发行版里的文件名不统一，按顺序逐个找，命中第一个就用。
  */
 function desktopFileNamesForId(id: string): readonly string[] {
   switch (id) {
-    case "vscode":
-      return ["com.microsoft.VSCode", "code", "visual-studio-code"];
-    case "vscode-insiders":
-      return ["com.microsoft.VSCodeInsiders", "code-insiders"];
-    case "cursor":
-      return ["cursor", "CoCursor"];
-    case "dolphin":
-      return ["org.kde.dolphin", "dolphin"];
-    case "nautilus":
-      return ["org.gnome.Nautilus", "nautilus"];
     case "evince":
       return ["org.gnome.Evince", "evince"];
     case "okular":
       return ["org.kde.okular", "okular"];
+    case "firefox":
+      return ["firefox", "org.mozilla.firefox"];
+    case "wps":
+      return ["wps", "kingsoft-office", "wps-office"];
+    case "wps-presentation":
+      return ["wps-presentation", "wpp"];
+    case "wps-spreadsheets":
+      return ["wps-spreadsheets", "et"];
+    case "libreoffice-writer":
+      return ["libreoffice-writer", "libreoffice-startcenter"];
+    case "libreoffice-impress":
+      return ["libreoffice-impress", "libreoffice-startcenter"];
+    case "libreoffice-calc":
+      return ["libreoffice-calc", "libreoffice-startcenter"];
+    case "vlc":
+      return ["vlc", "org.videolan.VLC"];
+    case "mpv":
+      return ["mpv", "io.mpv.Mpv"];
     default:
       return [id];
   }
@@ -177,23 +178,4 @@ async function encodeIconFile(path: string): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-/** 目录扫描结果缓存（应用安装状态在进程生命周期内不变）。 */
-let cachedEditors: Promise<EditorInfo[]> | null = null;
-
-export function getCachedInstalledEditors(
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<EditorInfo[]> {
-  cachedEditors ??= getInstalledEditors(undefined, env).catch((error) => {
-    // 探测失败不能永久缓存：下一次调用应重试（例如 PATH 在服务重启后才补齐）。
-    cachedEditors = null;
-    throw error;
-  });
-  return cachedEditors;
-}
-
-/** 仅供测试：清空缓存。 */
-export function resetInstalledEditorsCache(): void {
-  cachedEditors = null;
 }

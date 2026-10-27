@@ -48,8 +48,8 @@ describe("createWebPlatform host-native 接入", () => {
       calls.push(`openInEditor:${editorId}:${path}`);
       return { success: true };
     },
-    async getInstalledEditors() {
-      return [{ id: "dolphin", name: "Dolphin", iconDataUrl: "" }];
+    async getInstalledEditors(filePath?: string) {
+      return filePath ? [{ id: "evince", name: "Evince", iconDataUrl: "" }] : [];
     },
     async createTempTextAttachment() {
       return {
@@ -91,7 +91,8 @@ describe("createWebPlatform host-native 接入", () => {
     expect(platform.canOpenLocalFiles).toBe(true);
     expect(await platform.openInFileManager("/tmp")).toEqual({ success: true });
     expect(await platform.openInEditor("dolphin", "/tmp")).toEqual({ success: true });
-    expect(await platform.getInstalledEditors()).toHaveLength(1);
+    expect(await platform.getInstalledEditors()).toEqual([]);
+    expect(await platform.getInstalledEditors("/tmp/a.pdf")).toHaveLength(1);
     expect(await platform.isDockerAvailable()).toBe(true);
     expect(await platform.listDockerContainers()).toHaveLength(1);
     expect(await platform.listSSHConfigAliases()).toEqual([{ alias: "demo" }]);

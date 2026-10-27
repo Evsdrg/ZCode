@@ -28,12 +28,12 @@ describe("host-native service 装配", () => {
   it("转发 openInFileManager / openInEditor", async () => {
     const service = build();
     expect(await service.openInFileManager("/tmp")).toEqual(ok);
-    expect(await service.openInEditor("dolphin", "/tmp")).toEqual(ok);
+    expect(await service.openInEditor("evince", "/tmp/a.pdf")).toEqual(ok);
   });
 
   it("openInEditor 拒绝远端目标：server 就是宿主，不能把远端路径当本机路径打开", async () => {
     const service = build();
-    const result = await service.openInEditor("dolphin", "/tmp", {
+    const result = await service.openInEditor("evince", "/tmp/a.pdf", {
       remoteTarget: { kind: "ssh", host: "example", username: "root" },
     });
     expect(result.success).toBe(false);
