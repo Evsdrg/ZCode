@@ -271,6 +271,8 @@ vi.mock("@/hooks/usePlatform.js", () => ({
   useOptionalPlatform: () => null,
   usePlatform: () => ({
     openInFileManager: openInFileManagerMock,
+    // 桌面端能力：本用例验证的是「路径可以点开」，需要声明支持本机文件管理。
+    canOpenLocalFiles: true,
   }),
 }));
 

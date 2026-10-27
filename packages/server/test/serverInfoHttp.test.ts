@@ -60,6 +60,8 @@ describe("server info HTTP endpoint", () => {
         minCompatibleVersion: expect.any(String),
       },
       migration: { failedPathCount: 0 },
+      // 宿主进程平台由服务端自报，供自部署 WebUI 判定本机桌面能力。
+      hostPlatform: process.platform,
       identity: { osUser: expect.any(String), hostname: expect.any(String) },
       workspaces: [
         {
