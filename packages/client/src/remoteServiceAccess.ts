@@ -54,6 +54,7 @@ import {
   IPromptAttachmentTransferService,
   IWindowControllerService,
   IManagedBrowserMaintenanceService,
+  IHostNativeService,
   IWebRemoteControlRelayService,
   IWindowProjectService,
   IWindowRemoteProjectService,
@@ -134,6 +135,12 @@ export class RemoteServiceAccess implements IServiceAccessor {
   readonly webRemoteControlRelayService?: IWebRemoteControlRelayService;
   /** 自部署：托管浏览器数据清理；代理惰性失败——未注册的 host 上仅在调用时报错。 */
   readonly managedBrowserMaintenanceService: IManagedBrowserMaintenanceService;
+  /**
+   * 自部署：host-native 平台能力。仅 server（entry-http）注册该 channel；
+   * 其它形态不创建代理，web 端按 `hostNativeAvailable` 判定能力存在性。
+   */
+  readonly hostNativeService?: IHostNativeService;
+  readonly hostNativeAvailable: boolean;
 
   constructor(
     channelClient: IChannelClient,
@@ -141,8 +148,16 @@ export class RemoteServiceAccess implements IServiceAccessor {
       sourceServerManagementService?: boolean;
       windowProjectDirectory?: boolean;
       webRemoteControlRelay?: boolean;
+      /** 自部署 server 注册了 host-native 服务时开启；其它形态不创建代理。 */
+      hostNative?: boolean;
     } = {},
   ) {
+    this.hostNativeAvailable = options.hostNative === true;
+    if (options.hostNative) {
+      this.hostNativeService = ProxyChannel.toService<IHostNativeService>(
+        channelClient.getChannel(IHostNativeService.channelName),
+      );
+    }
     if (options.webRemoteControlRelay) {
       this.webRemoteControlRelayService = ProxyChannel.toService<IWebRemoteControlRelayService>(
         channelClient.getChannel(IWebRemoteControlRelayService.channelName),

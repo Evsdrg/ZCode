@@ -123,6 +123,49 @@ import { createWebTaskNotificationState, showWebTaskNotification } from "./webTa
 type RootServices = Parameters<typeof Root>[0]["services"];
 type ServiceMethod = (...args: any[]) => unknown;
 
+/**
+ * 自部署 server 侧 host-native 平台服务在 web 侧的**形状子集**。
+ *
+ * web 包不依赖 `@zcode/services`（那是服务端包），因此这里按需声明用到的签名，
+ * 由 `main.tsx` 的 bootstrap 从 server accessor 取到后注入。未提供的宿主（手机远控）
+ * 保持 `undefined`，`createWebPlatform` 回落到原有失败桩。
+ */
+export interface WebHostNativeService {
+  openInFileManager(path: string): Promise<{ success: boolean; error?: string }>;
+  openInEditor(
+    editorId: string,
+    path: string,
+  ): Promise<{ success: boolean; error?: string }>;
+  getInstalledEditors(filePath?: string): Promise<
+    Array<{ id: string; name: string; iconDataUrl: string }>
+  >;
+  createTempTextAttachment(payload: {
+    text: string;
+    filename?: string;
+  }): Promise<{ filename: string; localPath: string; mimeType: "text/plain"; sizeBytes: number }>;
+  materializeWorkflowArtifactFile(payload: {
+    runId: string;
+    artifactId: string;
+    version: number;
+    fileName: string;
+    bytes: Uint8Array;
+  }): Promise<{ localPath: string }>;
+  listSSHConfigAliases(): Promise<
+    Array<{
+      alias: string;
+      host?: string;
+      port?: number;
+      username?: string;
+      privateKeyPath?: string;
+      source?: string;
+    }>
+  >;
+  isDockerAvailable(): Promise<boolean>;
+  listDockerContainers(): Promise<
+    Array<{ id: string; image: string; name: string; state: string; status: string }>
+  >;
+}
+
 function logWebRemoteControlTaskReadFailure(
   error: unknown,
   context: { taskId: string; workspaceKey: string },
@@ -267,6 +310,8 @@ interface WebBootstrapResult {
   allowOpenWorkspace?: boolean;
   /** 宿主进程平台（来自 server-info.hostPlatform），用于本机能力可见性判定。 */
   hostPlatform?: string;
+  /** 宿主是否注册了 host-native 平台服务（server-info.capabilities.hostNative）。 */
+  hostNative?: boolean;
 }
 
 type WebRemoteControlWorkspaceListUpdateListener = (
@@ -536,11 +581,22 @@ export function createWebPlatform(options?: {
     ): Promise<LoadCliMcpFromUserDirectoryResult>;
     saveMcpToUserDirectory(payload: SaveCliMcpToUserDirectoryRequest): Promise<void>;
   };
+  /**
+   * 自部署：server 侧 host-native 平台服务（IHostNativeService 形状子集，web 不依赖 services 包）。
+   *
+   * 自部署 server 与用户同机同会话，「打开本机文件管理器 / 用本机编辑器打开 / 临时文本附件 /
+   * 产物落地」这类操作与 Electron 无关，可真实执行。未提供时（手机远控等形态）保持原有
+   * 失败桩/缺席语义。
+   */
+  hostNativeService?: WebHostNativeService;
 }): IPlatformService {
   const platformProxy = options?.externalWebRemoteControlProxy;
   const relayStatusSource = options?.relayStatusSource;
   const managedBrowserMaintenance = options?.managedBrowserMaintenance;
   const mcpDirectoryService = options?.mcpDirectoryService;
+  const hostNativeService = options?.hostNativeService;
+  /** 有 host-native 服务时才真正具备「打开本机文件」的能力。 */
+  const canOpenHostNativeFiles = hostNativeService !== undefined;
   // 官方契约里 start/getStatus 都要回填目标 workspace（对话框靠它判定「同一目标」）。
   // 桌面端按窗口持有 target；这里按「最后一次 start 收到的 context」记录，
   // getStatus 用它投影，语义与桌面按窗口一致（自部署是 server 级单实例）。
@@ -550,17 +606,37 @@ export function createWebPlatform(options?: {
 
   return {
     canSelectFilePath: false,
-    canOpenLocalFiles: false,
+    // 自部署：server 就是宿主，可真的打开本机文件/编辑器；手机远控等无 host-native 形态仍为 false。
+    canOpenLocalFiles: canOpenHostNativeFiles,
     // Web 端无法打开系统目录选择框
     selectDirectory: () => Promise.resolve(null),
     // Web 端无法打开系统文件选择框
     selectFile: () => Promise.resolve(null),
     selectFiles: () => Promise.resolve([]),
     getPathForFile: () => null,
-    createTempTextAttachment: (payload) =>
-      platformProxy
-        ? platformProxy.requestPlatformMethod("createTempTextAttachment", payload)
-        : Promise.reject(new Error("Temporary text attachments require a desktop host")),
+    createTempTextAttachment: (payload) => {
+      if (platformProxy) {
+        return platformProxy.requestPlatformMethod("createTempTextAttachment", payload);
+      }
+      // 自部署：server 进程直接写本机临时目录，语义与桌面端一致（原先恒 reject，
+      // 导致 WebUI 粘贴 ≥15 KiB 文本必然报「读取失败」）。
+      if (hostNativeService) {
+        return hostNativeService.createTempTextAttachment(payload);
+      }
+      return Promise.reject(new Error("Temporary text attachments require a desktop host"));
+    },
+    // 可选方法：只有自部署 host-native 形态提供，手机远控/普通 Web 缺席即不出入口。
+    ...(hostNativeService
+      ? {
+          materializeWorkflowArtifactFile: (payload: {
+            runId: string;
+            artifactId: string;
+            version: number;
+            fileName: string;
+            bytes: Uint8Array;
+          }) => hostNativeService.materializeWorkflowArtifactFile(payload),
+        }
+      : {}),
     onRemoteConnectionLog: () => () => {},
     onRemoteSessionClosed: () => () => {},
     // Web 端无多窗口管理
@@ -628,17 +704,17 @@ export function createWebPlatform(options?: {
     isDockerAvailable: () =>
       platformProxy
         ? platformProxy.requestPlatformMethod("isDockerAvailable")
-        : Promise.resolve(false),
+        : (hostNativeService?.isDockerAvailable() ?? Promise.resolve(false)),
     listWSLDistros: () =>
       platformProxy ? platformProxy.requestPlatformMethod("listWSLDistros") : Promise.resolve([]),
     listDockerContainers: () =>
       platformProxy
         ? platformProxy.requestPlatformMethod("listDockerContainers")
-        : Promise.resolve([]),
+        : (hostNativeService?.listDockerContainers() ?? Promise.resolve([])),
     listSSHConfigAliases: () =>
       platformProxy
         ? platformProxy.requestPlatformMethod("listSSHConfigAliases")
-        : Promise.resolve([]),
+        : (hostNativeService?.listSSHConfigAliases() ?? Promise.resolve([])),
     loadMcpFromUserDirectory: (payload) => {
       if (platformProxy) {
         return platformProxy.requestPlatformMethod("loadMcpFromUserDirectory", payload);
@@ -692,8 +768,13 @@ export function createWebPlatform(options?: {
       const communityUrl = await resolveWebCommunityUrl(locale);
       return typeof communityUrl === "string" && communityUrl.length > 0;
     },
-    openInFileManager: () =>
-      Promise.resolve({ success: false, error: "Not supported in web mode" }),
+    // 手机远控（platformProxy）不转发该方法：WebRemoteControlPlatformMethodResultMap 里没有它，
+    // 说明远控协议本来就不提供本机文件管理能力；自部署形态才走 host-native。
+    openInFileManager: (path) =>
+      platformProxy
+        ? Promise.resolve({ success: false, error: "Not supported in web mode" })
+        : (hostNativeService?.openInFileManager(path) ??
+          Promise.resolve({ success: false, error: "Not supported in web mode" })),
     // 原因：openExternalFile 也是**可选**方法（接口注释：普通 Web 平台返回 unsupported，缺席即不支持）。
     // 提供失败桩会让 `platform.openExternalFile !== undefined` / 真值判断误以为能力存在，
     // 使 OpenSplitButton 的「用默认应用打开」与外部链接分支走到必然失败的路径。
@@ -790,8 +871,15 @@ export function createWebPlatform(options?: {
     acknowledgePostUpdateReleaseNotes: () => Promise.resolve(),
     skipUpdateVersion: () => Promise.resolve(),
     quitAndInstallUpdate: () => Promise.resolve(),
-    getInstalledEditors: () => Promise.resolve([]),
-    openInEditor: () => Promise.resolve({ success: false, error: "Not supported in web mode" }),
+    getInstalledEditors: (filePath?: string) =>
+      platformProxy
+        ? Promise.resolve([])
+        : (hostNativeService?.getInstalledEditors(filePath) ?? Promise.resolve([])),
+    openInEditor: (editorId, path) =>
+      platformProxy
+        ? Promise.resolve({ success: false, error: "Not supported in web mode" })
+        : (hostNativeService?.openInEditor(editorId, path) ??
+          Promise.resolve({ success: false, error: "Not supported in web mode" })),
     executeDesktopCommand: () => Promise.resolve(),
     setApplicationLocale: (_locale) => Promise.resolve(),
     setTitleBarTheme: () => Promise.resolve(),
@@ -845,6 +933,7 @@ async function resolveWebBootstrap(): Promise<WebBootstrapResult> {
       ...(typeof serverInfo.hostPlatform === "string"
         ? { hostPlatform: serverInfo.hostPlatform }
         : {}),
+      ...(serverInfo.capabilities?.hostNative === true ? { hostNative: true } : {}),
     };
   } catch {
     return { wsUrl };
@@ -2258,6 +2347,8 @@ async function bootstrapWebApp() {
         if (openedOnce) reconnectController.notifyClosed();
       },
       webRemoteControlRelay: true,
+      // 自部署 server 声明能力时才建 host-native 代理；手机远控/旧 server 保持 undefined。
+      hostNative: bootstrap.hostNative === true,
     });
     openedOnce = true;
     // 页面隐藏时暂停本连接的投递（切标签/锁屏/切后台），恢复可见时回前台档位。
@@ -2277,6 +2368,9 @@ async function bootstrapWebApp() {
       relayStatusSource: services.webRemoteControlRelayService,
       managedBrowserMaintenance: services.managedBrowserMaintenanceService,
       mcpDirectoryService: services.mcpSyncService,
+      ...(services.hostNativeAvailable && services.hostNativeService
+        ? { hostNativeService: services.hostNativeService }
+        : {}),
     });
     document.title = "ZCode - Web + Server";
 

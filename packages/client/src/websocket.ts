@@ -20,6 +20,8 @@ interface WebSocketConnectionOptions {
   onOpenSocket?: (socket: WebSocket) => void;
   /** 仅自部署 server 主连接开启：暴露 webRemoteControlRelayService 代理。 */
   webRemoteControlRelay?: boolean;
+  /** 自部署 server 注册了 host-native 服务时开启对应代理。 */
+  hostNative?: boolean;
 }
 
 function wrapBrowserWebSocket(ws: WebSocket): ISocket {
@@ -99,6 +101,7 @@ export function connectViaWebSocket(
       resolve(
         connectViaProtocol(new SocketProtocol(socket), {
           webRemoteControlRelay: options?.webRemoteControlRelay,
+          hostNative: options?.hostNative,
         }),
       );
     });
@@ -107,7 +110,11 @@ export function connectViaWebSocket(
 
 export function connectViaProtocol(
   protocol: IMessagePassingProtocol,
-  options: { windowProjectDirectory?: boolean; webRemoteControlRelay?: boolean } = {},
+  options: {
+    windowProjectDirectory?: boolean;
+    webRemoteControlRelay?: boolean;
+    hostNative?: boolean;
+  } = {},
 ): IServiceAccessor {
   const client = new ChannelClient(protocol);
   return new RemoteServiceAccess(client, options);

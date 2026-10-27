@@ -68,6 +68,9 @@ async function main(): Promise<void> {
     // 桌面 Host 自带窗口 Controller；自部署缺它会让全局任务列表（useGlobalTaskList）恒空。
     windowController: true,
     arbitraryFileUploads: true,
+    // 自部署 server 与用户同机同会话：「打开本机文件管理器 / 用本机编辑器打开 / 临时文本附件 /
+    // 产物落地」与 Electron 无关，由本进程直接执行（见 docs/specs/selfhost-host-native-platform-service.md）。
+    hostNative: true,
     // 「立即运行」在自部署形态下由本进程直接派发；缺失该 dispatcher 会让 runAutomationNow 抛错。
     onAutomationManualRunRequested: (params) => {
       if (!dispatchRuntime) {
@@ -105,6 +108,8 @@ async function main(): Promise<void> {
     ...(host ? { host } : {}),
     ...(staticRoot ? { staticRoot, spaFallback: true } : {}),
     ...(authToken ? { authToken, authRequired: true } : {}),
+    // 本进程已注册 host-native 服务（见上方 createLocalServices 的 hostNative: true）。
+    hostNative: true,
   });
 
   // 优雅关闭：systemd stop/restart 发 SIGTERM。此前没有任何信号处理，进程被默认

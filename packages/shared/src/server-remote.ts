@@ -45,6 +45,8 @@ export const serverRemoteInfoSchema = z.object({
     virtualProjects: z.literal(true).optional(),
     // 旧 Server 缺少新增 dynamic event，必须先声明能力再订阅，避免异常打进对端读循环。
     processResourceTelemetry: z.boolean().optional(),
+    /** 自部署 server 注册了 host-native 平台服务（见 serverRemoteInfoOutputSchema 同名字段）。 */
+    hostNative: z.literal(true).optional(),
   }),
 });
 
@@ -68,6 +70,12 @@ export const serverRemoteInfoOutputSchema = z
         virtualProjects: z.literal(true).optional(),
         // 输入和严格输出保持同一能力合同，否则新 Server 会在监听前被自身 schema 拒绝。
         processResourceTelemetry: z.boolean().optional(),
+        /**
+         * 自部署 server 注册了 host-native 平台服务（本机文件管理器/编辑器/临时附件/产物落地）。
+         * Web 端据此决定是否为 `createWebPlatform` 注入 host-native 实现；
+         * 未声明时（旧 server / 手机远控）保持原有失败桩语义。
+         */
+        hostNative: z.literal(true).optional(),
       })
       .strict(),
   })

@@ -26,6 +26,7 @@ import type { ICuaPermissionService } from "./cua-permission-broker/cuaPermissio
 import type { IBotsService } from "./bots/bots.js";
 import type { IWebRemoteControlRelayService } from "./web-remote-control/webRemoteControlRelay.js";
 import type { IManagedBrowserMaintenanceService } from "./browser/managedBrowserMaintenanceService.js";
+import type { IHostNativeService } from "./host-native/contract.js";
 import type { IFileWatcherService } from "./fileWatcher/fileWatcher.js";
 import type { IOAuthService } from "./oauth/oauth.js";
 import type {
@@ -88,6 +89,10 @@ export interface IServiceAccessor {
   readonly webRemoteControlRelayService?: IWebRemoteControlRelayService;
   /** 自部署：托管浏览器数据清理；桌面 host 不注册（可选成员）。 */
   readonly managedBrowserMaintenanceService?: IManagedBrowserMaintenanceService;
+  /** 自部署：host-native 平台能力（本机文件管理器/编辑器/临时附件/产物落地）；桌面走 IPC。 */
+  readonly hostNativeService?: IHostNativeService;
+  /** 自部署：host-native 服务是否已注册（accessor 的 hostNativeService 是惰性代理，无法用真值判断）。 */
+  readonly hostNativeAvailable?: boolean;
   readonly fileWatcherService: IFileWatcherService;
   readonly oauthService: IOAuthService;
   /** 当前 Environment 的 Provider 配置与设置视图。 */

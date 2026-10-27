@@ -416,3 +416,8 @@ export {
 } from "./web-remote-control/relayStatusProjection.js";
 export { IManagedBrowserMaintenanceService } from "./browser/managedBrowserMaintenanceService.js";
 export type { IManagedBrowserMaintenanceService as IManagedBrowserMaintenanceServiceType } from "./browser/managedBrowserMaintenanceService.js";
+export { IHostNativeService } from "./host-native/contract.js";
+export type {
+  IHostNativeService as IHostNativeServiceType,
+  HostNativeOpenResult,
+} from "./host-native/contract.js";

@@ -190,6 +190,11 @@ export const ServiceChannels = {
   HighspeedCard: "highspeed-card",
   /** Onboarding 完成记录服务（本地持久化，后续上传服务器） */
   OnboardingRecord: "onboarding-record",
+  /**
+   * 自部署 server 的 host-native 平台能力（本机文件管理器/编辑器/临时附件/产物落地等）。
+   * 仅 entry-http 形态注册；桌面 host 走 Electron IPC，不注册该服务。
+   */
+  HostNative: "host-native",
 } as const;
 
 export type ServiceChannelName = (typeof ServiceChannels)[keyof typeof ServiceChannels];

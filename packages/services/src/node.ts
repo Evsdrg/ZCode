@@ -126,6 +126,8 @@ export { GitCommitMessageGenerator } from "./git/gitCommitMessageGenerator.js";
 export { createGitCheckpointService } from "./git/gitCheckpointService.js";
 export { createSystemService } from "./system/systemService.js";
 export { listSSHConfigAliasesFromLocalConfig } from "./system/sshConfigAlias.js";
+export { IHostNativeService, type IHostNativeService as IHostNativeServiceType } from "./host-native/contract.js";
+export { createHostNativeService } from "./host-native/hostNativeService.js";
 export { createTerminalService } from "./terminal/terminalService.js";
 export {
   createSettingService,
@@ -492,6 +494,8 @@ import { createAllWorkspacesTaskView } from "./session/allWorkspacesTaskView.js"
 import { createLocalWindowControllerService } from "./window-controller/localWindowControllerService.js";
 import { IWindowControllerService } from "./window-controller/windowController.js";
 import { IManagedBrowserMaintenanceService } from "./browser/managedBrowserMaintenanceService.js";
+import { IHostNativeService } from "./host-native/contract.js";
+import { createHostNativeService } from "./host-native/hostNativeService.js";
 import { IWebRemoteControlRelayService } from "./web-remote-control/webRemoteControlRelay.js";
 import { BotsRepo } from "#src/bots/repo.js";
 import {
@@ -1380,6 +1384,13 @@ export function createLocalServices(options: {
   };
   /** Windows desktop-local Host 的 CUA turn 状态投影；其它 authority 会在装配层拒绝。 */
   cuaOperationStateReporter?: CuaOperationStateReporter;
+  /**
+   * 自部署 server 注册 host-native 平台能力（本机文件管理器/编辑器/临时附件/产物落地等）。
+   *
+   * 桌面 Host 不传：桌面有自己的 `registerPlatformIpcHandlers`，两条路径不重叠。
+   * 见 docs/specs/selfhost-host-native-platform-service.md。
+   */
+  hostNative?: boolean;
 }): ServiceCollection {
   const isDesktopAttachedRemote = options?.serviceAuthorityMode === "desktop-attached-remote";
   // host / remote server 以前直接沿用当前进程环境启动后续服务。
@@ -3276,6 +3287,13 @@ export function createLocalServices(options: {
         }
       },
     });
+  }
+  if (options?.hostNative) {
+    // 自部署形态：server 进程本身就在用户桌面会话里（DISPLAY/WAYLAND_DISPLAY/用户 DBus 均可用），
+    // 「打开本机文件管理器 / 用本机编辑器打开」这类操作与 Electron 无关，直接在本进程执行。
+    // 注册后 Web 端 createWebPlatform 会把 IPlatformService 的对应方法转发到这里；
+    // 桌面 Host 不传该开关，仍走 Electron IPC，行为完全不变。
+    services.register(IHostNativeService, createHostNativeService());
   }
   if (options?.webRemoteControlRelay) {
     // resolveServices 经 getter 注入：注册链求值期 services 常量尚未完成初始化。

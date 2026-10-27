@@ -169,6 +169,8 @@ export interface HttpServerOptions {
   spaFallback?: boolean;
   staticRoot?: string;
   workspaces?: ServerRemoteWorkspaceInfo[];
+  /** 自部署：本进程注册了 host-native 平台服务，server-info.capabilities 据此声明能力。 */
+  hostNative?: boolean;
 }
 
 function readTrimmedEnv(name: string): string | undefined {
@@ -215,6 +217,7 @@ function createServerInfo(options: HttpServerOptions): ServerRemoteInfo {
       websocketRpc: true,
       ...(options.virtualProjects ? { virtualProjects: true } : {}),
       processResourceTelemetry: true,
+      ...(options.hostNative ? { hostNative: true as const } : {}),
     },
   });
 }
