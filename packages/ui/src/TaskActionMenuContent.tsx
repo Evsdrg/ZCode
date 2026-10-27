@@ -24,6 +24,7 @@ export function TaskActionMenuContent({
   disablePinTaskAction = false,
   disabledReason,
   hideMobileUnsupportedActions = false,
+  canOpenLocalFileManager = true,
   Item,
   Separator,
   onTogglePinTask,
@@ -58,6 +59,8 @@ export function TaskActionMenuContent({
   disablePinTaskAction?: boolean;
   disabledReason?: string;
   hideMobileUnsupportedActions?: boolean;
+  /** 宿主能否操作本机文件管理器。默认 true 保持既有调用方（均来自桌面壳）行为不变。 */
+  canOpenLocalFileManager?: boolean;
   Item: React.ComponentType<TaskActionMenuItemProps>;
   Separator: React.ComponentType<TaskActionMenuSeparatorProps>;
   onTogglePinTask: () => void;
@@ -122,7 +125,7 @@ export function TaskActionMenuContent({
         {intl.formatMessage({ id: "taskList.markAsUnread" })}
       </Item>
       <Separator />
-      {!hideMobileUnsupportedActions ? (
+      {!hideMobileUnsupportedActions && canOpenLocalFileManager ? (
         <Item
           disabled={disableTaskActions}
           title={disableTaskActions ? disabledReason : undefined}
@@ -171,9 +174,10 @@ export function TaskActionMenuContent({
           {intl.formatMessage({ id: "appHeader.copySessionId" })}
         </Item>
       ) : null}
-      {!hideMobileUnsupportedActions ? (
+      {!hideMobileUnsupportedActions && canOpenLocalFileManager ? (
         /* Bugfix: 手机远控运行在浏览器里，无法可靠打开桌面端 provider 配置文件。
-           这里只在远控移动端隐藏入口，桌面端仍沿用“路径已知即可前往配置”的能力。 */
+           这里只在远控移动端隐藏入口，桌面端仍沿用“路径已知即可前往配置”的能力。
+           自部署浏览器同理：没有本机文件管理器与系统编辑器，入口必然失败，按能力隐藏。 */
         <Item
           disabled={disableTaskActions || providerConfigFile.loading || !providerConfigFile.path}
           title={disableTaskActions ? disabledReason : undefined}

@@ -865,6 +865,7 @@ export function TaskListItemContextMenuContent({
     taskNativeSessionLogFile,
     providerConfigFile,
     fileManagerLabel,
+    canOpenLocalFileManager,
     handleCopyText,
     handleOpenTaskPathInFileManager,
     handleOpenProviderConfig,
@@ -929,6 +930,7 @@ export function TaskListItemContextMenuContent({
       isPinned={isPinned}
       isArchived={isArchived}
       fileManagerLabel={fileManagerLabel}
+      canOpenLocalFileManager={canOpenLocalFileManager}
       taskSessionFile={taskSessionFile}
       activeSessionId={task.taskId}
       taskNativeSessionLogFile={taskNativeSessionLogFile}

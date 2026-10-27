@@ -18,6 +18,7 @@ export function GroupedTaskContextMenuContent({
   groups,
   intl,
   fileManagerLabel,
+  canOpenLocalFileManager = true,
   taskSessionFile,
   taskNativeSessionLogFile,
   providerConfigFile,
@@ -39,6 +40,7 @@ export function GroupedTaskContextMenuContent({
     formatMessage: (desc: { id: string }) => string;
   };
   fileManagerLabel: string;
+  canOpenLocalFileManager?: boolean;
   taskSessionFile: { loading: boolean; path: string | null };
   taskNativeSessionLogFile: { loading: boolean; path: string | null };
   providerConfigFile: { loading: boolean; path: string | null };
@@ -154,19 +156,21 @@ export function GroupedTaskContextMenuContent({
         </ContextMenuItem>
       </SidebarNativeTooltip>
       <ContextMenuSeparator />
-      <SidebarNativeTooltip>
-        <ContextMenuItem
-          disabled={Boolean(disabledReason)}
-          title={disabledReason}
-          onSelect={() => {
-            if (!disabledReason) {
-              onOpenTaskPathInFileManager();
-            }
-          }}
-        >
-          {fileManagerLabel}
-        </ContextMenuItem>
-      </SidebarNativeTooltip>
+      {canOpenLocalFileManager ? (
+        <SidebarNativeTooltip>
+          <ContextMenuItem
+            disabled={Boolean(disabledReason)}
+            title={disabledReason}
+            onSelect={() => {
+              if (!disabledReason) {
+                onOpenTaskPathInFileManager();
+              }
+            }}
+          >
+            {fileManagerLabel}
+          </ContextMenuItem>
+        </SidebarNativeTooltip>
+      ) : null}
       <ContextMenuItem
         onSelect={() =>
           onCopyText(intl.formatMessage({ id: "appHeader.copyPath" }), task.workspacePath)

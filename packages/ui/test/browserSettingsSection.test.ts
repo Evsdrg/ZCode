@@ -39,6 +39,9 @@ const h = vi.hoisted(() => {
     initialize,
     pluginState,
     setEnabled,
+    // 平台能力可逐用例覆盖：自部署 Web 拥有 clearEmbeddedBrowserData，
+    // 而手机远控等形态两者都没有——两种形态的 UI 分支不同，必须分开测。
+    platformOverrides: {} as Record<string, unknown>,
   };
 });
 
@@ -46,6 +49,7 @@ vi.mock("@/hooks/usePlatform.js", () => ({
   usePlatform: () => ({
     importChromeBrowserData: h.importChromeBrowserData,
     clearEmbeddedBrowserData: h.clearEmbeddedBrowserData,
+    ...h.platformOverrides,
   }),
 }));
 vi.mock("@/hooks/useServices.js", () => ({
@@ -92,6 +96,7 @@ beforeEach(() => {
   h.pluginState.loading = false;
   h.pluginState.error = null;
   h.pluginState.togglingPluginId = null;
+  h.platformOverrides = {};
 });
 
 function renderSection(
@@ -272,16 +277,16 @@ describe("BrowserSettingsSection", () => {
   });
 
   it("Web/手机端禁用本机浏览器数据操作并展示桌面端提示", () => {
+    // 两者都不具备的形态（如手机远控）：导入入口不渲染，清理按钮禁用，展示桌面端提示。
+    h.platformOverrides = {
+      importChromeBrowserData: undefined,
+      clearEmbeddedBrowserData: undefined,
+    };
     renderSection(false);
 
     expect(screen.getByText("settings.browser.desktopOnly")).toBeTruthy();
-    expect(
-      (
-        screen.getByRole("button", {
-          name: "settings.browser.import.action",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true);
+    // 能力缺席时入口不渲染，而不是渲染一个禁用按钮——隐藏比禁用更符合“本形态永久不支持”的语义。
+    expect(screen.queryByRole("button", { name: "settings.browser.import.action" })).toBeNull();
     expect(
       (
         screen.getByRole("button", {
@@ -289,5 +294,17 @@ describe("BrowserSettingsSection", () => {
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
+  });
+
+  it("自部署 Web（有托管浏览器清理能力）不展示桌面端提示，只隐藏 Chrome 导入", () => {
+    // 回归：3.16.2 起自部署 Web 实现了 clearEmbeddedBrowserData（关闭托管浏览器会话即清数据），
+    // 不能再因为「非桌面」而把清理能力一起藏掉。导入仍读本机 Chrome profile，必须隐藏。
+    h.platformOverrides = { importChromeBrowserData: undefined };
+    renderSection(false);
+
+    expect(screen.queryByText("settings.browser.desktopOnly")).toBeNull();
+    expect(screen.queryByRole("button", { name: "settings.browser.import.action" })).toBeNull();
+    expect(screen.getByRole("button", { name: "settings.browser.clearCache.action" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "settings.browser.clearAll.action" })).toBeTruthy();
   });
 });

@@ -179,6 +179,9 @@ function ActiveWorkspaceFileSearchEditor({
   // （与 WindowsCaptionMenuButton/ModelTrajectoryPane 先例一致传目录）。
   // 远程 workspace 的规则文件在远端机器，本地文件管理器无法打开，按钮不展示。
   const isLocalWorkspace = !workspaceIdentity?.trim();
+  // 原因：openInFileManager 是 IPlatformService 的必需方法，Web 平台只能提供恒失败桩，
+  // 存在性不能当作能力。canOpenLocalFiles 才是宿主能否打开本机文件管理器的事实来源。
+  const canRevealInFileManager = isLocalWorkspace && platform.canOpenLocalFiles === true;
   const revealTargetReady = loaded?.source === "file";
   const handleReveal = useCallback(async () => {
     const result = await platform.openInFileManager(workspacePath);
@@ -251,7 +254,7 @@ function ActiveWorkspaceFileSearchEditor({
               <Undo2 className="size-4" />
               {intl.formatMessage({ id: "settings.workspaceFileSearch.restoreDefaults" })}
             </Button>
-            {isLocalWorkspace ? (
+            {canRevealInFileManager ? (
               <Button
                 variant="outline"
                 size="sm"

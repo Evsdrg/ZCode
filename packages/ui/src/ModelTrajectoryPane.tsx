@@ -221,7 +221,7 @@ export function ModelTrajectoryPane({
               )}
             </Button>
           ) : null}
-          {sourceDirectory ? (
+          {sourceDirectory && platform.canOpenLocalFiles === true ? (
             <Button
               type="button"
               variant="ghost"

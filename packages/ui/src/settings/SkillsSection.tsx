@@ -114,28 +114,38 @@ function SkillPathDetailField({
   path,
   openLabel,
   onOpen,
+  canOpen = true,
 }: {
   label: string;
   path: string;
   openLabel: string;
   onOpen: () => void;
+  canOpen?: boolean;
 }) {
   return (
     <div className="min-w-0 col-span-2">
       <div className="text-ui-base font-medium text-foreground">{label}</div>
       <div className="mt-1">
-        <Button
-          type="button"
-          variant="link"
-          size="sm"
-          aria-label={openLabel}
-          title={openLabel}
-          className="inline-flex h-auto max-w-full items-baseline gap-1.5 whitespace-normal break-all px-0 py-0 text-left align-baseline font-mono text-ui-base font-normal text-foreground-subtle underline-offset-2 hover:text-foreground hover:underline"
-          onClick={onOpen}
-        >
-          <span>{path}</span>
-          <ExternalLink className="relative top-px size-3 shrink-0" aria-hidden="true" />
-        </Button>
+        {canOpen ? (
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            aria-label={openLabel}
+            title={openLabel}
+            className="inline-flex h-auto max-w-full items-baseline gap-1.5 whitespace-normal break-all px-0 py-0 text-left align-baseline font-mono text-ui-base font-normal text-foreground-subtle underline-offset-2 hover:text-foreground hover:underline"
+            onClick={onOpen}
+          >
+            <span>{path}</span>
+            <ExternalLink className="relative top-px size-3 shrink-0" aria-hidden="true" />
+          </Button>
+        ) : (
+          /* 原因：openInFileManager 是必需方法，Web 平台只能提供恒失败桩（不是 undefined），
+             存在性不能当作能力。不能打开时退化为纯文本路径，而不是渲染一个点了就报错的链接。 */
+          <span className="break-all font-mono text-ui-base font-normal text-foreground-subtle">
+            {path}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -966,6 +976,7 @@ export function SkillsSection({
                     openLabel={intl.formatMessage({
                       id: "settings.skills.detail.openPath",
                     })}
+                    canOpen={platform.canOpenLocalFiles === true}
                     onOpen={() => void openSkillFilePath(detailSkill.path)}
                   />
                 </div>

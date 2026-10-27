@@ -11,6 +11,7 @@ export function TaskListItemContextMenu({
   isPinned,
   isArchived = false,
   fileManagerLabel,
+  canOpenLocalFileManager = true,
   taskSessionFile,
   activeSessionId,
   taskNativeSessionLogFile,
@@ -37,6 +38,7 @@ export function TaskListItemContextMenu({
   isPinned: boolean;
   isArchived?: boolean;
   fileManagerLabel: string;
+  canOpenLocalFileManager?: boolean;
   taskSessionFile: { loading: boolean; path: string | null; exists: boolean };
   activeSessionId?: string | null;
   taskNativeSessionLogFile: {
@@ -68,6 +70,7 @@ export function TaskListItemContextMenu({
         isPinned={isPinned}
         isArchived={isArchived}
         fileManagerLabel={fileManagerLabel}
+        canOpenLocalFileManager={canOpenLocalFileManager}
         taskSessionFile={taskSessionFile}
         activeSessionId={activeSessionId}
         taskNativeSessionLogFile={taskNativeSessionLogFile}

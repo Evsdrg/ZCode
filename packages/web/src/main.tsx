@@ -694,7 +694,10 @@ export function createWebPlatform(options?: {
     },
     openInFileManager: () =>
       Promise.resolve({ success: false, error: "Not supported in web mode" }),
-    openExternalFile: () => Promise.resolve({ success: false, error: "Not supported in web mode" }),
+    // 原因：openExternalFile 也是**可选**方法（接口注释：普通 Web 平台返回 unsupported，缺席即不支持）。
+    // 提供失败桩会让 `platform.openExternalFile !== undefined` / 真值判断误以为能力存在，
+    // 使 OpenSplitButton 的「用默认应用打开」与外部链接分支走到必然失败的路径。
+    // 删除后这些分支自然回退到 openExternal（浏览器新标签）。
     registerOAuthState: (_payload) => {},
     onOAuthCallback: () => () => {},
     onPaymentCallback: () => () => {},
@@ -767,18 +770,10 @@ export function createWebPlatform(options?: {
     onTaskNotificationClick: () => () => {},
     exportLogs: () => Promise.resolve({ success: false, error: "Not supported in web mode" }),
     captureWindowScreenshot: () => Promise.resolve(null),
-    importChromeBrowserData: (_options) =>
-      Promise.resolve({
-        success: false,
-        cookies: { imported: 0, skipped: 0, failed: 0 },
-        localStorage: {
-          originsImported: 0,
-          entriesImported: 0,
-          originsSkipped: 0,
-          originsFailed: 0,
-        },
-        error: "chrome_import_not_supported" as const,
-      }),
+    // 原因：importChromeBrowserData 是 IPlatformService 的**可选**方法，按接口约定「缺席即不支持」。
+    // 之前这里提供了恒返回 chrome_import_not_supported 的失败桩，使 UI 的
+    // `typeof platform.importChromeBrowserData === "function"` 能力判定恒为真，
+    // 浏览器里会渲染一个点了必然失败的「导入浏览器数据」按钮。可选方法不实现就不要写桩。
     // IPlatformService 新增更新提示能力后，Web fallback 没有同步补齐空实现，
     // 根级 typecheck 会直接失败，连与桌面端无关的改动都没法完成校验。
     // Web 端当前没有桌面更新器，先显式 no-op，保持接口完整且不改变现有行为。

@@ -21,6 +21,8 @@ interface TaskListItemContextActionsResult {
   taskNativeSessionLogFile: TaskPathState;
   providerConfigFile: TaskPathState;
   fileManagerLabel: string;
+  /** 宿主能否操作本机文件管理器/默认应用。Web 形态为 false，菜单项据此隐藏。 */
+  canOpenLocalFileManager: boolean;
   handleCopyText: (label: string, value: string | null) => Promise<void>;
   handleOpenTaskPathInFileManager: () => Promise<void>;
   handleOpenProviderConfig: () => Promise<void>;
@@ -242,6 +244,9 @@ export function useTaskListItemContextActions({
     taskNativeSessionLogFile,
     providerConfigFile,
     fileManagerLabel: getFileManagerLabel(intl),
+    // 原因：openInFileManager / openInEditor 是 IPlatformService 的**必需**方法，Web 平台为了满足
+    // 类型只能提供恒失败桩，所以不能用方法存在性判能力；canOpenLocalFiles 才是唯一事实来源。
+    canOpenLocalFileManager: platform.canOpenLocalFiles === true,
     handleCopyText,
     handleOpenTaskPathInFileManager,
     handleOpenProviderConfig,

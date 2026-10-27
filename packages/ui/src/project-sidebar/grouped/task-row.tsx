@@ -250,6 +250,7 @@ function GroupedTaskRowComponent({
     taskNativeSessionLogFile,
     providerConfigFile,
     fileManagerLabel,
+    canOpenLocalFileManager,
     handleCopyText,
     handleOpenTaskPathInFileManager,
     handleOpenProviderConfig,
@@ -508,6 +509,7 @@ function GroupedTaskRowComponent({
           groups={groups}
           intl={intl}
           fileManagerLabel={fileManagerLabel}
+          canOpenLocalFileManager={canOpenLocalFileManager}
           taskSessionFile={taskSessionFile}
           taskNativeSessionLogFile={taskNativeSessionLogFile}
           providerConfigFile={providerConfigFile}

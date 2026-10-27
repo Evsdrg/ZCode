@@ -36,10 +36,12 @@ export function supportsLocalMacCuaPermissionOnboarding(
  * Windows 本地桌面的 CUA 能力门（与上面的 mac 门对称）。
  *
  * Windows 无 TCC，不读 Helper 权限，因此不能用 openCuaPermissionOnboarding 当 capability 判据；
- * 改用 executeDesktopCommand——它只在 desktop preload 注入，能把 Windows 上的普通浏览器排除掉。
+ * 原来用 executeDesktopCommand 的存在性，但它已从可选方法变为 IPlatformService 的**必需**方法，
+ * 且 createWebPlatform 必须提供一个空实现——`typeof === "function"` 恒为真，会把 Windows 上的
+ * 普通浏览器误判成桌面。改用 canOpenLocalFiles（只有 desktopPlatform 设为 true）。
  */
 export function supportsLocalWindowsCuaEntry(
-  platform: Pick<IPlatformService, "executeDesktopCommand"> | null | undefined,
+  platform: Pick<IPlatformService, "canOpenLocalFiles"> | null | undefined,
 ): boolean {
-  return isWindowsDesktopUserAgent() && typeof platform?.executeDesktopCommand === "function";
+  return isWindowsDesktopUserAgent() && platform?.canOpenLocalFiles === true;
 }
