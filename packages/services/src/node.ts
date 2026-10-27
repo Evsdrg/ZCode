@@ -126,8 +126,12 @@ export { GitCommitMessageGenerator } from "./git/gitCommitMessageGenerator.js";
 export { createGitCheckpointService } from "./git/gitCheckpointService.js";
 export { createSystemService } from "./system/systemService.js";
 export { listSSHConfigAliasesFromLocalConfig } from "./system/sshConfigAlias.js";
-export { IHostNativeService, type IHostNativeService as IHostNativeServiceType } from "./host-native/contract.js";
-export { createHostNativeService } from "./host-native/hostNativeService.js";
+export {
+  IHostNativeService,
+  type IHostNativeService as IHostNativeServiceType,
+  createHostNativeService,
+  type CreateHostNativeServiceOptions,
+} from "./host-native/index.js";
 export { createTerminalService } from "./terminal/terminalService.js";
 export {
   createSettingService,
@@ -494,8 +498,8 @@ import { createAllWorkspacesTaskView } from "./session/allWorkspacesTaskView.js"
 import { createLocalWindowControllerService } from "./window-controller/localWindowControllerService.js";
 import { IWindowControllerService } from "./window-controller/windowController.js";
 import { IManagedBrowserMaintenanceService } from "./browser/managedBrowserMaintenanceService.js";
-import { IHostNativeService } from "./host-native/contract.js";
-import { createHostNativeService } from "./host-native/hostNativeService.js";
+// 跨模块边界必须走 host-native 的公开入口（contract/index），不深导入 adapters 实现。
+import { createHostNativeService, IHostNativeService } from "./host-native/index.js";
 import { IWebRemoteControlRelayService } from "./web-remote-control/webRemoteControlRelay.js";
 import { BotsRepo } from "#src/bots/repo.js";
 import {

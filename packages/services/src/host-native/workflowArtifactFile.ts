@@ -100,9 +100,14 @@ function sanitizeSegment(value: string): string {
 
 function sanitizeFileName(fileName: string, artifactId: string): string {
   const leaf = fileName.split(/[\\/]/u).at(-1) ?? "";
-  let cleaned = leaf
-    // oxlint-disable-next-line no-control-regex -- 控制字符正是要替换掉的东西。
-    .replace(/[<>:"|?*\u0000-\u001f]/gu, "_")
+  // 控制字符正是要替换掉的东西：用显式字符码判断，避免正则里出现控制字符范围。
+  let cleaned = Array.from(leaf)
+    .map((char) => {
+      const code = char.codePointAt(0) ?? 0;
+      if (code <= 0x1f || '<>:"|?*'.includes(char)) return "_";
+      return char;
+    })
+    .join("")
     .trim()
     .replace(/^\.+/u, "")
     .replace(/[. ]+$/u, "");

@@ -253,6 +253,18 @@ modules:
     publicEntrypoints: [packages/shared/src/gen-ui/index.ts, packages/shared/src/gen-ui/contract.ts]
     layers: { domain: "." }
     owner: conversation
+  # host-native：自部署 WebUI 的平台能力下沉模块（新增目录，由 architecture:adopt 登记；
+  # 手工保持原 YAML 排版，不整体重排）。
+  - id: host-native
+    roots: [packages/services/src/host-native]
+    managed: true
+    requires: [services, shared]
+    publicEntrypoints:
+      - packages/services/src/host-native/index.ts
+      - packages/services/src/host-native/contract.ts
+    layers: { adapters: . }
+    owner: conversation
+
   - id: gen-ui-service
     roots: [packages/services/src/gen-ui]
     managed: true
@@ -989,6 +1001,16 @@ exceptions:
       - apps/zcode-cli/packages/adapters/src/model/endpoint-routing-edition/index.ts
       - apps/zcode-cli/packages/adapters/src/model/provider-endpoint-routing-options.ts
     reason: Existing upstream routing assembly files gain the endpoint origin and injected JWT reader; adopting the full CLI model adapter directory needs a separate module boundary refactor.
+  - id: selfhost-web-platform-capability-gate-ui-edits
+    rule: unmanaged-new-file
+    paths: [packages/ui/src/settings/WorkspaceFileSearchSection.tsx]
+    reason: 上游快照准入路径上的存量文件（upstream-snapshot introduced 列表内），本轮只在既有「打开文件所在位置」入口加上 canOpenLocalFiles 能力门控（一处条件判断），不改模块边界；该能力判据已在 platformCapabilityGates.test.ts 覆盖，接管整个 settings 目录不在本次修复范围内。
+  - id: selfhost-cua-permission-broker-files
+    rule: unmanaged-new-file
+    paths:
+      - packages/services/src/cua-permission-broker/linuxCuaHelper.ts
+      - packages/services/src/cua-permission-broker/linuxCuaPermissionStatus.ts
+    reason: Linux CUA 的 Helper 启动/探活与权限状态探测；复用既有 cua-permission-broker 目录内的 ICuaPermissionService 契约与 node.ts 装配点，不接管整个既有目录（该目录另有 11 个存量文件属于上游）。
   - id: workflow-mode-user-choice-unmanaged-edit
     rule: unmanaged-new-file
     paths:

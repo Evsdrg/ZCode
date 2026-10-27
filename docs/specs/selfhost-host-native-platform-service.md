@@ -212,3 +212,24 @@ GUI 打开（`openInFileManager` / `openInEditor` 的成功分支）**未在用�
 避免弹出窗口干扰正在进行的会议：已核对前置条件（`xdg-open` / `gio` / `dolphin` / `code` 均存在、
 server 进程带 `DISPLAY`/`WAYLAND_DISPLAY`、`hasGraphicalSession()` 为真），
 并在独立进程里跑通了同一份实现的选择逻辑。首次真实点击会在下一次用户操作时自然验证。
+
+
+## 架构治理
+
+本模块按 `architecture:adopt` 登记为 managed 模块（`architecture-policy.yaml`）：
+
+```
+- id: host-native
+  roots: [packages/services/src/host-native]
+  managed: true
+  requires: [services, shared]
+  publicEntrypoints:
+    - packages/services/src/host-native/index.ts
+    - packages/services/src/host-native/contract.ts
+  layers: { adapters: . }
+```
+
+五件套齐全：`module.ts` / `contract.ts` / `contract.example.ts` / `contract.test.ts` / `CONTRACT.md`。
+`packages/services/src/node.ts` 只从 `./host-native/index.js` 公开入口导入，不深导入 adapters 实现。
+
+`pnpm architecture:check --changed` 结果：`violations: 0`。
