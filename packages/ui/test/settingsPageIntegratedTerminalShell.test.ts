@@ -378,6 +378,8 @@ describe("SettingsPage integrated terminal shell", () => {
         isDesktop: false,
         isMacDesktop: false,
         isWindowsDesktop: true,
+        // hostPlatform 未传时按 linux 之外处理（自部署 WebUI 才由 server-info 下发）。
+        isLinuxDesktop: false,
       },
     ]);
     expect(html).toContain('aria-label="settings.navLabel"');
