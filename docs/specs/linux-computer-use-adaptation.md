@@ -922,3 +922,97 @@ scroll ✅  element_scroll ✅  drag ✅  key ✅  type ✅  hold_key ✅
 hold_key_to_app ✅  cancel_input_holds ✅  screenshot ✅  permission_status ✅
 ping ✅  未知方法正确 fail-closed ✅
 ```
+
+## 22. 截图回传链路修复与两处坐标系契约缺陷（2026-10-28）
+
+第 21 节验证的是**直连 helper socket**。本节补做**真实模型链路**
+（`node-repl-host/dist/mcp/server.js` → `PermissionBrokerClient` → helper）的验证，
+发现并修复了四个此前完全没暴露的缺陷——它们只在经过闭源侧的严格校验时才会显形。
+
+### 22.1 `bounds: null` 会让整次 `capture_app` 失败（P0）
+
+闭源 `asElements()` 对每个元素调用 `asBounds2`：
+
+```js
+if (!Array.isArray(value) || value.length !== 4) throw new Error(...)
+```
+
+而 helper 原先对「AT-SPI `INT_MIN`（位置未知）/ 零尺寸」返回 `bounds: null`。
+实测六个应用全部命中（Firefox 74/393、VirtualBox 80/305、krunner 18/24 …），
+**任意一个 null 就让整次 `capture_app` 抛错，模型连树都拿不到**。
+
+修复：无法定位的元素返回 `[0,0,0,0]`。闭源侧所有消费点都以 `w > 0 && h > 0`
+判定可用性（`elementPriority` 扣分、`resolveElement` 不给 point），零尺寸天然安全。
+
+### 22.2 `window.bounds` 与 `elements[].bounds` 坐标系不一致（P0）
+
+`walk()` 已把元素 bounds 用 `offset = kwin.client - atspi_window_origin` 校正成
+**屏幕逻辑坐标**，但 `window.bounds` 一直原样透传 AT-SPI 的**窗口局部坐标**。
+
+闭源 `visibleElementCenter()` 会用 `window.bounds` 裁剪元素 bounds 来判定元素可见性：
+
+```js
+const left = Math.max(ex, wx), top = Math.max(ey, wy);
+if (right <= left || bottom <= top) return undefined;   // → element_no_native_no_bounds
+```
+
+实测 KWrite（窗口在屏幕 (1244,654)，AT-SPI 报 [0,0,640,480]）：
+**452/452 个元素全部被判为窗口外**，所有元素坐标点击都不可能成功。
+修复后同一窗口只剩 12/452 不可见（真正在窗口外的元素）。
+
+修复：`window.bounds` 加上同一 `offset`。`list_windows` 同样处理（此前它也是原始坐标）。
+
+### 22.3 `capture_app` 完全忽略 `include_screenshot`
+
+闭源从不调用 helper 的独立 `screenshot` 方法（枚举 `broker.call` 的方法字面量确认：
+只有 12 个方法，无 `screenshot`）。截图的唯一入口是
+`get_app_state({include_screenshot:true})` → `capture_app` 附带 `raw.screenshot.data`。
+
+helper 原先直接丢弃该参数。现已实现：
+
+- 读 `params.include_screenshot`；
+- 抓整屏 → 按目标窗口 `clientGeometry` 裁剪（GStreamer `videocrop`，端到端自测；
+  `videocrop` 的裁剪量取整必须保证「裁剪后尺寸 == round(逻辑尺寸 × scale)」，否则
+  640x480@1.25 会得到 800x599）；
+- 返回 `screenshot{data,format}`、`pointer{x,y,width,height,unit}`（描述**裁剪后 raster
+  对应的屏幕逻辑矩形**，不是光标位置）、`display{id,topology_fingerprint}`、
+  `coordinate_contract: "frame_pixel_projection_v1"`。
+
+实测像素级正确：全屏 3840×2160 裁剪 (1555,818)-(2355,1418) 与 helper 输出
+**逐像素完全一致（最大差 0）**。
+
+### 22.4 截图必须处理「窗口不可见」
+
+Wayland portal 的 ScreenCast 是**整屏流**，没有按窗口捕获。裁剪窗口矩形的前提是
+目标窗口真的渲染在那里：
+
+- **被遮挡**：实测 KWrite 被 Firefox 覆盖时，剪出来的 800×600 是一张白底+鼠标
+  （那块区域属于 Firefox 的页面空白）。修复：截图前临时 `keepAbove=true` 并激活目标
+  窗口，截图后只复位 `keepAbove`（不动焦点，避免抢用户正在操作的窗口）。
+- **最小化**：compositor 不为最小化窗口渲染任何像素，剪出来的是它背后的桌面壁纸。
+  修复：直接从 KWin 读 `w.minimized`，最小化时**报错**而不是返回一张看似正常的图。
+
+### 22.5 `pipewiresrc` 无 `num-buffers` 导致写满 `/tmp`
+
+`pipewiresrc` 是实时流，不限制缓冲区数就会无限出帧，`pngenc ! filesink` 一直追写
+同一个文件。实测单个临时 PNG 涨到 **197MB**，最终把 11GB 的 `/tmp`（tmpfs）写到
+「Error while writing to file descriptor: 超出磁盘配额」，此后所有截图都失败。
+
+修复：`num-buffers=15` + `multifilesink`，取最后一帧。取 15 而不是 1 是因为
+KWin ScreenCast 建立后的**前几帧是空白/未渲染**的（`num-buffers=1` 实测得到纯白
+画面 + 鼠标指针）；15 帧在 30fps 下约 0.5 秒。
+
+### 22.6 验证
+
+生产 socket（`/tmp/zcode-cua-linux-helper-1000.sock`）+ 真实 MCP 链路
+（`node-repl-host` 的 `js` 工具 + 官方 `computer-use-client.mjs` 引导）：
+
+```
+listApps=6  getAXState len=16542  elements=393  sizedElements=319
+getScreenshot bytes=43420  getAXStateAndScreenshot tree=16542 shot=43400
+image_ref actionable=true  image_size={width:1280,height:720}
+structuredContent.state_id=s-5  has_image=true
+```
+
+截图内容人工核对为 Firefox 窗口真实画面（25364 个唯一色，非空白/非壁纸）。
+连续 5 次抓帧耗时 0.84–1.5 秒，`/tmp` 无残留 `zcode-cua-frame-*` 文件。

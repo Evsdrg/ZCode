@@ -222,10 +222,16 @@ async fn walk(
     // 腾讯会议/VirtualBox 给真实屏幕坐标，rustdesk/phone-cam-manager/kdialog/consoLe 给
     // (0,0) 原点局部坐标）。统一用 `atspi + (kwin_client_origin - atspi_window_origin)`
     // 换算：两种情况都成立（前者偏移为 0，后者偏移为窗口真实位置）。
-    // AT-SPI 用 INT_MIN 表示「位置未知」。这类元素不可按坐标点击，bounds 置 null，
-    // 让 agent 明确知道无法用坐标定位（仍可用元素级动作）。
     // AT-SPI 用 INT_MIN 表示「位置未知」，另有元素报 0 尺寸/极小负值（不可见装饰）。
-    // 这些元素无法按坐标点击，bounds 置 null，让 agent 明确知道要用元素级动作。
+    // 这类元素无法按坐标点击。
+    //
+    // 【契约约束】bounds 必须是 4 个有限数字的数组，**不能是 null**：闭源
+    // node-repl-host 的 asElements() 对每个元素调用 asBounds2()，后者对非 4 数字数组
+    // 直接 throw（"capture_app element[i].bounds must be a 4-number bounds array"），
+    // 一个 null 就会让整次 capture_app 失败、模型连树都拿不到。
+    // 因此用 [0,0,0,0] 作为「无可用 bounds」的哨兵：闭源侧所有消费点都以
+    // `w > 0 && h > 0` 判定可用性（elementPriority 扣分、resolveElement 不给 point），
+    // 零尺寸天然不会被当成可点击区域。
     const ATSPI_COORD_UNKNOWN: i32 = i32::MIN;
     let bounds = match ext {
         Some((x, y, w, h))
@@ -243,7 +249,7 @@ async fn walk(
                 h as f64
             ])
         }
-        _ => Value::Null,
+        _ => json!([0.0, 0.0, 0.0, 0.0]),
     };
     let value = timed(get_text_value(conn, bname, path)).await.flatten();
     let lower = role.to_lowercase();
@@ -377,10 +383,68 @@ async fn find_window(conn: &Conn, app: &App) -> (Value, Value) {
     (wtitle, wbounds)
 }
 
+/// 用 GStreamer 在本地裁剪一张 PNG（不经过 portal，不重建会话）。
+/// crop = (left, top, right, bottom)，单位是 raster 像素。
+fn crop_png(png: &[u8], crop: (i32, i32, i32, i32)) -> Result<Vec<u8>, String> {
+    let (l, t, r, b) = crop;
+    if l <= 0 && t <= 0 && r <= 0 && b <= 0 {
+        return Ok(png.to_vec());
+    }
+    let uniq = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let dir = std::env::temp_dir();
+    let src = dir.join(format!("zcode-cua-crop-in-{uniq}.png"));
+    let dst = dir.join(format!("zcode-cua-crop-out-{uniq}.png"));
+    std::fs::write(&src, png).map_err(|e| format!("write temp png: {e}"))?;
+    let out = std::process::Command::new("gst-launch-1.0")
+        // 注意：gst-launch-1.0 的元素名与属性必须是**独立 argv**。合并成
+        // "filesrc location=x" 一个参数会让它报 "错误管道: 语法错误"——shell 里能跑
+        // 是因为 shell 先分词了，Command::args 不会。
+        .args([
+            "-q",
+            "filesrc",
+            &format!("location={}", src.display()),
+            "!",
+            "pngdec",
+            "!",
+            "videocrop",
+            &format!("left={l}"),
+            &format!("top={t}"),
+            &format!("right={r}"),
+            &format!("bottom={b}"),
+            "!",
+            "pngenc",
+            "!",
+            "filesink",
+            &format!("location={}", dst.display()),
+        ])
+        .output()
+        .map_err(|e| format!("spawn gst-launch-1.0 (crop): {e}"))?;
+    let res = if out.status.success() {
+        std::fs::read(&dst).map_err(|e| format!("read cropped png: {e}"))
+    } else {
+        Err(format!(
+            "gst crop failed ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        ))
+    };
+    let _ = std::fs::remove_file(&src);
+    let _ = std::fs::remove_file(&dst);
+    res
+}
+
 async fn capture_app(
     ac: &AccessibilityConnection,
     apps: &[App],
     app_ref: &Value,
+    include_screenshot: bool,
 ) -> Result<Value, String> {
     let conn = ac.connection();
     let i = find_app(apps, app_ref).ok_or_else(|| "app not found".to_string())?;
@@ -398,7 +462,7 @@ async fn capture_app(
     let mut geom_source = "none";
     let all_geoms = kwin::list_window_geometries().await;
     if let Some(g) = all_geoms
-        .into_iter()
+        .iter()
         .find(|g| g.pid == a.pid)
     {
         // AT-SPI 报的窗口 extents（若为 (0,0) 则视为局部坐标）
@@ -418,6 +482,65 @@ async fn capture_app(
         lines: Vec::new(),
     };
     walk(conn, &a.bname, &a.path, 0, a.pid, wb, offset, &mut ctx).await;
+
+    // window.bounds 必须和 elements[].bounds 用**同一个坐标系**。
+    // 闭源 node-repl-host 的 visibleElementCenter() 用 window.bounds 裁剪元素 bounds
+    // 来判定「元素是否在窗口内可见」：若 window 是 AT-SPI 原始的窗口局部坐标
+    // （如 [0,0,640,480]）而元素已校正为屏幕坐标（如 [1244,654,...]），所有元素都
+    // 会被判为窗口外 → TargetResolveError("element_no_native_no_bounds")。
+    // 故 window.bounds 也必须加上同一偏移。
+    let corrected_wbounds = if geom_source == "none" {
+        wbounds.clone()
+    } else {
+        json!([
+            wbounds[0].as_f64().unwrap_or(0.0) + offset.0,
+            wbounds[1].as_f64().unwrap_or(0.0) + offset.1,
+            wbounds[2].as_f64().unwrap_or(0.0),
+            wbounds[3].as_f64().unwrap_or(0.0),
+        ])
+    };
+
+    // 截图（可选）：闭源 node-repl-host 的 get_app_state({include_screenshot:true}) 走这条路，
+    // 它从不调独立的 screenshot 方法；它只读 capture_app 返回值里的 raw.screenshot.data。
+    //
+    // 坐标契约（frame_pixel_projection_v1）：repl-host 用 pointer + source 做
+    //   screen = pointer.x + (rasterX / rasterW) * pointer.width
+    // 因此 pointer 必须描述「raster 对应的屏幕逻辑矩形」，而不是指针当前位置。
+    let mut screenshot = Value::Null;
+    let mut pointer = Value::Null;
+    let mut display = Value::Null;
+    let mut advisory = String::new();
+    if include_screenshot {
+        // 整屏抓帧 + 裁剪必须先确保目标窗口真的可见（见 kwin::raise_window_for_capture
+        // 的注释：被遮挡时剪出来的是遮挡者）。截图后只复位 keepAbove，不动焦点。
+        let raised = kwin::raise_window_for_capture(a.pid).await;
+        let frame_result = capture_window_frame(a.pid, &all_geoms, wbounds.clone()).await;
+        if raised == Some(true) {
+            kwin::restore_after_capture(a.pid).await;
+        }
+        match frame_result {
+            Ok(frame) => {
+                screenshot = json!({
+                    "data": base64_encode(&frame.png),
+                    "format": "png",
+                });
+                pointer = json!({
+                    "x": frame.rect.0, "y": frame.rect.1,
+                    "width": frame.rect.2, "height": frame.rect.3,
+                    "unit": "point"
+                });
+                display = json!({
+                    "id": 0,
+                    "topology_fingerprint": frame.fingerprint,
+                });
+            }
+            // 截图失败不拖垮整次观察：树是独立的、仍完整返回。
+            Err(e) => {
+                advisory = format!("\n[screenshot unavailable: {e}]");
+            }
+        }
+    }
+
     Ok(json!({
         "snapshot_mode": "full",
         // 坐标空间：bounds 已按 KWin clientGeometry 校正为【屏幕逻辑坐标】（可直接用于
@@ -429,19 +552,103 @@ async fn capture_app(
         // elements[].bounds 是【逻辑像素】的屏幕坐标，可直接用于 click/scroll 的 point。
         // 与 screenshot 的关系：截图 raster 坐标 ÷ screenshot.scale = 逻辑坐标。
         "bounds_note": "bounds are logical-pixel screen coordinates usable directly as click points; for coordinates measured on a screenshot, divide by screenshot scale (e.g. 1.25) first",
+        // 仅在真的附带可用截图时声明坐标契约；否则 repl-host 会把帧标为
+        // capture_geometry_unverified 并扣留 raster。
+        "coordinate_contract": if screenshot.is_null() { Value::Null } else { json!("frame_pixel_projection_v1") },
+        "screenshot": screenshot,
+        "pointer": pointer,
+        "display": display,
         "app": {
             "bundle_id": Value::Null, "pid": a.pid, "name": a.name,
             "aumid": Value::Null, "executable_path": Value::Null, "icon_png": Value::Null
         },
-        "window": {"title": wtitle, "bounds": wbounds, "window_id": Value::Null},
+        "window": {"title": wtitle, "bounds": corrected_wbounds, "window_id": Value::Null},
         "elements": ctx.elements,
-        "content": format!("App: {} (pid {})\n{}", a.name, a.pid, ctx.lines.join("\n")),
+        "content": format!("App: {} (pid {})\n{}{}", a.name, a.pid, ctx.lines.join("\n"), advisory),
     }))
+}
+
+struct WindowFrame {
+    png: Vec<u8>,
+    /// 屏幕逻辑坐标下的矩形 (x, y, w, h)，对应裁剪后的 raster。
+    rect: (f64, f64, f64, f64),
+    fingerprint: String,
+}
+
+/// 抓整屏后按目标窗口的 clientGeometry 裁剪，返回该窗口的 PNG 与屏幕逻辑矩形。
+async fn capture_window_frame(
+    pid: i64,
+    geoms: &[kwin::WindowGeometry],
+    atspi_window_bounds: Value,
+) -> Result<WindowFrame, String> {
+    let (lw, lh) = portal::screen_logical_size()
+        .await
+        .map_err(|e| format!("screen size: {e}"))?;
+    let full = portal::capture_png()
+        .await
+        .map_err(|e| format!("capture: {e}"))?;
+    let (rw, rh) = png_raster_size(&full).ok_or_else(|| "capture returned a non-PNG".to_string())?;
+    if lw <= 0.0 || lh <= 0.0 {
+        return Err("portal reported a zero logical screen size".into());
+    }
+    let scale = rw as f64 / lw;
+    // 优先用 KWin 的 clientGeometry（真实屏幕逻辑坐标）；拿不到时退回 AT-SPI 窗口 extents。
+    // 最小化窗口在 compositor 里不产生像素，整屏抓帧里那个矩形是它背后的内容。
+    // 此时必须如实报告不可用，而不是把桌面壁纸当作该窗口的截图交给模型。
+    if let Some(g) = geoms.iter().find(|g| g.pid == pid) {
+        if g.minimized {
+            return Err("window is minimized; the compositor renders no pixels for it".into());
+        }
+    }
+    let rect = match geoms.iter().find(|g| g.pid == pid) {
+        Some(g) => g.client,
+        None => {
+            let v: Vec<f64> = (0..4)
+                .map(|i| atspi_window_bounds[i].as_f64().unwrap_or(0.0))
+                .collect();
+            (v[0], v[1], v[2], v[3])
+        }
+    };
+    let (wx, wy, ww, wh) = rect;
+    if ww <= 0.0 || wh <= 0.0 {
+        return Err("window has no usable client geometry".into());
+    }
+    // 裁剪到屏幕内
+    let x0 = wx.max(0.0);
+    let y0 = wy.max(0.0);
+    let x1 = (wx + ww).min(lw);
+    let y1 = (wy + wh).min(lh);
+    if x1 - x0 < 1.0 || y1 - y0 < 1.0 {
+        return Err("window is outside the captured screen".into());
+    }
+    // 裁剪量取整必须保证「裁剪后尺寸 == round(逻辑尺寸 × scale)」。若 left/top 与
+    // right/bottom 各自独立四舍五入，两个 .5 可能同时进位，导致宽/高差 1 像素
+    // （实测 640x480@1.25 得到 800x599 而不是 800x600）。repl-host 用
+    // pointer.width/height 描述 raster 对应的屏幕矩形，尺寸必须精确。
+    let left = (x0 * scale).round() as i32;
+    let top = (y0 * scale).round() as i32;
+    let want_w = ((x1 - x0) * scale).round().max(1.0) as i32;
+    let want_h = ((y1 - y0) * scale).round().max(1.0) as i32;
+    let right = (rw as i32 - left - want_w).max(0);
+    let bottom = (rh as i32 - top - want_h).max(0);
+    // 防止四舍五入把整张图裁没
+    if left + right >= rw as i32 || top + bottom >= rh as i32 {
+        return Err("crop leaves no pixels".into());
+    }
+    let png = crop_png(&full, (left, top, right, bottom))?;
+    Ok(WindowFrame {
+        png,
+        rect: (x0, y0, x1 - x0, y1 - y0),
+        fingerprint: format!("linux-portal:{lw}x{lh}@{scale:.3}"),
+    })
 }
 
 async fn list_windows(ac: &AccessibilityConnection, apps: &[App], app_ref: &Value) -> Value {
     let conn = ac.connection();
     let mut items = Vec::new();
+    // 与 capture_app 同一套校正：list_windows 的 bounds 也必须是屏幕逻辑坐标，
+    // 否则调用方拿它和 capture_app 的元素 bounds 对比时会得到不一致的两个坐标系。
+    let geoms = kwin::list_window_geometries().await;
     let targets: Vec<&App> = if let Some(idx) = find_app(apps, app_ref) {
         vec![&apps[idx]]
     } else {
@@ -459,10 +666,22 @@ async fn list_windows(ac: &AccessibilityConnection, apps: &[App], app_ref: &Valu
                         let r = kap.get_role_name().await.unwrap_or_default().to_lowercase();
                         if r.contains("frame") || r.contains("window") || r.contains("dialog") {
                             let t = kap.name().await.unwrap_or_default();
-                            let b = get_extents(conn, &bn, &kp)
-                                .await
-                                .map(|(x, y, w, h)| json!([x, y, w, h]))
-                                .unwrap_or(json!([0, 0, 0, 0]));
+                            let raw_ext = get_extents(conn, &bn, &kp).await;
+                            let b = match raw_ext {
+                                Some((x, y, w, h)) => {
+                                    let (mut ox, mut oy) = (0.0f64, 0.0f64);
+                                    if let Some(g) = geoms.iter().find(|g| g.pid == a.pid) {
+                                        if (w as f64 - g.client.2).abs() <= 2.0
+                                            && (h as f64 - g.client.3).abs() <= 2.0
+                                        {
+                                            ox = g.client.0 - x as f64;
+                                            oy = g.client.1 - y as f64;
+                                        }
+                                    }
+                                    json!([x as f64 + ox, y as f64 + oy, w as f64, h as f64])
+                                }
+                                None => json!([0, 0, 0, 0]),
+                            };
                             items.push(json!({
                                 "index": index, "window_id": Value::Null, "title": t,
                                 "bounds": b, "main": index == 0, "focused": false, "onscreen": true,
@@ -1029,8 +1248,12 @@ async fn dispatch(method: &str, params: &Value, ac: &AccessibilityConnection) ->
         },
         "capture_app" => {
             let app_ref = params.get("app_ref").cloned().unwrap_or(json!({}));
+            let include_screenshot = params
+                .get("include_screenshot")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             match list_apps(ac).await {
-                Ok(apps) => match capture_app(ac, &apps, &app_ref).await {
+                Ok(apps) => match capture_app(ac, &apps, &app_ref, include_screenshot).await {
                     Ok(v) => json!({"ok": true, "result": v}),
                     Err(e) => json!({"ok": false, "error": e}),
                 },

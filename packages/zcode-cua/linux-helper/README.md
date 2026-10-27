@@ -33,7 +33,7 @@ NDJSON，每行一条消息：
 |---|---|---|
 | `authenticate` / `broker_info` / `ping` | 握手 / 探活 | — |
 | `list_applications` | 裸 JSON 数组 `[{name,pid,active,bundle_id,aumid}]` | AT-SPI |
-| `capture_app` | `{snapshot_mode,app,window,elements[],content,coordinate_space,coordinate_source,bounds_note}` | AT-SPI + KWin 几何校准 |
+| `capture_app` | `{snapshot_mode,app,window,elements[],content,coordinate_space,coordinate_source,bounds_note}`；`include_screenshot=true` 时额外返回 `screenshot/pointer/display/coordinate_contract` | AT-SPI + KWin 几何校准 + portal ScreenCast（仅截图时）|
 | `list_windows` | `{items:[{index,title,bounds,pid,app_name,...}]}` | AT-SPI |
 | `application_info` | `{name,pid,...}` | AT-SPI |
 | `element_at_point` | 屏幕坐标 → 元素 native token（双坐标空间尝试） | AT-SPI + KWin |
@@ -54,19 +54,29 @@ NDJSON，每行一条消息：
 | `hold_key_to_app` | 同上 + `app_ref{pid}`；Linux 无 pid 定向键盘，先 KWin 前置目标窗口，失败即 fail-closed | portal + KWin |
 | `cancel_input_holds` | `session_key`；从另一条 broker 连接打断进行中的 hold | — |
 | `reset_access` | 撤销 portal 授权并清 restore_token | portal |
-| `reset_access` | 撤销授权并清 restore_token | portal |
 
 全部 23 个方法均已实现，无 fail-closed 占位。
 
 ### 坐标契约（重要）
 
 - `capture_app.elements[].bounds` 是**逻辑像素的屏幕坐标**，可直接作为 `click.point`。
+- `capture_app.window.bounds` 与元素 bounds **同坐标系**（也经过 KWin clientGeometry
+  校准）。两者必须一致：闭源 `node-repl-host` 的 `visibleElementCenter()` 用
+  `window.bounds` 裁剪元素 bounds 判定「元素是否在窗口内」，坐标系混用会让**全部元素
+  被判为窗口外**，坐标点击全部失效。
 - 若 AT-SPI 报的是窗口局部坐标，helper 会用 KWin `clientGeometry` 自动校准，并在
   响应里标 `coordinate_space: "screen"` / `coordinate_source: "kwin-client-geometry"`；
   校准不了时标 `"atspi-raw"` / `"none"`，此时 bounds **不可直接用于点击**。
-- `INT_MIN`（位置未知）与零尺寸元素的 `bounds` 为 `null`。
+- 位置未知（AT-SPI `INT_MIN`）与零尺寸元素的 `bounds` 是 **`[0,0,0,0]`，不是 `null`**：
+  闭源 `asElements()` 的 `asBounds2()` 对非 4 数字数组直接 throw，一个 `null` 就会让整次
+  `capture_app` 失败、模型连树都拿不到。零宽高在闭源侧天然被当作不可点击。
 - **`screenshot` 的像素是物理（raster）像素**，桌面缩放 1.25 时 3072×1728（逻辑）会
   得到 3840×2160 的 PNG。**从截图量出的坐标必须除以 `scale`**。
+- `capture_app(include_screenshot=true)` 返回的 `pointer = {x,y,width,height,unit}` 描述
+  **裁剪后 raster 对应的屏幕逻辑矩形**（不是光标位置），配合
+  `coordinate_contract: "frame_pixel_projection_v1"` 让闭源侧把帧标为 actionable。
+- 截图前会临时把目标窗口 `keepAbove` 并激活（Wayland portal 是整屏流，被遮住的区域
+  剪出来是遮挡者）；**最小化窗口直接报错**，不会把桌面壁纸当作它的截图返回。
 
 ## 构建与安装
 

@@ -29,6 +29,9 @@ pub struct WindowGeometry {
     pub frame: (f64, f64, f64, f64),
     /// clientGeometry：客户区（不含装饰）。AT-SPI 的 extents 与之同尺寸。
     pub client: (f64, f64, f64, f64),
+    /// 窗口是否被最小化。最小化时 compositor 不为该窗口渲染任何像素：整屏抓帧再
+    /// 裁剪得到的是它**背后**的桌面/其它窗口，不能当该窗口的截图返回。
+    pub minimized: bool,
 }
 
 /// 执行一段 KWin JS 脚本并返回它 `print()` 的输出行。
@@ -153,14 +156,15 @@ for (var i = 0; i < ws.length; i++) {{
     print("{marker}" + (w.resourceClass || "") + "\u0001" + (w.caption || "") + "\u0001" +
           w.pid + "\u0001" +
           f.x + "," + f.y + "," + f.width + "," + f.height + "\u0001" +
-          c.x + "," + c.y + "," + c.width + "," + c.height);
+          c.x + "," + c.y + "," + c.width + "," + c.height + "\u0001" +
+          (w.minimized ? "1" : "0"));
 }}"#
     );
     let lines = run_script_collect(&script, &marker).await;
     let mut out = Vec::new();
     for line in lines {
         let parts: Vec<&str> = line.split('\u{1}').collect();
-        if parts.len() != 5 {
+        if parts.len() != 6 {
             continue;
         }
         let parse4 = |s: &str| -> Option<(f64, f64, f64, f64)> {
@@ -174,6 +178,7 @@ for (var i = 0; i < ws.length; i++) {{
                 pid: parts[2].parse().unwrap_or(-1),
                 frame,
                 client,
+                minimized: parts[5].trim() == "1",
             });
         }
     }
@@ -283,4 +288,73 @@ if (!target) {{
         }
     }
     None
+}
+
+/// 临时把指定 pid 的窗口抬到最前并激活，返回「之前是否已经是最前/激活」以便恢复。
+///
+/// 为什么截图需要它：Wayland portal 的 ScreenCast 是**整屏**流，没有按窗口捕获。
+/// 我们靠裁剪 clientGeometry 取窗口区域，但若目标窗口被别的窗口覆盖，那块像素就
+/// 属于遮挡者（实测：kwrite 被 Firefox 盖住时，剪出来的 800x600 是一张白底 + 鼠标，
+/// 因为那块区域是 Firefox 的页面空白区）。截图前必须让目标窗口真的可见。
+///
+/// 恢复：只把 keepAbove 复位；不强行把焦点还给原窗口——用户此刻可能正在别处操作，
+/// 抢焦点比一次截图更打扰。若目标本来就 active，则无需激活。
+pub async fn raise_window_for_capture(pid: i64) -> Option<bool> {
+    let nonce = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let marker = format!("ZCODERAISE{nonce}|");
+    let script = format!(
+        r#"var ws = workspace.stackingOrder;
+var t = null;
+for (var i = 0; i < ws.length; i++) {{
+    if (ws[i].pid === {pid} && ws[i].normalWindow) {{ t = ws[i]; break; }}
+}}
+if (!t) {{
+    print("{marker}NOTFOUND");
+}} else {{
+    var wasActive = t.active === true;
+    var wasAbove = t.keepAbove === true;
+    t.keepAbove = true;
+    if (!wasActive) workspace.activeWindow = t;
+    print("{marker}OK|" + (wasActive ? "1" : "0") + "|" + (wasAbove ? "1" : "0"));
+}}"#
+    );
+    let lines = run_script_collect(&script, &marker).await;
+    for line in lines {
+        let v = line.trim();
+        if v == "NOTFOUND" {
+            return Some(false);
+        }
+        if v.starts_with("OK|") {
+            return Some(true);
+        }
+    }
+    None
+}
+
+/// 截图结束后复位 keepAbove（不动焦点）。
+pub async fn restore_after_capture(pid: i64) {
+    let nonce = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let marker = format!("ZCODEREST{nonce}|");
+    let script = format!(
+        r#"var ws = workspace.stackingOrder;
+for (var i = 0; i < ws.length; i++) {{
+    if (ws[i].pid === {pid} && ws[i].normalWindow) {{ ws[i].keepAbove = false; }}
+}}
+print("{marker}DONE");"#
+    );
+    let _ = run_script_collect(&script, &marker).await;
 }

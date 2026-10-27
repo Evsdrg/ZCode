@@ -90,6 +90,10 @@ enum Cmd {
 
 static TX: OnceLock<mpsc::UnboundedSender<Cmd>> = OnceLock::new();
 
+/// 每次抓帧取多少个缓冲区后 EOS。KWin ScreenCast 建立后的前几帧是空白，
+/// 取多帧用最后一帧才能拿到稳定内容；15 帧在 30fps 下约 0.5 秒。
+const FRAME_BURST: u32 = 15;
+
 /// 当前是否有 hold_key 正在进行（用于 cancel_input_holds 的跨连接查询）。
 static HOLDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// 取消标志：cancel_input_holds 在另一条连接上置位，hold 循环每 50ms 检查。
@@ -773,56 +777,81 @@ pub fn capture_frame(state: &Option<PortalSession>) -> Result<Vec<u8>, String> {
     if flags >= 0 {
         unsafe { libc::fcntl(raw, libc::F_SETFD, flags & !libc::FD_CLOEXEC) };
     }
-    let out = std::env::temp_dir().join(format!("zcode-cua-frame-{}.png", raw));
-    let _ = std::fs::remove_file(&out);
+    // multifilesink 写 zcode-cua-frame-<fd>-%03d.png；最后取编号最大的那个。
+    let pattern = std::env::temp_dir().join(format!("zcode-cua-frame-{raw}-%03d.png"));
+    let cleanup = || {
+        for i in 0..=FRAME_BURST {
+            let _ = std::fs::remove_file(std::env::temp_dir().join(format!("zcode-cua-frame-{raw}-{i:03}.png")));
+        }
+    };
+    cleanup();
+    let mut args: Vec<String> = vec![
+        "-q".into(),
+        "pipewiresrc".into(),
+        format!("fd={raw}"),
+        // 按官方文档核对过（gst-inspect 属性文档）：target-object 官方推荐但只接受
+        // "source name/serial"，node id 传给它在本机 PipeWire 0.3 实测报
+        // "target not found"；path 属性虽标 deprecated，其语义正是 node id 且实测
+        // 可靠。故用 path。迁移路径：升级 PipeWire 1.x 后改用 serial 作 target-object。
+        format!("path={node_id}"),
+        // 必须限制缓冲区数：pipewiresrc 是**实时流**，不限制就会无限出帧，pngenc/filesink
+        // 一直追写同一个文件——实测单个临时 PNG 涨到 197MB 直至 /tmp（11GB tmpfs）写满，
+        // 之后所有截图都因 “Error while writing to file descriptor: 超出磁盘配额” 失败。
+        //
+        // 为什么不是 1：KWin ScreenCast 流建立后的**前几帧是空白/未渲染**的（实测
+        // num-buffers=1 抓到纯白画面 + 鼠标指针）。取多帧、用最后一帧，才是稳定内容。
+        format!("num-buffers={FRAME_BURST}"),
+        "!".into(),
+        "videoconvert".into(),
+        "!".into(),
+    ];
+    args.extend(
+        ["pngenc", "!", "multifilesink"]
+            .iter()
+            .map(|s| s.to_string()),
+    );
+    args.push(format!("location={}", pattern.display()));
     let mut child = std::process::Command::new("gst-launch-1.0")
-        .args([
-            "-q",
-            "pipewiresrc",
-            &format!("fd={raw}"),
-            // 按官方文档核对过（gst-inspect 属性文档）：target-object 官方推荐但只接受
-            // "source name/serial"，node id 传给它在本机 PipeWire 0.3 实测报
-            // "target not found"；path 属性虽标 deprecated，其语义正是 node id 且实测
-            // 可靠。故用 path。迁移路径：升级 PipeWire 1.x 后改用 serial 作 target-object。
-            &format!("path={node_id}"),
-            "!",
-            "videoconvert",
-            "!",
-            "pngenc",
-            "!",
-            "filesink",
-            &format!("location={}", out.display()),
-        ])
+        .args(&args)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::inherit())
         .spawn()
         .map_err(|e| format!("spawn gst-launch-1.0: {e}"))?;
-    // 等文件出现且大小稳定（pngenc 写完后才完整）
+    // 等 gst 因 num-buffers 到量而 EOS（在 EOS 分支里读取最后一帧并清理）。
+    // 兜底超时 8 秒：即使 gst 卡死也不会让 RPC 无限挂起。
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
-    let mut last_size = 0u64;
-    let mut stable = 0;
-    let data = loop {
-        if let Ok(meta) = std::fs::metadata(&out) {
-            let size = meta.len();
-            if size > 0 && size == last_size {
-                stable += 1;
-                if stable >= 3 {
-                    break std::fs::read(&out).map_err(|e| format!("read frame: {e}"));
-                }
-            } else {
-                stable = 0;
-            }
-            last_size = size;
-        }
+    loop {
         if std::time::Instant::now() > deadline {
             let _ = child.kill();
             let _ = child.wait();
+            cleanup();
             return Err("timed out waiting for screen frame".into());
         }
+        if let Ok(Some(status)) = child.try_wait() {
+            // gst 已退出（num-buffers 到量 → EOS）。给文件系统一点时间落盘。
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            let _ = child.wait();
+            // 取编号最大的非空帧。
+            let mut best: Option<Vec<u8>> = None;
+            for i in (0..=FRAME_BURST).rev() {
+                let f = std::env::temp_dir().join(format!("zcode-cua-frame-{raw}-{i:03}.png"));
+                if let Ok(m) = std::fs::metadata(&f) {
+                    if m.len() > 0 {
+                        if let Ok(bytes) = std::fs::read(&f) {
+                            best = Some(bytes);
+                            break;
+                        }
+                    }
+                }
+            }
+            cleanup();
+            return match best {
+                Some(b) => Ok(b),
+                None => Err(format!(
+                    "gst-launch-1.0 exited ({status}) without producing a frame"
+                )),
+            };
+        }
         std::thread::sleep(std::time::Duration::from_millis(60));
-    };
-    let _ = child.kill();
-    let _ = child.wait();
-    let _ = std::fs::remove_file(&out);
-    data
+    }
 }
