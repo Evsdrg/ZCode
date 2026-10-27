@@ -315,7 +315,7 @@ broker(socket) → producer.py（GLib/selectors 单线程）→ dispatch(method)
 
 实测确认（非推断）：
 
-- **实际运行的是闭源 agent 自带的 `node-repl-host`**（`/home/cepvor/.zcode/server/agents/glm/packages/node-repl-host/dist/mcp/server.js`，5.07MB，`"not available in this build"` 出现 0 次）——它有**完整真实实现**。
+- **实际运行的是闭源 agent 自带的 `node-repl-host`**（`~/.zcode/server/agents/glm/packages/node-repl-host/dist/mcp/server.js`，5.07MB，`"not available in this build"` 出现 0 次）——它有**完整真实实现**。
 - 它的 `createComputerUseRuntime` 是一个 **`BrokerClient`**：连 `ZCODE_CUA_PERMISSION_BROKER_SOCKET`，把 `list_apps`/`get_app_state`/`left_click`… 转发给后端 **permission broker Helper**。真正执行引擎在 Helper（mac 原生 app / win 安装包 runtime），Linux 分支 `ensureStandaloneHelperLaunched` 直接 return。
 - **唯一堵点**：`packages/services/src/node.ts` 的 `resolveSpawnEnv` 只在 `darwin || win32` 时给 agent 注入 `ZCODE_CUA_PERMISSION_BROKER_SOCKET`。Linux 不注入 ⇒ BrokerClient 无 socket ⇒ CUA 不挂。
 
