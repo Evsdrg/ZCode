@@ -20,6 +20,8 @@ interface RootWorkspaceContentProps {
   workspaceRemoteSessionId?: string;
   activeWorkspacePath: string | null;
   isSettingsTabActive: boolean;
+  /** 宿主进程平台（自部署 WebUI 由 server-info.hostPlatform 提供），透传到设置页用于本机能力可见性。 */
+  hostPlatform?: string;
   handleConnectRemote: AppProps["onConnectRemote"];
   handleSelectRemoteProject: AppProps["onSelectRemoteProject"];
   handleCancelRemoteProject: AppProps["onCancelRemoteProject"];
@@ -62,6 +64,7 @@ export function RootWorkspaceContent({
   workspaceRemoteSessionId,
   activeWorkspacePath,
   isSettingsTabActive,
+  hostPlatform,
   handleConnectRemote,
   handleSelectRemoteProject,
   handleCancelRemoteProject,
@@ -202,6 +205,7 @@ export function RootWorkspaceContent({
             isDesktop={isDesktop}
             isMacDesktop={isMacDesktop}
             isWindowsDesktop={isWindowsDesktop}
+            hostPlatform={hostPlatform}
             windowsWindowControlsRightPaddingPx={windowsWindowControlsRightPaddingPx}
             captionWorkspacePath={activeWorkspacePath}
             onBack={activeWorkspacePath ? handleBackFromSettings : undefined}

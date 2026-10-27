@@ -1636,6 +1636,7 @@ function RootInner({
                 isDesktop={isDesktop}
                 isMacDesktop={isMacDesktop}
                 isWindowsDesktop={isWindowsDesktop}
+                hostPlatform={hostPlatform}
                 supportsEmbeddedBrowser={supportsEmbeddedBrowser}
               />
             </RemoteProjectPresentationProvider>

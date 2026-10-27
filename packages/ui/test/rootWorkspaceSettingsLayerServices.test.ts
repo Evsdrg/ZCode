@@ -67,3 +67,43 @@ describe("RootWorkspaceContent settings layer services", () => {
     );
   });
 });
+
+describe("RootWorkspaceContent host platform passthrough", () => {
+  beforeEach(() => {
+    workspaceSettingsLayerMock.mockClear();
+  });
+
+  // 回归：阶段 5 只把 hostPlatform 接到了 Root.tsx 的 settingsLayerProps，漏了实际主用的
+  // RootWorkspaceContent → WorkspaceSettingsLayer 链路，导致自部署 WebUI 的
+  // SettingsPage 永远收到 undefined hostPlatform、Linux 下「电脑控制」区整块不可见。
+  it("forwards hostPlatform into the settings overlay", async () => {
+    const { RootWorkspaceContent } = await import("../src/root/RootWorkspaceContent.js");
+
+    renderToStaticMarkup(
+      createElement(RootWorkspaceContent, {
+        workspaceScopedServices: makeServices("local"),
+        workspaceShellPath: "/workspace/local",
+        activeWorkspacePath: "/workspace/local",
+        isSettingsTabActive: true,
+        hostPlatform: "linux",
+        handleConnectRemote: vi.fn(),
+        handleSelectRemoteProject: vi.fn(),
+        handleCancelRemoteProject: vi.fn(),
+        handleReconnectRemoteWorkspace: vi.fn(),
+        handleCreateTask: vi.fn(),
+        handleOpenWorkspace: vi.fn(),
+        remoteWorkspaceSessions: [],
+        allowRemoteWorkspace: true,
+        handleBackFromSettings: vi.fn(),
+        user: null,
+        reconnectingRemoteWorkspaceKeys: [],
+        remoteWorkspaceErrorByWorkspaceKey: {},
+        allowOpenWorkspace: true,
+      }),
+    );
+
+    expect(workspaceSettingsLayerMock).toHaveBeenCalledWith(
+      expect.objectContaining({ hostPlatform: "linux" }),
+    );
+  });
+});

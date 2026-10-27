@@ -855,7 +855,11 @@ export function shouldUseCuaPermissionService(opts: {
   cuaEnabled: boolean;
 }): boolean {
   const platform = opts.platform ?? process.platform;
-  return (platform === "darwin" || platform === "win32") && opts.cuaEnabled;
+  // 这个判定回答的是「插件总开关是否打开」，不是「平台能力是否具备」——平台能力由
+  // 各方法自己的分支负责（getStatus 的 linux 分支、restartHelper 的 darwin-only 守卫）。
+  // 历史缺陷：此处曾只写 darwin/win32，而 getStatus/requestAccess 的 Linux 分支内部
+  // 又调用它，导致 Linux 上 CUA 权限查询与主动授权永远返回「未启用」。
+  return (platform === "darwin" || platform === "win32" || platform === "linux") && opts.cuaEnabled;
 }
 
 export function shouldRetainDefaultCuaProductHelper(): boolean {
@@ -2058,6 +2062,9 @@ export function createLocalServices(options: {
           };
         }
         return {
+          // CuaPermissionStatus.available 是可选字面量 true，但 isCuaPermissionStatusAvailable
+          // 按 available === true 判定；漏写会让设置页把可用状态误判为不可用（显示「未知」）。
+          available: true,
           platform: "linux",
           grantOwner: linuxReport.grant_owner ?? "xdg-desktop-portal",
           grantOwnerDisplayName: linuxReport.grant_owner ?? "xdg-desktop-portal",

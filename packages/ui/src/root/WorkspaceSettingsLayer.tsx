@@ -9,6 +9,7 @@ export function WorkspaceSettingsLayer({
   isDesktop,
   isMacDesktop,
   isWindowsDesktop,
+  hostPlatform,
   isWebRemoteControl,
   windowsWindowControlsRightPaddingPx,
   captionWorkspacePath,
@@ -36,6 +37,7 @@ export function WorkspaceSettingsLayer({
             isDesktop={isDesktop}
             isMacDesktop={isMacDesktop}
             isWindowsDesktop={isWindowsDesktop}
+            hostPlatform={hostPlatform}
             isWebRemoteControl={isWebRemoteControl}
             windowsWindowControlsRightPaddingPx={windowsWindowControlsRightPaddingPx}
             captionWorkspacePath={captionWorkspacePath}
@@ -54,6 +56,7 @@ export function WorkspaceSettingsLayer({
           isDesktop={isDesktop}
           isMacDesktop={isMacDesktop}
           isWindowsDesktop={isWindowsDesktop}
+          hostPlatform={hostPlatform}
           isWebRemoteControl={isWebRemoteControl}
           windowsWindowControlsRightPaddingPx={windowsWindowControlsRightPaddingPx}
           captionWorkspacePath={captionWorkspacePath}

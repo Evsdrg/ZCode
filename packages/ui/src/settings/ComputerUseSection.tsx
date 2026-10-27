@@ -103,7 +103,13 @@ export function ComputerUseSection({
     workspaceIdentity,
   });
   // CUA 权限是 macOS 本机属性：仅完整 macOS 设置需要 Helper workspace 路径。
-  const path = supportsLocalMacWorkspace ? (localWorkspacePath ?? workspacePath) : null;
+  // Linux 同样要查：portal 授权态（accessibility/screenRecording）由本机 Rust Helper 提供，
+  // 路径必须是本机 workspace 路径（SSH 远端设置页的 workspacePath 是远端路径，不可用）。
+  const path = supportsLocalMacWorkspace
+    ? (localWorkspacePath ?? workspacePath)
+    : supportsLocalLinuxWorkspace
+      ? (localWorkspacePath ?? workspacePath)
+      : null;
   // 展示只跟 settled：fresh 每次查询开始都会落回 false，跟着它渲染会让授权按钮的文案
   // 在「验证中…」与终态之间切换、宽度随之跳变。
   const { status, settled, refresh } = useCuaPermissionStatus(path ?? null, workspaceIdentity);
