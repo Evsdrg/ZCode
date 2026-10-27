@@ -221,6 +221,11 @@ export function buildStandardChromeInstallations(
     });
   }
 
+  // 原因：此前只区分 darwin / win32，其余平台（如 aix）会落入下方 Linux 分支，
+  // 导致在非 Linux 上报出 Linux 安装路径并误判为「找到了 Chrome」。
+  // 与 chromeExecutableDiscovery.ts 的 SUPPORTED_PLATFORMS 保持一致，其余平台不返回候选。
+  if (platform !== "linux") return [];
+
   const configRoot = env.CHROME_CONFIG_HOME ?? env.XDG_CONFIG_HOME ?? join(homeDir, ".config");
   const standardInstallations = browsers.map((browser) => ({
     browser,
