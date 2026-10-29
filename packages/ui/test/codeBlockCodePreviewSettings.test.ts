@@ -3,10 +3,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
-import { create } from "zustand";
-import { StoreContext } from "@/store/StoreProvider.js";
 import type { CodePreviewSettings } from "@/lib/codePreviewSettings.js";
 import { DEFAULT_CODE_PREVIEW_SETTINGS } from "@/lib/codePreviewSettings.js";
+import { CodePreviewSettingsContext } from "@/lib/codePreviewSettings.js";
 
 // CodeViewer 会把设置翻译成 DOM 属性，这里只观察传参，不真的渲染 @pierre/diffs。
 const seen: Array<Record<string, unknown>> = [];
@@ -39,12 +38,10 @@ vi.mock("@/lib/mermaidLanguage.js", () => ({
 
 import { CodeBlock } from "@/components/ai-elements/code-block.js";
 
-function storeWith(settings: CodePreviewSettings) {
-  return create(() => ({ codePreviewSettings: settings })) as never;
-}
-
 function renderBlock(element: ReturnType<typeof createElement>, state: CodePreviewSettings) {
-  return render(createElement(StoreContext.Provider, { value: storeWith(state) }, element));
+  return render(
+    createElement(CodePreviewSettingsContext.Provider, { value: state }, element),
+  );
 }
 
 describe("CodeBlock 接入代码预览设置", () => {
@@ -102,7 +99,7 @@ describe("CodeBlock 接入代码预览设置", () => {
     expect(seen.at(-1)?.theme).toBe("github-light");
   });
 
-  it("无 StoreProvider 时回退默认值而不是抛错", () => {
+  it("无 Context Provider 时回退默认值而不是抛错", () => {
     expect(() =>
       renderToStaticMarkup(
         createElement(CodeBlock, { code: "x", language: "text" }),

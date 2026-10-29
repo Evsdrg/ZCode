@@ -15,7 +15,7 @@ import {
   RequestSecurityWorkspaceBridge,
   setRequestSecurityReporter,
 } from "@/request-security-edition/index.js";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { LucideProvider, RefreshCw } from "lucide-react";
 import {
   APP_RUNTIME_PREFERENCES_CHANGED_BROADCAST_CHANNEL,
@@ -58,13 +58,14 @@ import {
   shouldShowRootStartupLoading,
   shouldOpenFallbackWorkspaceAfterCreate,
 } from "@/lib/rootStartupGate.js";
-import { StoreProvider, useZCodeStore } from "@/store/StoreProvider.js";
+import { StoreProvider, useZCodeStore, useZCodeStoreWithDefault } from "@/store/StoreProvider.js";
 import { setMcpStorePlatform } from "@/store/mcpStore.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { TabStoreProvider, useTabStore, useTabStoreApi } from "@/store/TabStoreProvider.js";
 import { isSettingsTab, isWorkspaceTab, type WorkspaceTabState } from "@/store/tabStore.js";
 import { logger } from "@/logger.js";
 import { RootShell } from "@/root/RootShell.js";
+import { CodePreviewSettingsContext, DEFAULT_CODE_PREVIEW_SETTINGS } from "@/lib/codePreviewSettings.js";
 import { RootWorkspaceContent } from "@/root/RootWorkspaceContent.js";
 import { resolveConversationWorkspaceTarget } from "@/conversation-workspace-target/index.js";
 import { resolveRootWorkspaceShellTarget } from "@/root/rootWorkspaceShellTarget.js";
@@ -133,6 +134,26 @@ type WelcomeScreenOpenReason =
   | "session-expired";
 
 /**
+ * 把 store 里的「外观 → 代码预览」设置投影到展示层 Context。
+ *
+ * 为什么放在这里而不是让 CodeBlock 直接读 store：`lib/codePreviewSettings.ts` 明确要求
+ * ai-elements / ToolCallBlocks 这类纯展示组件不依赖 zustand store。Root 是唯一持有 store
+ * 的宿主，负责把设置下发给全部 `CodeBlock` 调用点（25 个），避免逐个传 props 漏接。
+ */
+function CodePreviewSettingsBridge({ children }: { children: ReactNode }) {
+  const settings = useZCodeStoreWithDefault(
+    (state) => state.codePreviewSettings,
+    DEFAULT_CODE_PREVIEW_SETTINGS,
+  );
+  const merged = { ...DEFAULT_CODE_PREVIEW_SETTINGS, ...settings };
+  return (
+    <CodePreviewSettingsContext.Provider value={merged}>
+      {children}
+    </CodePreviewSettingsContext.Provider>
+  );
+}
+
+/**
  * Root —— 应用根组件
  *
  * 外层挂载 StoreProvider（连接广播服务）+ TabStoreProvider，内层处理认证和路由。
@@ -161,26 +182,30 @@ export function Root(props: RootProps) {
               initialIsRestoringOAuthSession
             >
               <TabStoreProvider>
-                <ProjectDirectoryProvider isDesktop={props.isDesktop}>
-                  <DiffsWorkerPoolProvider>
-                    <WebRemoteControlFeatureProvider enabled={props.webRemoteControlFeatureEnabled}>
-                      <AssistantCodeCommentFeatureProvider
-                        enabled={props.assistantCodeCommentCardsEnabled}
+                <CodePreviewSettingsBridge>
+                  <ProjectDirectoryProvider isDesktop={props.isDesktop}>
+                    <DiffsWorkerPoolProvider>
+                      <WebRemoteControlFeatureProvider
+                        enabled={props.webRemoteControlFeatureEnabled}
                       >
-                        <CodingPlanUpgradeDialogProvider>
-                          <RewardsProvider desktop={props.isDesktop === true}>
-                            <RequestSecurityHost />
-                            <MarketingTouchProvider desktop={props.isDesktop === true}>
-                              <RemoteConnectionProgressProvider>
-                                <RootInner {...props} />
-                              </RemoteConnectionProgressProvider>
-                            </MarketingTouchProvider>
-                          </RewardsProvider>
-                        </CodingPlanUpgradeDialogProvider>
-                      </AssistantCodeCommentFeatureProvider>
-                    </WebRemoteControlFeatureProvider>
-                  </DiffsWorkerPoolProvider>
-                </ProjectDirectoryProvider>
+                        <AssistantCodeCommentFeatureProvider
+                          enabled={props.assistantCodeCommentCardsEnabled}
+                        >
+                          <CodingPlanUpgradeDialogProvider>
+                            <RewardsProvider desktop={props.isDesktop === true}>
+                              <RequestSecurityHost />
+                              <MarketingTouchProvider desktop={props.isDesktop === true}>
+                                <RemoteConnectionProgressProvider>
+                                  <RootInner {...props} />
+                                </RemoteConnectionProgressProvider>
+                              </MarketingTouchProvider>
+                            </RewardsProvider>
+                          </CodingPlanUpgradeDialogProvider>
+                        </AssistantCodeCommentFeatureProvider>
+                      </WebRemoteControlFeatureProvider>
+                    </DiffsWorkerPoolProvider>
+                  </ProjectDirectoryProvider>
+                </CodePreviewSettingsBridge>
               </TabStoreProvider>
             </StoreProvider>
           </PlatformProvider>

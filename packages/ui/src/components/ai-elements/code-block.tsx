@@ -33,9 +33,11 @@ import {
 import { MermaidBlock } from "@/components/ai-elements/mermaid-block.js";
 import { DiagramPreviewDialog } from "@/components/ai-elements/diagram-preview-dialog.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import {
+  DEFAULT_CODE_PREVIEW_SETTINGS,
+  useCodePreviewSettings,
+} from "@/lib/codePreviewSettings.js";
 import { logger } from "@/logger.js";
-import { DEFAULT_CODE_PREVIEW_SETTINGS } from "@/lib/codePreviewSettings.js";
-import { useZCodeStoreWithDefault } from "@/store/StoreProvider.js";
 import type { Theme } from "@/useTheme.js";
 
 // Types
@@ -267,26 +269,25 @@ export const CodeBlock = ({
   // 修复原因：CodeBlock 此前把 showLineNumbers=false / wrapLongLines=false / fontSizePx=14 硬编码为
   // props 默认值，而 store 默认是 showLineNumbers=true / fontSizePx=12。全仓 25 个调用点里只有
   // 2 个显式传参，导致「外观 → 代码预览」的三项设置在工具输出、MCP 结果、轨迹面板等主要路径
-  // 完全不生效。这里改为统一从 store 取默认值（无 Provider 时回退 DEFAULT），显式 props 仍优先。
-  const codePreviewSettings = useZCodeStoreWithDefault(
-    (state) => state.codePreviewSettings,
-    DEFAULT_CODE_PREVIEW_SETTINGS,
-  );
-  const resolvedShowLineNumbers = showLineNumbers ?? codePreviewSettings.showLineNumbers;
-  const resolvedWrapLongLines = wrapLongLines ?? codePreviewSettings.wrapLongLines;
-  const resolvedFontSizePx = fontSizePx ?? codePreviewSettings.fontSizePx;
+  // 完全不生效。这里改为从展示层 Context 取默认值（无 Provider 时回退 DEFAULT），显式 props 仍优先。
+  const codePreviewSettings = useCodePreviewSettings();
+  // 与 DEFAULT 逐项合并：单测/旧调用方可能只提供部分字段，缺项时不能变成 undefined。
+  const merged = { ...DEFAULT_CODE_PREVIEW_SETTINGS, ...codePreviewSettings };
+  const resolvedShowLineNumbers = showLineNumbers ?? merged.showLineNumbers;
+  const resolvedWrapLongLines = wrapLongLines ?? merged.wrapLongLines;
+  const resolvedFontSizePx = fontSizePx ?? merged.fontSizePx;
   // shiki 主题名无法表达「跟随系统」，因此 system/未指定时按当前 DOM 的 dark 类判定；
   // 显式 theme 仍完全优先，保持既有调用方语义不变。
   const resolvedTheme =
     theme ??
     (appTheme === "dark" || appTheme === "zai-dark"
-      ? codePreviewSettings.darkTheme
+      ? merged.darkTheme
       : appTheme === "light"
-        ? codePreviewSettings.lightTheme
+        ? merged.lightTheme
         : typeof document !== "undefined" &&
             document.documentElement.classList.contains("dark")
-          ? codePreviewSettings.darkTheme
-          : codePreviewSettings.lightTheme);
+          ? merged.darkTheme
+          : merged.lightTheme);
   const [isWrapped, setIsWrapped] = useState(resolvedWrapLongLines);
   const [mermaidPreviewSvg, setMermaidPreviewSvg] = useState<string | null>(null);
   const [mermaidPreviewOpen, setMermaidPreviewOpen] = useState(false);
