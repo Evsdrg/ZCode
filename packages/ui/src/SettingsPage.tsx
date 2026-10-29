@@ -1281,14 +1281,17 @@ export function SettingsPage({
         },
       });
       setEmbeddedBrowserAllowInsecureCertificates(enabled);
-      // 证书策略在 main 启动时装到 Session 上，改完必须重启才会换掉 verifyProc。
+      // 桌面端证书策略在 main 启动时装到 Session 上，改完必须重启才会换掉 verifyProc；
+      // 自部署由 server 在每次新建 Playwright Context 时读取，新开的浏览器会话即生效。
       toast(
         intl.formatMessage({
-          id: "settings.embeddedBrowserAllowInsecureCertificatesSavedHint",
+          id: isDesktop
+            ? "settings.embeddedBrowserAllowInsecureCertificatesSavedHint"
+            : "settings.embeddedBrowserAllowInsecureCertificatesSavedHintSelfHost",
         }),
       );
     },
-    [localHostServices.settingService, intl],
+    [localHostServices.settingService, intl, isDesktop],
   );
   const handleReceivePreviewUpdatesChange = useCallback(
     async (enabled: boolean) => {

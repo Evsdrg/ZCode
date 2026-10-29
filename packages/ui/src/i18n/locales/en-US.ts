@@ -3304,6 +3304,7 @@ const enUS: Record<string, string> = {
     "Root directory for app data (defaults to user home directory). Existing data will be copied to the new location. The .zcode/v2 suffix cannot be changed.",
   "settings.dataBaseDirPlaceholder": "Default: user home directory",
   "settings.dataBaseDirBrowse": "Choose folder",
+  "settings.dataBaseDirSelectFolder": "Use this folder",
   "settings.dataBaseDirSave": "Save",
   "settings.dataBaseDirCopying": "Copying data, please do not close the app...",
   "settings.dataBaseDirCopyFailed": "Data copy failed. Path was not changed.",
@@ -3450,8 +3451,12 @@ const enUS: Record<string, string> = {
   "settings.embeddedBrowserAllowInsecureCertificates": "Ignore certificate errors",
   "settings.embeddedBrowserAllowInsecureCertificatesDescription":
     "When enabled, the built-in browser stops verifying HTTPS certificates. Affects the built-in browser only. Restart to take effect.",
+  "settings.embeddedBrowserAllowInsecureCertificatesDescriptionSelfHost":
+    "When enabled, the built-in browser stops verifying HTTPS certificates. Affects the built-in browser only. Takes effect for newly opened browser sessions.",
   "settings.embeddedBrowserAllowInsecureCertificatesSavedHint":
     "Certificate setting saved. Restart the app to take effect.",
+  "settings.embeddedBrowserAllowInsecureCertificatesSavedHintSelfHost":
+    "Certificate setting saved. Takes effect for newly opened browser sessions.",
   "settings.browser.data.section": "Browser data",
   "settings.browser.desktopOnly": "Browser data can only be managed in the ZCode desktop app.",
   "settings.browser.import.title": "Import Chrome sign-in state",

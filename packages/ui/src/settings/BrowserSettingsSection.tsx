@@ -310,7 +310,9 @@ export function BrowserSettingsSection({
                 id: "settings.embeddedBrowserAllowInsecureCertificates",
               })}
               description={intl.formatMessage({
-                id: "settings.embeddedBrowserAllowInsecureCertificatesDescription",
+                id: isDesktop
+                  ? "settings.embeddedBrowserAllowInsecureCertificatesDescription"
+                  : "settings.embeddedBrowserAllowInsecureCertificatesDescriptionSelfHost",
               })}
               control={
                 <Switch

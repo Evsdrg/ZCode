@@ -159,6 +159,10 @@ export function DataBaseDirControl({
         <DirectoryBrowser
           services={services}
           initialPath={localDataBaseDir.trim() || undefined}
+          // 作为独立选择器时必须显式打开底部确认动作：默认 false 只用于「嵌在向导里、
+          // 由外层按钮接管」的场景，否则会出现「能浏览但无法确认」的死路。
+          showSelectionActions
+          selectLabel={intl.formatMessage({ id: "settings.dataBaseDirSelectFolder" })}
           onCancel={() => setServiceBrowserOpen(false)}
           onSelect={(path) => {
             setServiceBrowserOpen(false);

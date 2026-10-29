@@ -3094,6 +3094,7 @@ const zhCN: Record<string, string> = {
     "应用数据的根目录（默认为用户主目录），修改后会将现有数据复制到新位置。路径后缀 .zcode/v2 不可更改。",
   "settings.dataBaseDirPlaceholder": "默认：用户主目录",
   "settings.dataBaseDirBrowse": "选择文件夹",
+  "settings.dataBaseDirSelectFolder": "选择此目录",
   "settings.dataBaseDirSave": "保存",
   "settings.dataBaseDirCopying": "正在复制数据，请勿关闭应用…",
   "settings.dataBaseDirCopyFailed": "数据复制失败，路径未更改。",
@@ -3233,8 +3234,12 @@ const zhCN: Record<string, string> = {
   "settings.embeddedBrowserAllowInsecureCertificates": "忽略证书校验",
   "settings.embeddedBrowserAllowInsecureCertificatesDescription":
     "开启后内置浏览器不再校验 HTTPS 证书，仅影响内置浏览器。修改后需重启生效。",
+  "settings.embeddedBrowserAllowInsecureCertificatesDescriptionSelfHost":
+    "开启后内置浏览器不再校验 HTTPS 证书，仅影响内置浏览器。修改后对新开的浏览器会话生效。",
   "settings.embeddedBrowserAllowInsecureCertificatesSavedHint":
     "证书校验设置已保存，重启应用后生效",
+  "settings.embeddedBrowserAllowInsecureCertificatesSavedHintSelfHost":
+    "证书校验设置已保存，新开的浏览器会话生效",
   "settings.browser.data.section": "浏览器数据",
   "settings.browser.desktopOnly": "浏览器数据只能在 ZCode 桌面端管理。",
   "settings.browser.import.title": "导入 Chrome 登录状态",
