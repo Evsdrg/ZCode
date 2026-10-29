@@ -608,6 +608,11 @@ export function createWebPlatform(options?: {
     canSelectFilePath: false,
     // 自部署：server 就是宿主，可真的打开本机文件/编辑器；手机远控等无 host-native 形态仍为 false。
     canOpenLocalFiles: canOpenHostNativeFiles,
+    // 自部署托管浏览器在 UI 侧能否配证书策略：server 注册了托管浏览器维护服务（clearAllData）
+    // 即说明存在托管浏览器。手机远控/无托管浏览器形态不声明，设置项不展示。
+    ...(managedBrowserMaintenance
+      ? { canConfigureManagedBrowserCertificates: true }
+      : {}),
     // Web 端无法打开系统目录选择框
     selectDirectory: () => Promise.resolve(null),
     // Web 端无法打开系统文件选择框

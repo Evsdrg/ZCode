@@ -3,7 +3,7 @@ import {
   AutomationScheduler,
   createLocalServices,
   createServiceLogger,
-  createSettingService,
+  createSettingServiceWithMigrations,
   createTopicResourcePeers,
   disposeServiceResourcesAndWait,
   getAppConfigDir,
@@ -29,9 +29,19 @@ async function main(): Promise<void> {
   const host = process.env["ZCODE_SERVER_HOST"]?.trim() || process.env["HOST"]?.trim() || undefined;
   const staticRoot = process.env["ZCODE_WEB_STATIC_ROOT"]?.trim() || undefined;
   const authToken = process.env["ZCODE_SERVER_AUTH_TOKEN"]?.trim() || undefined;
+  // 设置权威实例先建：托管浏览器需要在每个 Playwright Context 上读取「允许不安全证书」
+  // （桌面端由 Electron main 装到 Session，自部署没有 Electron）。与 Desktop Host 一致，
+  // 显式注入同一个 settingService 并把迁移钩子一并透传，避免出现两套写队列分叉。
+  const {
+    service: settingService,
+    prepareLegacyAccountConnections,
+    setWorkspaceProjection,
+  } = createSettingServiceWithMigrations();
+  const resolveIgnoreHTTPSErrors = async (): Promise<boolean> =>
+    (await settingService.get()).embeddedBrowserAllowInsecureCertificates === true;
   const browserConfig = resolveHeadlessBrowserConfig(process.env);
   const browserExecutor = browserConfig
-    ? createConfiguredBrowserExecutor(browserConfig)
+    ? createConfiguredBrowserExecutor(browserConfig, undefined, { resolveIgnoreHTTPSErrors })
     : undefined;
   // topic resource 中继：上游在自部署入口建立 peers 并注入服务集合与 HTTP 层。
   const topicResourcePeers = createTopicResourcePeers();
@@ -50,7 +60,7 @@ async function main(): Promise<void> {
   // service 同时触发，后到者会撞 busy_timeout 报 `database is locked`，启动失败。上游
   // createServerHostServices 内部就是这么先 migrateApplicationStorage 再装配的。这里走 local 语义
   //（hostId 省略），与 Electron Local Host 一致；迁移完成后各 repo 的 ensureReady 会直接快速返回。
-  await migrateApplicationStorage(await createSettingService().get());
+  await migrateApplicationStorage(await settingService.get());
   // 自部署 WebUI 只是把 Electron 的 WebUI 拆到浏览器：服务与数据语义必须与 Electron Local Host
   // 完全一致。这里沿用 v3.14.3/v3.15.1 的 createLocalServices（宿主身份 = local），
   // 不采用上游 3.16 的 createServerHostServices（它把 projectStorageHostId 设为
@@ -58,6 +68,9 @@ async function main(): Promise<void> {
   // fork 需要的服务开关照常透传。
   const services = createLocalServices({
     topicResourceRelayChannel: (request) => topicResourcePeers.getChannel(request),
+    settingService,
+    setWorkspaceProjection,
+    prepareLegacyAccountConnections,
     zcodeBuiltinProviderConfigFilePath,
     providerProvisioningTargetEnabled: Boolean(authToken),
     // 自部署形态的服务开关（fork）：relay 远控、全工作区任务视图、窗口 Controller、

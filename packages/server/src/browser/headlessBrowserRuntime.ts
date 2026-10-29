@@ -34,6 +34,13 @@ export interface HeadlessBrowserRuntimeOptions {
   engine?: HeadlessBrowserEngine;
   loadPlaywright?: () => Promise<typeof import("playwright-core")>;
   executablePath?: string;
+  /**
+   * 自部署：每次新建 Context 时读取「允许不安全证书」设置。桌面端该开关由 Electron main
+   * 装到 Session；自部署没有 Electron，托管浏览器在 server 进程里，必须在建 Context 时
+   * 把 ignoreHTTPSErrors 传给 Playwright，否则访问自签名/过期证书的内网站点直接失败且无配置入口。
+   * 不传时保持 Playwright 默认（严格校验），不影响桌面/旧行为。
+   */
+  resolveIgnoreHTTPSErrors?: () => Promise<boolean>;
   /** 测试注入时钟与扫描间隔；生产缺省用 Date.now 与 60s。 */
   now?: () => number;
   idleReclaimIntervalMs?: number;
@@ -273,7 +280,14 @@ export class HeadlessBrowserRuntime {
   private async createSession(generation: number): Promise<HeadlessBrowserSession> {
     const browser = await this.ensureBrowser();
     this.assertCurrent(generation);
-    const context = await browser.newContext();
+    // 修复原因：自部署托管浏览器没有 Electron Session 承载证书策略，ignoreHTTPSErrors
+    // 只能在每个 Context 上设置。读取失败按严格校验处理（fail-closed），不向调用方抛错。
+    const ignoreHTTPSErrors = this.#options.resolveIgnoreHTTPSErrors
+      ? await this.#options.resolveIgnoreHTTPSErrors().catch(() => false)
+      : undefined;
+    const context = await browser.newContext(
+      ignoreHTTPSErrors === undefined ? {} : { ignoreHTTPSErrors },
+    );
     // 修复原因：Context 创建是异步的，断连或关闭后的结果不能进入新代次注册表。
     if (this.#disposed || generation !== this.#generation || !browser.isConnected()) {
       await context.close().catch(() => {});

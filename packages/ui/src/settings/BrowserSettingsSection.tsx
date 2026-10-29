@@ -104,6 +104,11 @@ export function BrowserSettingsSection({
     typeof platform.importChromeBrowserData === "function" ||
     typeof platform.clearEmbeddedBrowserData === "function";
   const importAvailable = typeof platform.importChromeBrowserData === "function";
+  // 证书策略的展示条件：优先看平台能力声明（自部署由 server 在每个 Playwright Context 上
+  // 设 ignoreHTTPSErrors，桌面由 Electron main 装到 Session）；未声明时回退到原 isDesktop 语义，
+  // 保证旧调用方/旧测试与历史行为不变。
+  const showCertificateSettings =
+    platform.canConfigureManagedBrowserCertificates ?? Boolean(isDesktop);
 
   useEffect(() => {
     if (!workspacePath) return;
@@ -292,8 +297,9 @@ export function BrowserSettingsSection({
         </SettingsGroupCard>
       </section>
 
-      {/* 证书策略只在桌面端有内置浏览器时可配；改动由 main 在启动时装到 Session，需重启生效。 */}
-      {isDesktop ? (
+      {/* 证书策略：桌面端由 Electron main 装到 Session；自部署由 server 在每个 Playwright
+          Context 上设 ignoreHTTPSErrors，两边都真实生效，因此按能力（而非是否 Electron）展示。 */}
+      {showCertificateSettings ? (
         <section className="space-y-3">
           <div className="text-ui-base font-medium text-foreground-subtle">
             {intl.formatMessage({ id: "settings.browser.security.section" })}

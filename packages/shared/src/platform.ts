@@ -688,6 +688,13 @@ export interface IPlatformService {
   canSelectFilePath?: boolean;
 
   /**
+   * 是否具备「托管浏览器证书策略」配置能力。
+   * 桌面端由 Electron main 把开关装到 Session；自部署由 server 在每次新建 Playwright Context 时读取。
+   * 两者都真实生效，故共用同一个设置项；手机远控等无托管浏览器的形态不声明。
+   */
+  canConfigureManagedBrowserCertificates?: boolean;
+
+  /**
    * 插件 UI 沙箱平台端口。只有桌面端实现；
    * web / 手机远控为 undefined，plugin-ui 据此回退到普通 MCP 工具卡片。
    */

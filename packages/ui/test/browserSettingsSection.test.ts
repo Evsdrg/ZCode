@@ -307,4 +307,28 @@ describe("BrowserSettingsSection", () => {
     expect(screen.getByRole("button", { name: "settings.browser.clearCache.action" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "settings.browser.clearAll.action" })).toBeTruthy();
   });
+
+  it("自部署平台声明托管浏览器证书能力时展示开关（不依赖 isDesktop）", () => {
+    h.platformOverrides = { canConfigureManagedBrowserCertificates: true };
+    renderSection(false, false, {
+      embeddedBrowserAllowInsecureCertificates: true,
+      onEmbeddedBrowserAllowInsecureCertificatesChange: vi.fn(async () => {}),
+    });
+    expect(
+      screen
+        .getByRole("switch", { name: "settings.embeddedBrowserAllowInsecureCertificates" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
+  it("平台未声明证书能力时保持原 isDesktop 语义（Web 不显示）", () => {
+    h.platformOverrides = {};
+    renderSection(false, false, {
+      embeddedBrowserAllowInsecureCertificates: true,
+      onEmbeddedBrowserAllowInsecureCertificatesChange: vi.fn(async () => {}),
+    });
+    expect(
+      screen.queryByRole("switch", { name: "settings.embeddedBrowserAllowInsecureCertificates" }),
+    ).toBeNull();
+  });
 });

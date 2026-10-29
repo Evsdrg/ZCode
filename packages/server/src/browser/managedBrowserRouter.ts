@@ -5,7 +5,7 @@ import {
   type BrowserControlExecutor,
   type BrowserExecutorExecuteInput,
 } from "./headlessBrowserExecutor.js";
-import type { BrowserExecutorListInput } from "./headlessBrowserRuntime.js";
+import type { BrowserExecutorListInput, HeadlessBrowserRuntimeOptions } from "./headlessBrowserRuntime.js";
 import type { HeadlessBrowserConfig, ManagedBrowserConfig } from "./headlessBrowserConfig.js";
 
 interface ManagedBrowserEntry {
@@ -93,15 +93,20 @@ export function createManagedBrowserRouter(
 
 export function createConfiguredBrowserExecutor(
   config: ManagedBrowserConfig,
-  createExecutor: (
-    config: HeadlessBrowserConfig,
-  ) => BrowserControlExecutor = createHeadlessBrowserExecutor,
+  createExecutor?: (config: HeadlessBrowserConfig) => BrowserControlExecutor,
+  runtimeOptions?: HeadlessBrowserRuntimeOptions,
 ): BrowserControlExecutor {
-  if (!("engines" in config)) return createExecutor(config);
+  // 自部署：证书策略来自设置页「允许不安全证书」（仅 self-host 生效，桌面走 Electron Session）。
+  // 未传工厂时用默认的 headless executor，并把 runtimeOptions（含 resolveIgnoreHTTPSErrors）传下去。
+  const create =
+    createExecutor ??
+    ((engineConfig: HeadlessBrowserConfig) =>
+      createHeadlessBrowserExecutor({ ...runtimeOptions, ...engineConfig }));
+  if (!("engines" in config)) return create(config);
   return createManagedBrowserRouter(
     config.engines.map((engine) => ({
       browserId: `server-headless-${engine.engine}`,
-      executor: createExecutor(engine),
+      executor: create(engine),
     })),
   );
 }

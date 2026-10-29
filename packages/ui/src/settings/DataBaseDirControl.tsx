@@ -9,6 +9,9 @@ import {
 } from "@zcode/shared/test-ids";
 import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
+import { DirectoryBrowser } from "@/DirectoryBrowser.js";
+import { useOptionalPlatform } from "@/hooks/usePlatform.js";
+import { useOptionalServices } from "@/hooks/useServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 
 export function DataBaseDirControl({
@@ -23,9 +26,18 @@ export function DataBaseDirControl({
   onSelectDataBaseDir: () => Promise<string | null>;
 }) {
   const { intl } = useZCodeIntl();
+  // 用 optional 版：纯展示单测会无 Provider 直 render，不应因平台注入缺失而抛错。
+  const platform = useOptionalPlatform();
+  const services = useOptionalServices();
   const effectiveDir = dataBaseDir || defaultHomeDir;
   const [localDataBaseDir, setLocalDataBaseDir] = useState(effectiveDir);
   const [isPickingDataBaseDir, setIsPickingDataBaseDir] = useState(false);
+  // 修复原因：WebUI 的 platform.selectDirectory 恒返回 null（浏览器无法调系统目录框），
+  // 导致「选择文件夹」点击无任何反应、输入框又只读，数据目录迁移在自部署形态完全不可用。
+  // 改为按能力分流：无法用原生目录框时回退到服务端目录浏览器（fileService.readdir），
+  // 保证选到的仍是宿主上真实存在的目录，与「只接受真实文件夹路径」的原设计一致。
+  const useServiceDirectoryBrowser = platform?.canSelectFilePath === false && services !== null;
+  const [serviceBrowserOpen, setServiceBrowserOpen] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [errorMessageId, setErrorMessageId] = useState("settings.dataBaseDirCopyFailed");
 
@@ -39,6 +51,10 @@ export function DataBaseDirControl({
   const isSaving = saveState === "saving";
 
   const handleBrowseDataBaseDir = useCallback(async () => {
+    if (useServiceDirectoryBrowser) {
+      setServiceBrowserOpen(true);
+      return;
+    }
     setIsPickingDataBaseDir(true);
     try {
       const selectedDir = await onSelectDataBaseDir();
@@ -56,7 +72,7 @@ export function DataBaseDirControl({
     } finally {
       setIsPickingDataBaseDir(false);
     }
-  }, [onSelectDataBaseDir, saveState]);
+  }, [onSelectDataBaseDir, saveState, useServiceDirectoryBrowser]);
 
   const handleSave = useCallback(async () => {
     const trimmed = localDataBaseDir.trim();
@@ -138,6 +154,18 @@ export function DataBaseDirControl({
         >
           {intl.formatMessage({ id: errorMessageId })}
         </p>
+      ) : null}
+      {serviceBrowserOpen && services ? (
+        <DirectoryBrowser
+          services={services}
+          initialPath={localDataBaseDir.trim() || undefined}
+          onCancel={() => setServiceBrowserOpen(false)}
+          onSelect={(path) => {
+            setServiceBrowserOpen(false);
+            setLocalDataBaseDir(path);
+            if (saveState !== "idle") setSaveState("idle");
+          }}
+        />
       ) : null}
     </div>
   );
