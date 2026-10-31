@@ -45,13 +45,6 @@ async function readDownloadBytes(url: string): Promise<ArrayBuffer> {
   }
 }
 
-/**
- * Web 端「另存为」：把字节交给浏览器下载。
- *
- * 与桌面端的语义差异（契约见 platform.ts 的 SaveFileResult 注释）：
- * 桌面端表示**已写入文件**；这里 success 只表示**已把下载交给浏览器**，
- * 浏览器不提供落盘回执，也无法可靠观察取消。
- */
 export async function saveBrowserFile(payload: SaveFileRequest): Promise<SaveFileResult> {
   let objectUrl: string | undefined;
   let anchor: HTMLAnchorElement | undefined;
@@ -74,6 +67,7 @@ export async function saveBrowserFile(payload: SaveFileRequest): Promise<SaveFil
     document.body.appendChild(anchor);
     anchor.click();
     dispatched = true;
+    // 浏览器下载没有可靠的落盘回执；success 只表示已将字节交给下载器。
     return { success: true };
   } catch (error) {
     return {

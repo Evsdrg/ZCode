@@ -86,7 +86,12 @@ export function createLocalWindowControllerService(options: {
 
   return {
     async listTaskList(params) {
-      for (const scope of params.workspaceScopes) ensureScopeEventSubscription(scope);
+      // 上游 3.17 起 workspaceScopes 可以是 "host"（存储 owner 决定全部范围）。
+      // 自部署的 taskService 就是存储 owner，直接透传即可；只有显式 scope 列表才需
+      // 建立 workspace 事件订阅（"host" 没有可订阅的具体 workspace）。
+      if (params.workspaceScopes !== "host") {
+        for (const scope of params.workspaceScopes) ensureScopeEventSubscription(scope);
+      }
       const result = await taskService.listTaskList(params);
       return {
         items: result.items.map((item) => ({

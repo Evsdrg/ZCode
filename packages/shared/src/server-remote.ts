@@ -47,6 +47,7 @@ export const serverRemoteInfoSchema = z.object({
     processResourceTelemetry: z.boolean().optional(),
     /** 自部署 server 注册了 host-native 平台服务（见 serverRemoteInfoOutputSchema 同名字段）。 */
     hostNative: z.literal(true).optional(),
+    remoteConversationTelemetry: z.boolean().optional(),
   }),
 });
 
@@ -76,6 +77,7 @@ export const serverRemoteInfoOutputSchema = z
          * 未声明时（旧 server / 手机远控）保持原有失败桩语义。
          */
         hostNative: z.literal(true).optional(),
+        remoteConversationTelemetry: z.boolean().optional(),
       })
       .strict(),
   })
