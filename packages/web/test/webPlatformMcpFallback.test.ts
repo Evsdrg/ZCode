@@ -28,7 +28,7 @@ async function importCreateWebPlatform() {
     location: new URL("https://zcode.z.ai/"),
   });
   vi.stubGlobal("navigator", { language: "zh-CN" });
-  const { createWebPlatform } = await import("../src/main.js");
+  const { createWebPlatform } = await import("#src/platform/index.js");
   return createWebPlatform;
 }
 

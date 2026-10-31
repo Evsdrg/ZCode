@@ -35,6 +35,8 @@
     "test:coverage": "vitest run --coverage --exclude \"packages/desktop/test/e2e/**/*.test.ts\"",
     "test:unit": "vitest run --exclude \"packages/desktop/test/e2e/**/*.test.ts\"",
     "test:unit:affected": "node scripts/run-affected-unit-tests.mjs",
+    "test:selfhost": "vitest run --config vitest.selfhost.config.ts",
+    "test:selfhost:known-debt": "ZCODE_SELFHOST_KNOWN_DEBT=1 vitest run --config vitest.selfhost.config.ts --project selfhost-known-debt",
     "test:docker:web-app-gateway": "node scripts/test-web-app-gateway-reset.mjs",
     "publish:check": "node scripts/publication/check.mjs",
     "publish:check:test": "node --test scripts/publication/checks.test.mjs",

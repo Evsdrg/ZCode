@@ -773,6 +773,21 @@ modules:
     layers:
       ui: .
     owner: conversation
+  # web-platform：由 architecture:adopt 登记
+  - id: web-platform
+    roots:
+      - packages/web/src/platform
+    managed: true
+    requires:
+      - shared
+      - ui
+      - web
+    publicEntrypoints:
+      - packages/web/src/platform/index.ts
+      - packages/web/src/platform/contract.ts
+    layers:
+      adapters: .
+    owner: web
 
 global:
   # 临时时间戳（2026-09-10）：unmanaged-new-file 只约束此日期之后首次入库的文件。

@@ -10,7 +10,7 @@ import { beforeAll, describe, expect, it } from "vitest";
  * 用动态 import：`main.tsx` 会拉入 xterm 等浏览器 bundle，而 vitest 是 node 环境，
  * 这些模块在顶层读 `self`。这里先补齐最小浏览器全局，再加载模块。
  */
-type WebPlatformFactory = typeof import("../src/main.js")["createWebPlatform"];
+type WebPlatformFactory = typeof import("#src/platform/index.js")["createWebPlatform"];
 let createWebPlatform: WebPlatformFactory;
 
 beforeAll(async () => {
@@ -33,7 +33,7 @@ beforeAll(async () => {
   const rootElement = document.createElement("div");
   rootElement.id = "root";
   document.body.appendChild(rootElement);
-  ({ createWebPlatform } = await import("../src/main.js"));
+  ({ createWebPlatform } = await import("#src/platform/index.js"));
 });
 
 describe("createWebPlatform host-native 接入", () => {
