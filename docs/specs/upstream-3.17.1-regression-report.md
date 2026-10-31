@@ -162,3 +162,46 @@ UI 显示 `smoke2.zip | ZIP`，无「上传失败」提示。
   重建 server/web 并重启，属于破坏性操作，需单独确认。
 - **`relayDeviceTransportV2.test.ts` 22 个用例仍红**：3.16.2 变基遗留的既有债，
   与本次合并无关（已在 fork 基线 `39c88478` 复现）。
+
+## 5. 生产上线记录
+
+保持验证策略（Web 形态）完成验收后，3.17.1 已上线到本机生产实例。
+
+| 项 | 上线前 | 上线后 |
+|---|---|---|
+| `server-info.version` | 3.16.2 | **3.17.1** |
+| `hostPlatform` | linux | linux |
+| server bundle | 5,696,749 B / `bd8d3c76` | 6,009,555 B / `04a75f6a` |
+| web 入口 chunk | `index-DYjqFjIU.js` | `index-BH8WGDy7.js` |
+| `zcode-web-local` | active, PID 185458 | active, PID 211958, NRestarts=0 |
+
+### 上线前置
+
+- 依赖：`pnpm install --no-frozen-lockfile`（7.8s），补齐上游新增的 workspace 包 `@zcode/e2e-report`
+- 数据库备份：`/opt/helloworld/agentTmp/zcode-backups/tasks-index-pre-3171-20261101-000348.sqlite`
+- 设置备份：同目录 `setting-pre-3171-20261101-000348.json`
+- 产物备份：`/opt/helloworld/agentTmp/zcode-backups/dist-pre-3171-20261101-000417/`
+
+### 上线后验证（生产实例，非隔离）
+
+| 检查 | 结果 |
+|---|---|
+| `/api/server-info` 无 token | 401 |
+| `/api/server-info` 带 token | 200，`version: 3.17.1` |
+| 静态首页 | 200，入口 `index-BH8WGDy7.js` |
+| 设置页导航 | 17 个分区全部渲染（含「个性化」） |
+| 历史任务打开 | `session-pane` + `composer` 正常，正文 3039 字符 |
+| **附件上传** | 四步 RPC 全 OK，落盘 SHA-256 `6ab4bfc6...4465` 与源文件一致 |
+| 数据存储路径 | 目录浏览器可打开（已取消，未改动生产配置） |
+| 代码预览设置 | `--diffs-font-size` = `12px`，输入框显示 12 |
+| CUA helper | socket 正常，`accessibility=granted` / `screen_recording=denied` |
+| 任务库完整性 | 266 条任务全部 `host_id='local'`，`remote:%` 残留 0 |
+| 子进程 | 12 个 `zcode-cli` 预热进程全部重建 |
+
+### 说明
+
+- 测试期间浏览器切换工作区导致 `setting.json` 的 `lastActiveWorkspace` /
+  `lastActiveTabIndex` 变动，已在收尾时恢复为测试前值
+  （`/opt/helloworld/agentTmp` / `6`）。
+- 测试上传的附件已删除。
+- `pi-bridge.service` 不在本机 systemd 中（`not-found`），非本次操作影响。
