@@ -201,6 +201,36 @@ describe.skipIf(!enabled)("managed browser integration", () => {
         expect((await run({ method: "list" })).tabs!.some((tab) => tab.tabId === tabId)).toBe(
           false,
         );
+        // ④ 会话生命周期命令：agent 侧 broker 在会话回收时会发 closeSession。
+        // 回归：该命令此前落到 dispatch default 返回 capability_unsupported，使 broker 抛
+        // "Browser lifecycle cleanup failed"，最终把整个 session 打成 faulted
+        // （用户可见 "Session runtime release failed"）。
+        // closeSession 必须真正关掉 Context：之后同 scope 的 list 返回空 tabs（新 session）。
+        const closed = await run({ method: "closeSession" });
+        expect(closed.ok).toBe(true);
+        const afterClose = await run({ method: "list" });
+        expect(afterClose.tabs ?? []).toEqual([]);
+        // 幂等：再关一次仍 ok。
+        expect((await run({ method: "closeSession" })).ok).toBe(true);
+        // openScope/releaseScope 回显 scope 状态（broker 会校验）。
+        const opened = await executor.execute({
+          ...scope,
+          requestId: crypto.randomUUID(),
+          browserId: descriptor.id,
+          browserGeneration: descriptor.generation,
+          controlScopeId: "scope-integration",
+          command: { method: "openScope" },
+        });
+        expect(opened.scope).toEqual({ id: "scope-integration", state: "open" });
+        const released = await executor.execute({
+          ...scope,
+          requestId: crypto.randomUUID(),
+          browserId: descriptor.id,
+          browserGeneration: descriptor.generation,
+          controlScopeId: "scope-integration",
+          command: { method: "releaseScope" },
+        });
+        expect(released.scope).toEqual({ id: "scope-integration", state: "released" });
       } finally {
         await executor.shutdown();
       }

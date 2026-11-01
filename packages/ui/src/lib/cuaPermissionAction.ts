@@ -131,3 +131,48 @@ export function completeCuaPermissionReturnRecovery(
     state.pending = false;
   }
 }
+
+/**
+ * Linux 主动授权失败的 i18n 文案 id 映射。
+ *
+ * 为什么需要按码分流：portal 授权失败横跨两类完全不同的原因——
+ *   1. 环境不具备条件（没有活动图形会话、xdg-desktop-portal-kde 未运行）；
+ *   2. 用户拒绝或等待超时。
+ * 前者用户需要去登录桌面或修复 portal，后者重试即可。历史上两者都被压成
+ * "Portal authorization was not granted."，把环境故障误报成用户操作问题。
+ *
+ * 未登记的失败码返回 undefined，由调用方回退到 helper 的原始错误文本，不吞信息。
+ */
+export function resolveLinuxCuaAccessFailureMessageId(
+  failureCode: string | null | undefined,
+): string | undefined {
+  switch (failureCode) {
+    case "portal_frontend_unavailable":
+      return "settings.computerUse.linuxAccess.failure.portalFrontendUnavailable";
+    case "graphical_session_unavailable":
+      return "settings.computerUse.linuxAccess.failure.graphicalSessionUnavailable";
+    case "authorization_denied":
+      return "settings.computerUse.linuxAccess.failure.denied";
+    case "authorization_timeout":
+      return "settings.computerUse.linuxAccess.failure.timeout";
+    case "helper_unreachable":
+      return "settings.computerUse.linuxAccess.failure.helperUnreachable";
+    case "unknown":
+      return "settings.computerUse.linuxAccess.failure.unknown";
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * 这些失败码属于「环境不具备条件」，提示里需要附上 portal 的原始错误，
+ * 用户报障时能直接给出原话；用户拒绝/超时则不必展示技术细节。
+ */
+export function shouldAppendLinuxCuaAccessFailureDetail(
+  failureCode: string | null | undefined,
+): boolean {
+  return (
+    failureCode === "portal_frontend_unavailable" ||
+    failureCode === "graphical_session_unavailable"
+  );
+}

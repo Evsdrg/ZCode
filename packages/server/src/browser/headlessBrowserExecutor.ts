@@ -31,6 +31,8 @@ export interface BrowserExecutorExecuteInput extends BrowserExecutorListInput {
   requestId: string;
   browserId?: string;
   browserGeneration?: number;
+  /** 桌面端的可接管控制域 id；托管后端没有该概念，仅在 releaseScope 时用于回显。 */
+  controlScopeId?: string;
   command: BrowserCommand;
 }
 
@@ -105,6 +107,41 @@ export function createHeadlessBrowserExecutor(
     });
     const fail = (code: BrowserErrorCode, message: string): BrowserCommandResult =>
       withMeta({ ok: false, error: { code, message } });
+    // 会话生命周期命令（closeSession / openScope / releaseScope）：
+    //
+    // 前两个来自 agent 侧 broker 的自动清理，不是模型发起的浏览器操作：
+    //  - closeSession：会话关闭/回收时释放该 session 的托管资源；
+    //  - openScope/releaseScope：桌面端用于“用户可接管”的控制域，托管后端没有对应概念。
+    //
+    // 桌面端由 browserGuestManager 逐条实现；自部署托管后端此前落到 dispatch 的 default，
+    // 返回 capability_unsupported，导致 broker 抛 "Browser lifecycle cleanup failed"，
+    // 再经 session-facade 把整个 session 打成 faulted，用户看到
+    // "Session runtime release failed"。见 headlessBrowserRuntime.closeSessionFor 注释。
+    if (command.method === "closeSession") {
+      // 不创建新 session，也不校验 generation：清理必须幂等成功。
+      // 浏览器断连/重启后 generation 会变，旧 session 已被 disconnected 监听器清空；
+      // 此时仍应返回 ok，否则关闭路径会因为「后端已过期」再次失败。
+      try {
+        await runtime.closeSessionFor(input);
+        return withMeta({ ok: true });
+      } catch (error) {
+        return fail("execution_error", error instanceof Error ? error.message : String(error));
+      }
+    }
+    if (command.method === "openScope" || command.method === "releaseScope") {
+      // 托管后端没有控制域：openScope 回显 open，releaseScope 回显 released。
+      // broker 对两者都校验 scope.id/state，不回显会被当成“未确认”而报错。
+      if (input.controlScopeId) {
+        return withMeta({
+          ok: true,
+          scope: {
+            id: input.controlScopeId,
+            state: command.method === "openScope" ? "open" : "released",
+          },
+        });
+      }
+      return withMeta({ ok: true });
+    }
     try {
       runtime.assertCurrent(generation, input.browserId);
       session = await runtime.sessionFor(input, generation);

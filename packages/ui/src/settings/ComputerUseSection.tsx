@@ -21,6 +21,7 @@ import { Switch } from "@/components/ui/switch.js";
 import { usePlatform } from "@/hooks/usePlatform.js";
 import { useServices } from "@/hooks/useServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import type { IntlInstance } from "@/i18n/IntlProvider.js";
 import { useCuaPermissionStatus } from "@/hooks/useCuaPermissionStatus.js";
 import {
   claimCuaPermissionReturnRecovery,
@@ -29,6 +30,8 @@ import {
   createCuaPermissionReturnRecoveryState,
   isCuaPermissionReturnRecoveryCurrent,
   markCuaPermissionOnboardingOpened,
+  resolveLinuxCuaAccessFailureMessageId,
+  shouldAppendLinuxCuaAccessFailureDetail,
   shouldRestartHelperAfterCuaPermissionReturn,
   type CuaPermissionReturnRecoveryClaim,
 } from "@/lib/cuaPermissionAction.js";
@@ -45,6 +48,32 @@ import {
   isComputerUseRemoteOrLinux,
   resolveComputerUseAvailability,
 } from "@/settings/computerUseAvailability.js";
+
+/**
+ * 把 Linux 主动授权失败码翻译成用户能据此行动的中文/英文提示。
+ * 映射规则与「是否附带原始错误」的判定都在 `cuaPermissionAction` 里，
+ * 这里只负责组合 intl 输出。
+ */
+function describeLinuxAccessFailure(
+  result: { reason?: string; failureCode?: string },
+  intl: IntlInstance,
+): string {
+  const messageId = resolveLinuxCuaAccessFailureMessageId(result.failureCode);
+  if (!messageId) {
+    // 未登记的失败码（例如未来 helper 新增的）直接回退到原始文本，不吞信息。
+    return (
+      result.reason ?? intl.formatMessage({ id: "settings.computerUse.linuxAccess.failure.unknown" })
+    );
+  }
+  const message = intl.formatMessage({ id: messageId });
+  if (result.reason && shouldAppendLinuxCuaAccessFailureDetail(result.failureCode)) {
+    return intl.formatMessage(
+      { id: "settings.computerUse.linuxAccess.failure.withDetail" },
+      { message, detail: result.reason },
+    );
+  }
+  return message;
+}
 
 interface ComputerUseSectionProps {
   isDesktop?: boolean;
@@ -639,10 +668,7 @@ export function ComputerUseSection({
         toast(intl.formatMessage({ id: "settings.computerUse.linuxAccess.grantedToast" }));
         refresh();
       } else {
-        toast(
-          result.reason ??
-            intl.formatMessage({ id: "settings.computerUse.linuxAccess.deniedToast" }),
-        );
+        toast(describeLinuxAccessFailure(result, intl));
       }
     } finally {
       if (mountedRef.current) setRequestingAccess(false);

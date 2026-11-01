@@ -7062,7 +7062,6 @@ const zhCN: Record<string, string> = {
     "排到任务时设备未在线。额度已返还，请保持设备在线后重新创建闲时任务。",
   "zcode.error.providerBusiness.3106": "已超过单次最长运行时间，请创建新的闲时任务继续。",
   "zcode.error.offPeakTicketExpired": "此闲时任务已无法继续，请创建新的闲时任务。",
-  "zcode.error.modelSuspiciousEmpty": "模型未返回任何内容。",
   "zcode.error.providerBusiness.2007": "上游服务暂时不可用，请稍后重试。",
   "zcode.error.providerBusiness.429": "请求过于频繁，请稍后重试。",
 
@@ -7865,6 +7864,16 @@ const zhCN: Record<string, string> = {
   "settings.computerUse.linuxAccess.requesting": "等待授权…",
   "settings.computerUse.linuxAccess.grantedToast": "已获得授权。",
   "settings.computerUse.linuxAccess.deniedToast": "未获得授权，可稍后重试。",
+  "settings.computerUse.linuxAccess.failure.portalFrontendUnavailable":
+    "系统门户的远程桌面组件不可用。请确认当前已登录 KDE 桌面会话，且 xdg-desktop-portal-kde 正在运行。",
+  "settings.computerUse.linuxAccess.failure.graphicalSessionUnavailable":
+    "当前没有可用的图形会话。Computer Use 需要先登录桌面后才能授权。",
+  "settings.computerUse.linuxAccess.failure.denied": "授权被拒绝，可稍后重试。",
+  "settings.computerUse.linuxAccess.failure.timeout": "等待授权超时，可稍后重试。",
+  "settings.computerUse.linuxAccess.failure.helperUnreachable":
+    "无法连接 Computer Use Helper，请稍后重试。",
+  "settings.computerUse.linuxAccess.failure.unknown": "未获得授权，可稍后重试。",
+  "settings.computerUse.linuxAccess.failure.withDetail": "{message}（详情：{detail}）",
   "settings.computerUse.pluginDisabledHint": "电脑控制插件未启用。前往插件开启后即可使用电脑控制。",
   "settings.computerUse.unsupported.title": "当前环境暂不支持电脑控制",
   "settings.computerUse.unsupported.remoteDescription":

@@ -285,6 +285,58 @@ describe("headlessBrowserExecutor", () => {
     await executor.shutdown();
   });
 
+  it("closeSession 释放该 session 的 Context 且幂等（未用过浏览器也返回 ok）", async () => {
+    const fake = createFakePlaywright();
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
+    // 未建立过 session：直接 closeSession 必须成功，不能返回 capability_unsupported。
+    // 回归：该分支此前落到 dispatch default，返回 capability_unsupported，使 agent 侧 broker
+    // 抛 "Browser lifecycle cleanup failed"，最终把整个 session 打成 faulted
+    // （用户可见 "Session runtime release failed"）。
+    const noop = await executor.execute(cmd({ method: "closeSession" }));
+    expect(noop.ok).toBe(true);
+    expect(fake.newContext).not.toHaveBeenCalled();
+
+    // 先建 session（一次 getState），再 closeSession：Context 必须被关闭。
+    const state = await executor.execute(cmd({ method: "getState" }));
+    expect(state.ok).toBe(true);
+    expect(fake.contexts).toHaveLength(1);
+    const closed = await executor.execute(cmd({ method: "closeSession" }));
+    expect(closed.ok).toBe(true);
+    // trackClose 是“登记后异步收尾”：close 在 promise 链上执行，需要等一个微任务轮次。
+    await vi.waitFor(() => expect(fake.contexts[0]!.close).toHaveBeenCalledTimes(1));
+
+    // 幂等：再次 closeSession 仍为 ok（session 已不在注册表）。
+    const again = await executor.execute(cmd({ method: "closeSession" }));
+    expect(again.ok).toBe(true);
+    await executor.shutdown();
+  });
+
+  it("openScope/releaseScope 回显 scope 状态（托管后端没有控制域）", async () => {
+    const fake = createFakePlaywright();
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
+    // broker 会校验 openScope 返回 scope.state === "open"、releaseScope 返回
+    // state ∈ {released, absent}；不回显会被当成“未确认”而抛错。
+    const opened = await executor.execute({
+      ...cmd({ method: "openScope" }),
+      controlScopeId: "scope-1",
+    });
+    expect(opened.ok).toBe(true);
+    expect(opened.scope).toEqual({ id: "scope-1", state: "open" });
+
+    const released = await executor.execute({
+      ...cmd({ method: "releaseScope" }),
+      controlScopeId: "scope-1",
+    });
+    expect(released.ok).toBe(true);
+    expect(released.scope).toEqual({ id: "scope-1", state: "released" });
+
+    // 不带 controlScopeId 时退化为普通 ok，不编造 scope。
+    const plain = await executor.execute(cmd({ method: "releaseScope" }));
+    expect(plain.ok).toBe(true);
+    expect(plain.scope).toBeUndefined();
+    await executor.shutdown();
+  });
+
   it("playwrightWaitForTimeout 与 listUserTabs/nameSession 返回兼容语义", async () => {
     const fake = createFakePlaywright();
     const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });

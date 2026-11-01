@@ -8296,6 +8296,16 @@ const enUS: Record<string, string> = {
   "settings.computerUse.linuxAccess.requesting": "Waiting for access…",
   "settings.computerUse.linuxAccess.grantedToast": "Access granted.",
   "settings.computerUse.linuxAccess.deniedToast": "Access was not granted. You can retry later.",
+  "settings.computerUse.linuxAccess.failure.portalFrontendUnavailable":
+    "The system portal's remote desktop component is unavailable. Make sure you are logged into a KDE desktop session and xdg-desktop-portal-kde is running.",
+  "settings.computerUse.linuxAccess.failure.graphicalSessionUnavailable":
+    "There is no active graphical session. Computer Use requires a desktop login before access can be granted.",
+  "settings.computerUse.linuxAccess.failure.denied": "Access was denied. You can retry later.",
+  "settings.computerUse.linuxAccess.failure.timeout": "Timed out waiting for access. You can retry later.",
+  "settings.computerUse.linuxAccess.failure.helperUnreachable":
+    "Could not reach the Computer Use Helper. Please try again later.",
+  "settings.computerUse.linuxAccess.failure.unknown": "Access was not granted. You can retry later.",
+  "settings.computerUse.linuxAccess.failure.withDetail": "{message} (details: {detail})",
   "settings.computerUse.pluginDisabledHint":
     "The Computer Use plugin is not enabled. Enable it in Plugins to use Computer Use.",
   "settings.computerUse.unsupported.title": "Computer Use is unavailable here",

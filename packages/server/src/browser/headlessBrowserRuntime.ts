@@ -296,6 +296,28 @@ export class HeadlessBrowserRuntime {
     return new HeadlessBrowserSession(context);
   }
 
+  /**
+   * 释放某个 session 的托管资源（BrowserContext 及其全部 tab）。
+   *
+   * 为什么需要显式方法：agent 侧 broker 在会话关闭/回收时会发 `closeSession` 生命周期命令，
+   * 桌面端由 browserGuestManager 处理；自部署托管后端此前落到 dispatch 的 default 分支，
+   * 返回 `capability_unsupported`，broker 因此抛 "Browser lifecycle cleanup failed"，
+   * 再经 session-facade → lifecycle controller 把整个 session 打成 `faulted`
+   * （日志链路：browser.session_cleanup.failed → session.resource_close.failed →
+   * "Session runtime release failed"）。表现为「部分会话」提示 Session runtime release failed，
+   * 实际只有用过浏览器的会话会命中（没建过 browser connection 的会话在 broker 里直接 return）。
+   *
+   * 幂等：session 可能已被空闲回收（不在注册表），此时返回 false 而不是报错。
+   */
+  async closeSessionFor(input: BrowserExecutorListInput): Promise<boolean> {
+    const key = scopeKey(input);
+    const entry = this.#sessions.get(key);
+    if (!entry) return false;
+    this.#sessions.delete(key);
+    this.trackClose(entry.promise);
+    return true;
+  }
+
   private trackClose(pending: Promise<HeadlessBrowserSession>): void {
     const closing = pending
       .then((session) => session.close())

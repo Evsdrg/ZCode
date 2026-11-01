@@ -987,9 +987,13 @@ function RootInner({
 
   // Bug 原因（2026-08-16 web 远控卡死）：官方版本请求安全校验应答方曾只随桌面正在展示的
   // session pane 挂载，web 远控新建会话时桌面没有对应 pane、web 端无应答方，
-  // headers 请求永远滞留 pending，任务永久「工作中」。应答方必须常驻桌面窗口、
-  // 覆盖每个打开的 workspace tab，与展示状态解耦；Web 端保持零订阅，桌面仍是唯一权威。
-  const requestSecurityBridgeNode = isDesktop ? (
+  // headers 请求永远滞留 pending，任务永久「工作中」。应答方必须常驻宿主窗口、
+  // 覆盖每个打开的 workspace tab，与展示状态解耦。
+  //
+  // 自部署 Web 也是「宿主」：它直接持有 agent 进程与凭据，必须自己应答；
+  // 只有手机 Web 远控（有 workspaceSwitcher）例外——那一边权威方是配对的桌面 Host。
+  const requestSecurityBridgeEnabled = isDesktop || !webRemoteControlWorkspaceSwitcher;
+  const requestSecurityBridgeNode = requestSecurityBridgeEnabled ? (
     <RequestSecurityWorkspaceBridge workspaceTabs={windowWorkspaceTabs} />
   ) : null;
 

@@ -2316,10 +2316,16 @@ export function createLocalServices(options: {
         const { requestLinuxCuaAccess } = await import(
           "./cua-permission-broker/linuxCuaPermissionStatus.js"
         );
-        const granted = await requestLinuxCuaAccess(socket, 120_000);
-        return granted
-          ? { ok: true }
-          : { ok: false, reason: "Portal authorization was not granted." };
+        const result = await requestLinuxCuaAccess(socket, 120_000);
+        if (result.granted) return { ok: true };
+        // 把 helper 的原始错误原样带出：上层据此区分「环境不具备授权条件」与
+        // 「用户拒绝了授权」。历史上这里统一返回 "Portal authorization was not granted."，
+        // 在没有图形会话时会把环境问题误报成用户操作问题。
+        return {
+          ok: false,
+          reason: result.errorMessage ?? "Portal authorization was not granted.",
+          failureCode: result.failureCode ?? "unknown",
+        };
       } catch (error) {
         return {
           ok: false,
