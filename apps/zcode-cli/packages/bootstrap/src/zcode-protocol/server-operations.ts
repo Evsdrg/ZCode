@@ -1698,7 +1698,28 @@ async function resolvePersistedDirectorySession(
   while (current && current.time.deleted === undefined && !visited.has(current.id)) {
     visited.add(current.id);
     const path = current.path || current.directory;
-    const key = current.workspaceID?.trim() || path;
+    let key = current.workspaceID?.trim() || path;
+    // Bug 原因：3.4 之前的 SSH/WSL 历史 session 把 remote identity 写进了 workspace_id，
+    // 而 host task-index 在 local 部署下已把它们归为 local（workspace_id 为 NULL）。
+    // 两侧不一致时冷恢复会抛 project.session-lineage-invalid，进而使后续
+    // runtime_preferences 落到错误 workspace 报 Request workspace is not owned by this CLI。
+    //
+    // 降级条件必须同时成立，避免把真实远端会话误判为 local：
+    //   1. 请求侧没有声明 workspaceIdentity（真实远端冷恢复一定带 identity）；
+    //   2. session.directory 与 identity 解析出的 workspacePath 完全相等——
+    //      这正是「本机路径被误写成远端身份」的形态；真实远端会话的 directory
+    //      是本地挂载路径，与远端 identity.workspacePath 不同。
+    //   3. identity.workspacePath 与请求 workspacePath 相等。
+    if (current.workspaceID && key !== expectedKey && !workspace.workspaceIdentity?.trim()) {
+      const parsed = parseRemoteWorkspaceIdentity(key);
+      if (
+        parsed &&
+        parsed.workspacePath === workspace.workspacePath &&
+        current.directory === parsed.workspacePath
+      ) {
+        key = path;
+      }
+    }
     if (path !== workspace.workspacePath) return null;
     const auxiliary = isAuxiliarySessionKind(current.taskType);
     if (key === expectedKey && (!resolveOwner || !auxiliary)) return current;
