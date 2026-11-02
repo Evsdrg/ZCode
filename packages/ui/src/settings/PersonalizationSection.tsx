@@ -134,17 +134,19 @@ const usePersonalizationDraftStore = create<PersonalizationDraftState>((set, get
  */
 export function PersonalizationSection({
   settingService,
-  isDesktop = false,
+  canEditUserInstructions = false,
 }: {
   settingService: PersonalizationSettingService;
-  /** 仅桌面本地入口可编辑：手机远控的 base services 可能归属远程 Source
-   *（remoteWorkspaceServiceCollection 把远程 Source 的 settingService 注册进该
-   * workspace 的服务集合，文件路径不是跨机器身份），编辑会写错机器。 */
-  isDesktop?: boolean;
+  /** 是否可编辑宿主机的 `~/.zcode/AGENTS.md`。
+   * 桌面端与自部署 Web（server 即宿主机）为 true；手机远控为 false——其 base
+   * services 可能归属远程 Source（remoteWorkspaceServiceCollection 把远程 Source
+   * 的 settingService 注册进该 workspace 的服务集合，文件路径不是跨机器身份），
+   * 编辑会写错机器。 */
+  canEditUserInstructions?: boolean;
 }) {
   // Web 远控不发起任何个性化读写，只给本地桌面端指引（同 WorkspaceFileSearchSection
   // 的无 workspace 分层先例：提前返回，不挂服务解析 hook 链）。
-  if (!isDesktop) {
+  if (!canEditUserInstructions) {
     return <LocalOnlyPersonalizationHint />;
   }
   return <DesktopPersonalizationEditor settingService={settingService} />;

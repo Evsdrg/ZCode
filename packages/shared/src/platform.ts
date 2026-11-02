@@ -735,6 +735,14 @@ export interface IPlatformService {
   canConfigureManagedBrowserCertificates?: boolean;
 
   /**
+   * 是否可编辑「个性化」指令（宿主机的 `~/.zcode/AGENTS.md`）。
+   * 桌面端写本机；自部署 Web 的 server 就是宿主机，`settingService.getUserInstructions`
+   * 已由 server 真实实现并注册到 RPC，写入的就是 server 所在机器的同一份文件。
+   * 手机远控不声明——它的 base services 可能归属远程 Source，编辑会写错机器。
+   */
+  canEditUserInstructions?: boolean;
+
+  /**
    * 插件 UI 沙箱平台端口。只有桌面端实现；
    * web / 手机远控为 undefined，plugin-ui 据此回退到普通 MCP 工具卡片。
    */

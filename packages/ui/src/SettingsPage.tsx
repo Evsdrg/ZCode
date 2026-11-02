@@ -2138,13 +2138,14 @@ export function SettingsPage({
                               />
                             </ServiceProvider>
                           ) : activeSection === "personalization" ? (
-                            // 个性化指令编辑的是本机 ~/.zcode/AGENTS.md（Agent 实际读取的文件）。
-                            // 仅桌面本地入口可编辑：手机远控的 base services 可能归属远程
-                            // Source（remoteWorkspaceServiceCollection 注册的是远端 settingService），
-                            // 编辑会写错机器；Web 端只显示本地桌面端指引。
+                            // 个性化指令编辑的是宿主机的 ~/.zcode/AGENTS.md（Agent 实际读取的文件）。
+                            // 按平台能力而非 isDesktop 判定：自部署 Web 的 server 就是宿主机，
+                            // settingService.getUserInstructions 由 server 真实实现并注册到 RPC，
+                            // 写入的是同一份文件；手机远控不声明该能力（base services 可能归属
+                            // 远程 Source，编辑会写错机器），仍只显示本地桌面端指引。
                             <PersonalizationSection
                               settingService={localHostServices.settingService}
-                              isDesktop={Boolean(isDesktop)}
+                              canEditUserInstructions={Boolean(platform.canEditUserInstructions)}
                             />
                           ) : activeSection === "memory" ? (
                             <ServiceProvider services={localHostServices}>

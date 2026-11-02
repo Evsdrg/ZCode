@@ -135,6 +135,10 @@ export function createWebPlatform(options?: {
     ...(managedBrowserMaintenance
       ? { canConfigureManagedBrowserCertificates: true }
       : {}),
+    // 自部署：server 就是宿主机，`settingService.getUserInstructions/saveUserInstructions`
+    // 由 server 真实实现并注册到 RPC，写入的就是 server 所在机器的 `~/.zcode/AGENTS.md`，
+    // 与桌面端语义一致。手机远控不声明——其 base services 可能归属远程 Source。
+    canEditUserInstructions: true,
     // Web 端无法打开系统目录选择框
     selectDirectory: () => Promise.resolve(null),
     // Web 端无法打开系统文件选择框

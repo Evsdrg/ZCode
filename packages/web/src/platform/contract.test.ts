@@ -9,6 +9,8 @@ describe("web platform boundary", () => {
     expect(platform.canOpenLocalFiles).toBe(false);
     expect(platform.canSelectFilePath).toBe(false);
     expect(platform.canConfigureManagedBrowserCertificates).toBeUndefined();
+    // 个性化指令由 server 侧的 settingService 真实实现，与 host-native 无关。
+    expect(platform.canEditUserInstructions).toBe(true);
     // 可选方法不实现就不要写桩：UI 的存在性判定必须拿到 undefined。
     expect(platform.importChromeBrowserData).toBeUndefined();
     expect(platform.openExternalFile).toBeUndefined();
@@ -43,6 +45,16 @@ describe("web platform boundary", () => {
       managedBrowserMaintenance: { clearAllData: async () => ({ success: true }) },
     });
     expect(platform.canConfigureManagedBrowserCertificates).toBe(true);
+  });
+
+  it("个性化指令能力与托管浏览器、host-native 互不牵连", () => {
+    // 三个能力分别对应不同的 server 侧实现，任何一个都不应连带影响其它。
+    const platform = createWebPlatform({
+      managedBrowserMaintenance: { clearAllData: async () => ({ success: true }) },
+    });
+    expect(platform.canConfigureManagedBrowserCertificates).toBe(true);
+    expect(platform.canEditUserInstructions).toBe(true);
+    expect(platform.canOpenLocalFiles).toBe(false);
   });
 
   it("saveFile 在超过 50 MiB 时 fail-closed 返回 file_too_large", async () => {
