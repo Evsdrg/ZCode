@@ -76,7 +76,18 @@ export class NodeZCodeBuiltinProviderConfigSource implements ProviderSource<Prov
         if (serializeZCodeBuiltinRelease(release) === serializeZCodeBuiltinRelease(current)) {
           return "unchanged" as const;
         }
-        throw new Error(`ZCode Built-in 相同 revision ${release.revision} 对应不同内容`);
+        // 上游发布事故：CDN 在同一个 revision 下换了内容（实测 zcode-builtin-production-43.json
+        // 的 config hash 为 cfb34fcb，而 3.17.1 内嵌 bundled 的 revision 43 是 b4402f74；
+        // 3.16.2 的 active 与 CDN 一致，证明是上游改内容未递增版本号）。
+        //
+        // 原实现直接 throw，使远端同步器把这次刷新记为失败：failureCount 指数退避重试，
+        // 实测已累到 160，且每次启动都刷 18 条 error 日志。但本地已由 selectReleaseCandidate
+        // 确定「同 revision 冲突以 Bundled 为权威」，实际一直在用 bundled 正常工作，
+        // 抛错除了刷屏和退避风暴外没有任何保护作用。
+        //
+        // 改为返回 "unchanged"（不覆盖本地、也不计作失败）：与 selectReleaseCandidate 的
+        // 权威裁定一致，同时让同步器按正常成功间隔复查，以便上游出真正递增版本时能正常追上。
+        return "unchanged" as const;
       }
       await this.#writeActiveLocked(release);
       this.#observedSignature = signatureOf(release);

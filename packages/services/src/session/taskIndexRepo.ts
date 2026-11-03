@@ -147,8 +147,17 @@ function rowToMeta(row: TaskIndexRow): ZCodeTaskMeta {
 
 function readPresentation(row: TaskIndexRow): ZCodeTaskMeta {
   const workspaceIdentity = resolveTaskIndexRowWorkspaceIdentity(row);
+  // 占位行：`reserveCreatedTask` 先于 CLI 首发插入归属行（保证创建归属早于窗口期），
+  // 该 INSERT 不写 meta_json——presentation 由后续 CLI 事实回填。因此 NULL/空串是设计内状态，
+  // 不是数据损坏；直接走下方列回退投影，不刷 warn。历史库里 165 条孤儿预留行曾因此每轮启动
+  // 刷 170 条 “meta_json 非法 (expected object, received null)”。
+  // 只有 “有内容但解析/校验失败” 才是真数据问题，仍按原样告警。
+  const rawMetaJson = row.meta_json?.trim();
+  if (!rawMetaJson) {
+    return projectPresentationFromColumns(row, workspaceIdentity);
+  }
   try {
-    const parsed = zcodeTaskMetaSchema.safeParse(JSON.parse(row.meta_json));
+    const parsed = zcodeTaskMetaSchema.safeParse(JSON.parse(rawMetaJson));
     if (parsed.success) {
       return {
         ...(parsed.data as ZCodeTaskMeta),
@@ -177,6 +186,14 @@ function readPresentation(row: TaskIndexRow): ZCodeTaskMeta {
     logger.warn(undefined, `读取 task index meta_json 失败 taskId=${row.task_id}`, error);
   }
 
+  return projectPresentationFromColumns(row, workspaceIdentity);
+}
+
+/** 由 tasks 表标量列投影 presentation；用于占位行与 meta_json 损坏行的统一回退。 */
+function projectPresentationFromColumns(
+  row: TaskIndexRow,
+  workspaceIdentity: string | undefined,
+): ZCodeTaskMeta {
   return {
     taskId: row.task_id,
     traceId: `zcode-${row.task_id}`,

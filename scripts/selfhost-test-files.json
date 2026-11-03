@@ -16,6 +16,8 @@
     "packages/services/src/prompt-attachment-transfer/arbitraryFileUploadStore.test.ts",
     "packages/services/src/prompt-attachment-transfer/promptAttachmentTransferService.test.ts",
     "packages/services/src/prompt-attachment-transfer/retainCommandAttachments.test.ts",
+    "packages/services/test/taskIndexPlaceholderMeta.test.ts",
+    "packages/provider-node/src/zcode-builtin-revision-conflict.test.ts",
     "packages/services/src/session/allWorkspacesTaskView.test.ts",
     "packages/services/src/session/automationScheduler.test.ts",
     "packages/services/src/web-remote-control/relayBridgeChannel.test.ts",

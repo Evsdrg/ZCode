@@ -6,6 +6,7 @@ import {
   createSettingServiceWithMigrations,
   createTopicResourcePeers,
   disposeServiceResourcesAndWait,
+  ensureTelemetryDeviceMid,
   getAppConfigDir,
   migrateApplicationStorage,
   OffPeakTaskRepo,
@@ -39,6 +40,20 @@ async function main(): Promise<void> {
   } = createSettingServiceWithMigrations();
   const resolveIgnoreHTTPSErrors = async (): Promise<boolean> =>
     (await settingService.get()).embeddedBrowserAllowInsecureCertificates === true;
+  // 自部署 Web 与 Desktop main 同机同会话，必须自己承担设备身份的生命周期。
+  // 与 entry-stdio / createServerHostServices 一致：在 services 创建前确保 telemetry-state.json
+  // 里有 deviceMid，否则 marketing-touch 的 `z.string().uuid().parse(getDeviceMid())` 会拿到
+  // undefined 并抛 ZodError，前端每次启动都刷 `marketing-touch.query FAIL`。
+  // 失败只告警、不阻断启动，也不伪造 ID（与既有 server 入口同语义）。
+  const serverLogger = createServiceLogger("server-host");
+  const telemetryDeviceMid = await ensureTelemetryDeviceMid().catch((error: unknown) => {
+    serverLogger.warn(
+      undefined,
+      "deviceMid 初始化失败，ZCode endpoint 请求将不带 X-Device-Mid:",
+      error instanceof Error ? error.message : String(error),
+    );
+    return undefined;
+  });
   const browserConfig = resolveHeadlessBrowserConfig(process.env);
   const browserExecutor = browserConfig
     ? createConfiguredBrowserExecutor(browserConfig, undefined, { resolveIgnoreHTTPSErrors })
@@ -92,6 +107,11 @@ async function main(): Promise<void> {
       return dispatchRuntime.dispatchManualRun(params);
     },
     ...(browserExecutor ? { browserControlExecutor: browserExecutor } : {}),
+    // marketing-touch / Start Plan 权益查询都以 X-Device-Mid 为必填；缺它会让
+    // marketing-touch.query 每次都抛 ZodError。这里把同一次启动期解析结果注入装配。
+    ...(telemetryDeviceMid
+      ? { agentTelemetry: { getDeviceMid: () => telemetryDeviceMid } }
+      : {}),
   });
 
   const automationSchedulerLogger = createServiceLogger("automation-scheduler");
