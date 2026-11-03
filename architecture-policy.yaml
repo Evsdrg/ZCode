@@ -1216,8 +1216,8 @@ exceptions:
     reason: 自部署托管浏览器执行器（Chromium/Firefox 双引擎、命令面、空闲回收），仅经 createConfiguredBrowserExecutor 公开入口装配。
   - id: selfhost-server-modules
     rule: unmanaged-new-file
-    paths: [ packages/server/src/automationDispatch.ts, packages/server/src/automationDispatchShared.ts, packages/server/src/offPeakDispatch.ts, packages/server/src/staticAssetCompression.ts, packages/server/src/webSocketHeartbeat.ts, packages/server/vitest.config.ts ]
-    reason: 自部署 server 的调度派发、静态压缩、WS 心跳与测试装配；依赖经 @zcode/services 公开入口。
+    paths: [ packages/server/src/automationDispatch.ts, packages/server/src/automationDispatchShared.ts, packages/server/src/offPeakDispatch.ts, packages/server/src/staticAssetCompression.ts, packages/server/src/webSocketHeartbeat.ts, packages/server/src/zcodeEndpointProxy.ts, packages/server/vitest.config.ts ]
+    reason: 自部署 server 的调度派发、静态压缩、WS 心跳、浏览器侧固定路径反代与测试装配；依赖经 @zcode/services 公开入口。
   - id: selfhost-relay-module
     rule: unmanaged-new-file
     paths: [ packages/services/src/web-remote-control/** ]

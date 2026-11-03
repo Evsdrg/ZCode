@@ -317,6 +317,7 @@ export {
   createRemoteConversationShareArtifactSource,
 } from "./conversation-share/conversationShareArtifactSource.js";
 export { createNodeApiClient, NodeApiClient } from "./providers/api/nodeApiClient.js";
+export { buildZCodeSourceHeaders } from "./providers/sourceHeaders.js";
 export {
   createHostApiNetworkTransport,
   type HostApiNetworkTransport,
@@ -834,6 +835,20 @@ export function registerHostApiNetworkTransportForDispose(
   transport: HostApiNetworkTransport,
 ): void {
   managedHostApiNetworkTransports.set(services, transport);
+}
+
+/**
+ * 取回本 Host 的 API 网络传输（含设置里的 HTTP 代理/自定义 CA）。
+ *
+ * 自部署 server 需要把浏览器的跨源请求（如 OAuth token 交换、help config）代发到 ZCode
+ * endpoint；这些请求必须与 server 自己的 API 调用走同一条出口（同一代理、同一 CA），
+ * 否则在配置了 HTTP 代理或企业 CA 的环境里，浏览器侧正常而反代侧失败。
+ * 只有同一 Host 创建时登记过才返回；外部注入的 transport 不走这条路径。
+ */
+export function getManagedHostApiNetworkTransport(
+  services: ServiceCollection,
+): HostApiNetworkTransport | undefined {
+  return managedHostApiNetworkTransports.get(services);
 }
 
 export function shouldEnableDefaultCuaProductHelper(

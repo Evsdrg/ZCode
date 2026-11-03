@@ -8,15 +8,18 @@ import {
   disposeServiceResourcesAndWait,
   ensureTelemetryDeviceMid,
   getAppConfigDir,
+  getManagedHostApiNetworkTransport,
   migrateApplicationStorage,
   OffPeakTaskRepo,
 } from "@zcode/services/node";
 import { formatLogPrefix } from "@zcode/shared";
+import { resolveRuntimeZCodeEndpointOrigin } from "@zcode/shared/zcodeEndpoint";
 import {
   materializeBundledZCodeBuiltinProviderConfig,
   readBundledZCodeBuiltinProviderConfig,
 } from "./bundledZCodeBuiltinProviderConfig.js";
 import { createHttpServer, resolveHttpServerId } from "./http.js";
+import { createZCodeEndpointProxy } from "./zcodeEndpointProxy.js";
 import { createConfiguredBrowserExecutor } from "./browser/managedBrowserRouter.js";
 import { resolveHeadlessBrowserConfig } from "./browser/headlessBrowserConfig.js";
 import { createServerAutomationDispatchRuntime } from "./automationDispatch.js";
@@ -143,6 +146,16 @@ async function main(): Promise<void> {
     ...(authToken ? { authToken, authRequired: true } : {}),
     // 本进程已注册 host-native 服务（见上方 createLocalServices 的 hostNative: true）。
     hostNative: true,
+    // 浏览器直连 zcode.z.ai 会被 Origin 白名单 403（实测：无 Origin 200 / 带部署站 Origin 403），
+    // 且浏览器 CORS 预检也不会过。自部署 Web 没有 Electron main 的 net.fetch，只能由 server
+    // 代发。复用本 Host 的 API 网络传输，保证与 server 其它 API 请求同一出口（HTTP 代理/CA）。
+    zcodeEndpointProxy: createZCodeEndpointProxy({
+      fetch: getManagedHostApiNetworkTransport(services)?.fetch ?? globalThis.fetch,
+      resolveEndpointOrigin: async () =>
+        resolveRuntimeZCodeEndpointOrigin(process.env, {
+          overrideOrigin: (await settingService.get()).zcodeEndpointOrigin,
+        }),
+    }),
   });
 
   // 优雅关闭：systemd stop/restart 发 SIGTERM。此前没有任何信号处理，进程被默认

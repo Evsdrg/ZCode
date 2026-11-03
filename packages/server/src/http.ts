@@ -50,6 +50,10 @@ import {
   compressStaticAsset,
   selectStaticAssetEncoding,
 } from "./staticAssetCompression.js";
+import {
+  ZCodeEndpointProxyError,
+  type createZCodeEndpointProxy,
+} from "./zcodeEndpointProxy.js";
 
 function wrapWebSocket(ws: WebSocket): ISocket {
   const onData = new Emitter<VSBuffer>();
@@ -172,6 +176,11 @@ export interface HttpServerOptions {
   workspaces?: ServerRemoteWorkspaceInfo[];
   /** 自部署：本进程注册了 host-native 平台服务，server-info.capabilities 据此声明能力。 */
   hostNative?: boolean;
+  /**
+   * 自部署：浏览器侧发往 ZCode endpoint 的固定路径反代。
+   * 普通浏览器没有 Electron main 的 net.fetch，直接连 zcode.z.ai 会被 Origin 白名单 403。
+   */
+  zcodeEndpointProxy?: ReturnType<typeof createZCodeEndpointProxy>;
 }
 
 function readTrimmedEnv(name: string): string | undefined {
@@ -387,6 +396,53 @@ export function createHttpServer(
 
   app.get("/api/server-info", (c) => c.json(createServerInfo(options)));
   app.post("/api/rpc-host-capability", (c) => c.json(hostCapabilities.issue()));
+
+  // 浏览器侧的固定路径反代（OAuth token 交换 / help 配置）。
+  // 自部署 Web 没有 Electron main 的 net.fetch：浏览器直连 zcode.z.ai 会被 Origin 白名单
+  // 直接 403（实测同一 URL 无 Origin 200、带部署站 Origin 403），且 CORS 预检也不会过。
+  // 这里只接受白名单路径，具体校验在 zcodeEndpointProxy 内部。
+  const zcodeEndpointProxy = options.zcodeEndpointProxy;
+  if (zcodeEndpointProxy) {
+    const handleProxy = async (c: Context) => {
+      const url = new URL(c.req.url);
+      const method = c.req.method === "POST" ? "POST" : c.req.method === "GET" ? "GET" : null;
+      if (!method) {
+        return c.json({ error: "Method Not Allowed" }, 405);
+      }
+      let body: string | undefined;
+      if (method === "POST") {
+        body = await c.req.text().catch(() => "");
+      }
+      try {
+        const result = await zcodeEndpointProxy({
+          method,
+          path: url.pathname,
+          search: url.search,
+          ...(body !== undefined ? { body } : {}),
+        });
+        return new Response(result.body, {
+          status: result.status,
+          headers: {
+            "Content-Type": result.contentType,
+            "Cache-Control": "no-store",
+          },
+        });
+      } catch (error) {
+        if (error instanceof ZCodeEndpointProxyError) {
+          const status =
+            error.reason === "path_not_allowed"
+              ? 404
+              : error.reason === "invalid_request"
+                ? 400
+                : 502;
+          return c.json({ error: error.message, reason: error.reason }, status);
+        }
+        return c.json({ error: "ZCode endpoint proxy failed" }, 502);
+      }
+    };
+    app.post("/api/v1/oauth/token", handleProxy);
+    app.get("/api/v1/client/configs", handleProxy);
+  }
 
   // 普通 `/ws` 永远是 terminal-client；浏览器/任意客户端设置旧 mode header
   // 都不能再把自己提升为 trusted host。

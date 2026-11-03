@@ -49,6 +49,11 @@ export function resolveHelpAppConfig(remote: unknown, local: unknown): HelpAppCo
 export function createHelpAppConfigReader(options: {
   fetchImpl: typeof fetch;
   now?: () => number;
+  /**
+   * 同源反代场景需要带上部署站自己的鉴权 cookie（自部署 server 的 `/api/` 受 token 保护）；
+   * 桌面端直连 zcode.z.ai 时保持 omit：那里没有也不该有本机 cookie。
+   */
+  credentials?: "omit" | "same-origin" | "include";
 }) {
   const entries = new Map<
     string,
@@ -70,7 +75,7 @@ export function createHelpAppConfigReader(options: {
       const response = await options.fetchImpl(url, {
         method: "GET",
         cache: "no-store",
-        credentials: "omit",
+        credentials: options.credentials ?? "omit",
         headers,
         signal: AbortSignal.timeout(10_000),
       });
