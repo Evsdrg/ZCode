@@ -37,6 +37,7 @@
     "packages/shared/src/request-security-edition/requestSecurityPolicy.test.ts",
     "packages/ui/src/botsUi.test.ts",
     "packages/ui/src/lib/browserDigest.test.ts",
+    "packages/ui/src/lib/insecureContextUuid.test.ts",
     "packages/ui/src/lib/clipboard.test.ts",
     "packages/ui/src/lib/clipboardRead.test.ts",
     "packages/ui/src/lib/cuaPermissionAction.test.ts",

@@ -1099,7 +1099,7 @@ modules:
     roots:
       - packages/ui/src/image-preview-editor
     managed: true
-    requires: [ ui ]
+    requires: [ shared, ui ]
     publicEntrypoints:
       - packages/ui/src/image-preview-editor/index.ts
       - packages/ui/src/image-preview-editor/contract.ts

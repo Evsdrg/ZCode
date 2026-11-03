@@ -6,6 +6,7 @@ import type {
   PluginUiScopeRef,
 } from "@zcode/shared/mcp-apps";
 import { buildPluginSandboxScopeId } from "@zcode/shared/mcp-apps";
+import { createUuid } from "@zcode/shared";
 import type { AttachmentRef, ConversationInputSource } from "@zcode/shared/zcode-protocol-v4";
 import type { ReactNode } from "react";
 import type { PluginUiImageBlock } from "./domain/pluginUiImageBlocks.js";
@@ -260,6 +261,6 @@ export interface PluginUiResourceNotificationTarget {
 /** 文档查看器手动入口创建独立窗口；工具调用继续使用原有的显式 surface 路由。 */
 export function documentViewerInstance(resourceUri: string): { instanceId?: string } {
   return /^ui:\/\/(documents|pdf|presentations|spreadsheets)\/panel\.html$/.test(resourceUri)
-    ? { instanceId: crypto.randomUUID() }
+    ? { instanceId: createUuid() }
     : {};
 }

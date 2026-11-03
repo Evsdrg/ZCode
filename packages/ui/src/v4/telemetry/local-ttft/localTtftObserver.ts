@@ -5,6 +5,7 @@ import {
 } from "@/v4/telemetry/local-ttft/localTtftRecord.js";
 import { logger } from "@/logger.js";
 import {
+  createUuid,
   LOCAL_TTFT_MAX_PENDING,
   LOCAL_TTFT_TTL_MS,
   LOCAL_TTFT_CLOCK_TTL_MS,
@@ -61,7 +62,7 @@ export class LocalTtftObserver {
     if (this.readForeground) this.visibility(this.readForeground());
     const context: LocalTtftContext = {
       version: 1,
-      observationId: crypto.randomUUID(),
+      observationId: createUuid(),
       ...(this.localOnly ? { localOnly: true as const } : {}),
     };
     const now = this.now();

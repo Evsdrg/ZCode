@@ -8,7 +8,7 @@ import {
   type CommandPayloadMap,
   type CommandType,
 } from "@zcode/shared/zcode-protocol-v4";
-import { uuidv7 } from "@zcode/shared";
+import { createUuid, uuidv7 } from "@zcode/shared";
 export { uuidv7 } from "@zcode/shared";
 
 const CLIENT_ID_STORAGE_KEY = "zcode-v4-client-id:v1";
@@ -60,13 +60,16 @@ export function createCommandEnvelope<T extends CommandType>(
     throw new Error(`command ${input.type} 是 row target 命令，必须携带 baseLogEpoch`);
   }
   // 会话 ID 恢复 UUID v4；在信封首次构造时分配，避免重试重新生成并预留另一条任务。
+  // 必须走 shared 的 createUuid：自部署 WebUI 常以 HTTP 访问内网地址，不是安全上下文，
+  // 此时 crypto.randomUUID 不存在（crypto.getRandomValues 仍在），直接调用会在发送前抛错，
+  // 表现为草稿态「草稿会话创建失败，请重试」且命令根本没离开浏览器。
   const payload =
     input.type === "createSession"
       ? {
           ...input.payload,
           sessionId:
             (input.payload as CommandPayloadMap["createSession"]).sessionId ??
-            `sess_${crypto.randomUUID()}`,
+            `sess_${createUuid()}`,
         }
       : input.payload;
   return {

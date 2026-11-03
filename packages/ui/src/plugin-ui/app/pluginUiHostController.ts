@@ -13,6 +13,7 @@ import {
   MCP_APPS_WIDGET_STATE_CONTEXT_KEY,
   buildPluginSandboxScopeId,
 } from "@zcode/shared/mcp-apps";
+import { createUuid } from "@zcode/shared";
 import { createPluginUiAppTools } from "./pluginUiAppTools.js";
 import {
   installPluginUiHostAppHandlers,
@@ -59,7 +60,8 @@ export function createPluginUiHostController(
   // 进行中的页面工具调用 id，dispose 时逐个取消到 agent。
   const activeCalls = new Set<string>();
   let unregisterNotifications: (() => void) | null = null;
-  const createCallId = deps.createCallId ?? (() => crypto.randomUUID());
+  // 默认调用 id 必须走 shared 的降级链：HTTP 自部署下 crypto.randomUUID 不存在。
+  const createCallId = deps.createCallId ?? (() => createUuid());
   const setTimer =
     deps.setTimer ??
     ((callback: () => void, ms: number) => {
