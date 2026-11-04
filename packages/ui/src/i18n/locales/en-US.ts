@@ -2306,6 +2306,8 @@ const enUS: Record<string, string> = {
   "directoryBrowser.opening": "Opening…",
   "directoryBrowser.errorSystem": "Failed to get system info",
   "directoryBrowser.errorReadDir": "Failed to read directory: {error}",
+  "directoryBrowser.selectPathAria": "Select directory {path}",
+  "directoryBrowser.selectPaths": "Add {count} selected directories",
 
   // Update ready button
   "updateReady.shortTitle": "Update",

@@ -2133,6 +2133,8 @@ const zhCN: Record<string, string> = {
   "directoryBrowser.opening": "正在打开…",
   "directoryBrowser.errorSystem": "无法获取系统信息",
   "directoryBrowser.errorReadDir": "无法读取目录：{error}",
+  "directoryBrowser.selectPathAria": "选择目录 {path}",
+  "directoryBrowser.selectPaths": "添加选中的 {count} 个目录",
 
   // 更新按钮
   "updateReady.shortTitle": "更新",

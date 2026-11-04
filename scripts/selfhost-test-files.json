@@ -59,6 +59,7 @@
     "packages/ui/src/webRemoteControlRelayUi.test.ts",
     "packages/ui/test/codeBlockCodePreviewSettings.test.ts",
     "packages/ui/test/dataBaseDirControlWebFallback.test.ts",
+    "packages/ui/test/directoryBrowserMultiSelect.test.ts",
     "packages/web/src/clientFlowControl.test.ts",
     "packages/web/src/connectionResilience.test.ts",
     "packages/web/src/platform/contract.test.ts",

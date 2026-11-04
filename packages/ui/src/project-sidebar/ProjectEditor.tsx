@@ -444,10 +444,17 @@ export function ProjectEditor({
                 <DirectoryBrowser
                   embedded
                   showSelectionActions
+                  // Web/无原生选择器形态：用内嵌浏览器支持一次勾选多个目录，
+                  // 与桌面端 selectDirectories 的批量语义对齐（原先只能单选后反复添加）。
+                  // 远端项目仍只允许一个根目录（addRoots 会截断），因此不在远端开启多选。
+                  multiSelect={!remote}
                   selectLabel={msg("browse")}
                   services={directory.services}
                   onSelect={(path) => {
                     if (current(browserEpoch)) addRoots([path]);
+                  }}
+                  onSelectPaths={(paths) => {
+                    if (current(browserEpoch)) addRoots(paths);
                   }}
                   onCancel={() => {
                     epoch.current++;

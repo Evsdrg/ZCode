@@ -59,6 +59,8 @@ export function DirectoryBrowser({
   selectLabel,
   selecting,
   formatError,
+  multiSelect = false,
+  onSelectPaths,
 }: {
   services: {
     fileService: Pick<IServiceAccessor["fileService"], "readdir">;
@@ -71,6 +73,12 @@ export function DirectoryBrowser({
   onNavigationStateChange?: (ready: boolean) => void;
   navigationRevision?: number;
   embedded?: boolean;
+  /**
+   * 多选模式：目录行出现勾选框，底部确认一次性交回全部已选目录。
+   * 单选模式（默认）保持原有「进入目录 → 确认当前目录」语义不变。
+   */
+  multiSelect?: boolean;
+  onSelectPaths?: (paths: string[]) => void;
   showSelectionActions?: boolean;
   selectLabel?: string;
   selecting?: boolean;
@@ -82,6 +90,8 @@ export function DirectoryBrowser({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showHiddenDirectories, setShowHiddenDirectories] = useState(false);
+  // 多选模式下已勾选的目录集合；单选模式不使用。
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const requestedPathRef = useRef("");
   const appliedNavigationRevisionRef = useRef(navigationRevision);
   const listRef = useRef<HTMLDivElement>(null);
@@ -205,6 +215,25 @@ export function DirectoryBrowser({
     onSelect(selectedPath);
   };
 
+  // 多选模式下底部确认交回全部勾选目录；未勾选时回退到当前浏览目录，
+  // 避免用户只导航不勾选时无法确认（与单选行为保持一致的退路）。
+  const handleConfirmMultiSelection = () => {
+    if (loading || selecting) return;
+    const paths = selectedPaths.length
+      ? selectedPaths
+      : currentPath.trim()
+        ? [currentPath.trim()]
+        : [];
+    if (!paths.length) return;
+    onSelectPaths?.(paths);
+  };
+
+  const toggleSelectedPath = (path: string) => {
+    setSelectedPaths((prev) =>
+      prev.includes(path) ? prev.filter((item) => item !== path) : [...prev, path],
+    );
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") onCancel();
   };
@@ -306,16 +335,41 @@ export function DirectoryBrowser({
               getDirectoryBrowserEntryIconKind(entry) === "folder-symlink"
                 ? FolderSymlinkIcon
                 : FolderIcon;
+            const isSelected = multiSelect && selectedPaths.includes(entry.path);
 
             return (
-              <button
+              <div
                 key={entry.path}
-                onClick={() => navigateTo(entry.path)}
-                className="flex w-full shrink-0 cursor-pointer items-center gap-2 px-3 py-2 text-left text-ui-base transition hover:bg-hover/50"
+                className={cn(
+                  "flex w-full shrink-0 items-center gap-2 text-ui-base transition",
+                  isSelected ? "bg-hover/60" : "hover:bg-hover/50",
+                )}
               >
-                <EntryIcon className="size-4 shrink-0 text-foreground-subtle" />
-                <span className="truncate">{entry.name}</span>
-              </button>
+                {/* 多选模式下勾选框与「进入目录」必须拆开：点勾选只改选择，
+                    点名称仍然进入子目录，否则无法在大目录下逐层选取多个目标。 */}
+                {multiSelect ? (
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    aria-label={intl.formatMessage(
+                      { id: "directoryBrowser.selectPathAria" },
+                      { path: entry.path },
+                    )}
+                    onChange={() => toggleSelectedPath(entry.path)}
+                    className="ml-3 size-4 shrink-0 cursor-pointer accent-primary"
+                  />
+                ) : null}
+                <button
+                  onClick={() => navigateTo(entry.path)}
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2 py-2 text-left",
+                    multiSelect ? "pr-3" : "px-3",
+                  )}
+                >
+                  <EntryIcon className="size-4 shrink-0 text-foreground-subtle" />
+                  <span className="truncate">{entry.name}</span>
+                </button>
+              </div>
             );
           })
         )}
@@ -347,10 +401,14 @@ export function DirectoryBrowser({
             selecting !== undefined && "grid",
             selecting && "disabled:opacity-100",
           )}
-          disabled={!currentPath.trim() || loading || Boolean(error) || selecting}
+          disabled={
+            multiSelect
+              ? selectedPaths.length === 0 && !currentPath.trim()
+              : !currentPath.trim() || loading || Boolean(error) || selecting
+          }
           aria-busy={selecting}
           data-testid="directory-browser-confirm"
-          onClick={handleSelectCurrentPath}
+          onClick={multiSelect ? handleConfirmMultiSelection : handleSelectCurrentPath}
         >
           {/* 原因：父层追加加载行会撑高弹窗且脱离点击位置；复用父层状态，在按钮内反馈。
               两种文案共用网格占位，避免加载时按钮变宽；不新增异步状态或计时器。 */}
@@ -358,7 +416,12 @@ export function DirectoryBrowser({
             className={cn("col-start-1 row-start-1", selecting && "invisible")}
             aria-hidden={selecting || undefined}
           >
-            {selectLabel ?? intl.formatMessage({ id: "directoryBrowser.selectDir" })}
+            {multiSelect && selectedPaths.length > 0
+              ? intl.formatMessage(
+                  { id: "directoryBrowser.selectPaths" },
+                  { count: selectedPaths.length },
+                )
+              : (selectLabel ?? intl.formatMessage({ id: "directoryBrowser.selectDir" }))}
           </span>
           {selecting !== undefined ? (
             <span
