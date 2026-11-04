@@ -1,8 +1,12 @@
 import type {
+  ApplicationIconInfo,
+  ApplicationIconRequest,
   CreateTempTextAttachmentRequest,
   CreateTempTextAttachmentResult,
   DockerContainerInfo,
   EditorInfo,
+  FileApplicationInfo,
+  FileApplicationTarget,
   MaterializeWorkflowArtifactFileRequest,
   MaterializeWorkflowArtifactFileResult,
   OpenInEditorOptions,
@@ -54,6 +58,23 @@ export interface IHostNativeService {
   materializeWorkflowArtifactFile(
     payload: MaterializeWorkflowArtifactFileRequest,
   ): Promise<MaterializeWorkflowArtifactFileResult>;
+
+  /** 用系统默认应用打开本机文件（对齐 Electron `shell.openPath`）。 */
+  openExternalFile(path: string): Promise<HostNativeOpenResult>;
+
+  /** 列出能打开该文件的系统应用（含图标）。 */
+  getFileApplications(target: FileApplicationTarget): Promise<FileApplicationInfo[]>;
+
+  /** 用指定系统应用打开本机文件；每次重查关联，不信任 renderer 传的应用路径。 */
+  openFileWithApplication(
+    applicationId: string,
+    target: FileApplicationTarget,
+  ): Promise<HostNativeOpenResult>;
+
+  /** 按 `.desktop` app id / 显示名解析应用图标；Linux 不支持 macOS/Windows locator。 */
+  getApplicationIcon(
+    request: string | ApplicationIconRequest,
+  ): Promise<ApplicationIconInfo | null>;
 
   /** 本机 `~/.ssh/config` 中定义的别名。 */
   listSSHConfigAliases(): Promise<SSHConfigAliasOption[]>;

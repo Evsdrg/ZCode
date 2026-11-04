@@ -144,3 +144,100 @@
 - 阶段 1 的文件选择框与日志导出（需新 portal 客户端 + HTTP 路由，属独立工作单元）。
 - `pluginSandbox` 的 iframe 替代方案。
 - 任何 Electron 更新器能力。
+
+---
+
+# 第二阶段：平台能力补齐（host-native 扩展）
+
+状态：实施中
+范围：`packages/services/src/host-native/` 扩展 + `packages/web/src/platform/index.ts` 接线。
+前提约束（用户明确）：**实际部署形态 = 开源 WebUI + 闭源后端**；开源 WebUI 是从 Electron 剥离而来，
+因此所有能力的**语义必须与 Electron 完全一致**，不能自由发挥。
+
+## 基线来源
+
+以 `desktopPlatform.ts`（Electron renderer 的 `IPlatformService` 实现）为语义基线：
+
+| 集合 | 数量 |
+| --- | --- |
+| `IPlatformService` 接口方法 | 139 |
+| `desktopPlatform` 实现 | 115 |
+| `createWebPlatform` 实现 | 70 |
+| **真实缺口** | **49** |
+
+## 缺口分类（49 个）
+
+### A 类：底层能力已存在或可直接移植（本阶段实施）
+
+| 方法 | UI 消费点 | 底层实现 | 做法 |
+| --- | --- | --- | --- |
+| `openExternalFile` | 9 | `shell.openPath` 语义 = `xdg-open`（`openTarget.ts` 已有同款） | host-native 暴露 `openExternalFile`；web 接线 |
+| `getFileApplications` | 3 | `desktop/src/main/file-open-apps/` **零 electron 依赖**（index/native/linux/windows/mac 共 11 文件） | 移植到 `services/src/host-native/file-apps/` |
+| `openFileWithApplication` | 4 | 同上 | 同上 |
+| `getApplicationIcon` | 5 | `.desktop` 的 `Icon=` 解析（`editors.ts` 已有同类逻辑） | 新增 Linux 图标解析 |
+| `selectDirectories` | 2 | `DirectoryBrowser`（`dataBaseDir` 已用同款） | web 侧接目录浏览器（多选） |
+| `getSystemLocale` | 0 | `navigator.language` | web 侧直接实现 |
+| `onApplicationLocaleChanged` | 1 | `languagechange` 事件 | web 侧直接实现 |
+
+### 已实施结果（本阶段）
+
+| 方法 | 状态 | 验证 |
+| --- | --- | --- |
+| `openExternalFile` | ✅ | 空路径 / 无图形会话 fail-closed；RPC 可达 |
+| `getFileApplications` | ✅ | 真实 PDF 返回 5 个关联应用（含默认标记与图标） |
+| `openFileWithApplication` | ✅ | 拒绝 remoteTarget / 非绝对路径 / 目录 / workspaceIdentity |
+| `getApplicationIcon` | ✅ | 按 `.desktop` app id 解析；主题链（Papirus）生效 |
+| `getSystemLocale` | ✅ | `navigator.language` → `zh-CN`/`en-US` |
+| `selectDirectories` | ⏸ 未做 | `DirectoryBrowser` 只支持单选，多选需改 UI 组件 |
+
+**额外修复的既有缺陷**：`file-apps/linux.ts` 原先只把绝对路径当 `iconPath`，主题图标名（`vscode`、`okular`）全部丢图标；`editors.ts` 的图标查找只查 `hicolor`，非 hicolor 主题（本机 `Papirus-Dark`）下应用无图标。两者现统一到 `applicationIcons.ts` 的 XDG 主题链解析。
+
+### B 类：有降级路径，收益低（暂不做）
+
+| 方法 | 现状 |
+| --- | --- |
+| `createLocalMediaPreviewUrl` | Web 已有 blob 回退（`attachmentRead` 走 chunks → `URL.createObjectURL`），仅视频 seek 体验略差 |
+
+### C 类：Electron 私有，不可实现（22 个）
+
+`browserView*` 全部 20 个、`getDesktopWindowChromeState`/`onDesktopWindowChromeStateChanged`、
+`getWindowControlsOverlayMetrics`/`onWindowControlsOverlayChanged`。
+
+### D 类：语义不适用，保持缺席（14 个）
+
+`getCloseToTrayCapability`、更新器 5 个、`getZCodeStdioTapDevState`、`onOpenWorkspacePath`、
+`onRemoteSessionReconnected`、手机远控 5 个、Source Server 2 个。
+
+### E 类：遥测采样，收益低（6 个）
+
+`getRendererActionTraceConfig` 等。
+
+### F 类：内嵌浏览器权限（6 个）
+
+自部署没有「用户可视的内嵌浏览器」，无消费场景。
+
+## 实施清单
+
+1. `packages/services/src/host-native/file-apps/`：从 desktop 移植（保持逐字一致，仅改 import 路径）
+2. `host-native/contract.ts`：新增 `openExternalFile` / `getFileApplications` / `openFileWithApplication` / `getApplicationIcon`
+3. `host-native/hostNativeService.ts`：装配新方法
+4. `host-native/icons.ts`：Linux `.desktop` 图标解析（`Icon=` → 主题图标查找 → data URL）
+5. `packages/web/src/platform/contract.ts`：`WebHostNativeService` 扩展形状
+6. `packages/web/src/platform/index.ts`：接线 7 个方法
+7. `packages/web/src/platform/index.ts`：`selectDirectories` 走目录浏览器多选
+8. `packages/web/src/platform/index.ts`：`getSystemLocale` / `onApplicationLocaleChanged`
+
+## 不变量
+
+1. **桌面行为零变化**：所有新方法只在 `hostNativeService` 存在时启用；desktop Host 不注册本服务。
+2. **语义与 Electron 一致**：`openExternalFile` = `shell.openPath`；`openFileWithApplication` 严格镜像
+   `file-open-apps/index.ts` 的 `validTarget` 校验（拒绝 remoteTarget / workspaceIdentity / 非 file / 非绝对路径 / 非真实文件）。
+3. **失败显式**：不满足条件返回 `{success:false, error}`，不静默成功。
+4. **跨层禁令**：`services` 不 import `packages/desktop`。
+
+## 验收场景
+
+1. 自部署 WebUI 中，文件树右键「在文件管理器中显示」→ 宿主文件管理器打开并定位。
+2. 点击文件卡片的「用其他应用打开」→ 列出本机已安装的关联应用（含图标）→ 选择后宿主打开该文件。
+3. 工程编辑器「添加目录」→ 打开目录浏览器（多选）→ 选中多个目录。
+4. 以上在桌面端行为完全不变。

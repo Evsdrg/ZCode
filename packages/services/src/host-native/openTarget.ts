@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { access, stat } from "node:fs/promises";
+import { access, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { createServiceLogger } from "../logger/serviceLogger.js";
 import type { HostNativeOpenResult } from "./contract.js";
@@ -16,6 +16,41 @@ const logger = createServiceLogger("host-native-files");
  */
 export function hasGraphicalSession(env: NodeJS.ProcessEnv = process.env): boolean {
   return Boolean(env["WAYLAND_DISPLAY"]?.trim() || env["DISPLAY"]?.trim());
+}
+
+/**
+ * 用系统默认应用打开本机文件。
+ *
+ * 语义与 Electron `shell.openPath` 一致（见 `desktopMainIpcHelpers.ts` 的 `openPathInDefaultApp`）：
+ * - 先把路径 `realpath` 归一（失败则用 normalize 后的原路径，让系统返回更具体的错误）；
+ * - 文件用默认应用打开；目录也交给系统（文件管理器）。
+ *
+ * 与 `openInFileManager` 的区别：`openInFileManager` 的语义是「在文件管理器里定位」
+ * （文件 → 打开父目录并选中）；本函数是「用默认应用打开这个文件」，两者不能混用。
+ */
+export async function openExternalFile(
+  rawPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<HostNativeOpenResult> {
+  const trimmed = typeof rawPath === "string" ? rawPath.trim() : "";
+  if (!trimmed) return { success: false, error: "empty path" };
+
+  let target = trimmed;
+  try {
+    target = await realpath(trimmed);
+  } catch {
+    // 路径不存在或无法解析时仍尝试用原路径，让系统给出更具体的错误。
+  }
+
+  if (!hasGraphicalSession(env)) return { success: false, error: "no_display" };
+
+  for (const [command, args] of [
+    ["xdg-open", [target]],
+    ["gio", ["open", target]],
+  ] as const) {
+    if (await trySpawn(command, [...args], env)) return { success: true };
+  }
+  return { success: false, error: "no_file_manager" };
 }
 
 /**

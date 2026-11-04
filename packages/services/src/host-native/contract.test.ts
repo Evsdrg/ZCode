@@ -19,6 +19,10 @@ describe("host-native contract", () => {
     const service: IHostNativeServiceType = {
       openInFileManager: async () => ({ success: true }),
       openInEditor: async () => ({ success: true }),
+      openExternalFile: async () => ({ success: true }),
+      getFileApplications: async () => [],
+      openFileWithApplication: async () => ({ success: true }),
+      getApplicationIcon: async () => null,
       getInstalledEditors: async () => [],
       createTempTextAttachment: async () => {
         throw new Error("not used");
@@ -39,6 +43,10 @@ describe("host-native contract", () => {
     const service: IHostNativeServiceType = {
       openInFileManager: async () => ({ success: true }),
       openInEditor: async () => ({ success: false, error: "application is not installed" }),
+      openExternalFile: async () => ({ success: true }),
+      getFileApplications: async () => [],
+      openFileWithApplication: async () => ({ success: true }),
+      getApplicationIcon: async () => null,
       getInstalledEditors: async () => [
         { id: "evince", name: "Evince", iconDataUrl: "" },
         { id: "okular", name: "Okular", iconDataUrl: "" },

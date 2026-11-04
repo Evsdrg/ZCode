@@ -7,6 +7,7 @@ import type {
   LoadCliMcpFromUserDirectoryResult,
   SaveCliMcpToUserDirectoryRequest,
 } from "@zcode/shared";
+import type { WebHostNativeFileApps } from "./contract-file-apps.js";
 import type { RelayStatusSource } from "@zcode/ui";
 
 export type { RelayStatusSource };
@@ -26,7 +27,7 @@ export interface WebRemoteControlPlatformProxy {
  * 由 bootstrap 从 server accessor 取到后注入。未提供的宿主（手机远控等形态）
  * 保持 `undefined`，`createWebPlatform` 回落到原有失败桩/缺席语义。
  */
-export interface WebHostNativeService {
+export interface WebHostNativeService extends WebHostNativeFileApps {
   openInFileManager(path: string): Promise<{ success: boolean; error?: string }>;
   openInEditor(editorId: string, path: string): Promise<{ success: boolean; error?: string }>;
   getInstalledEditors(filePath?: string): Promise<

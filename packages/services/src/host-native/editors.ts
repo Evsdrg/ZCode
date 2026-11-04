@@ -7,6 +7,7 @@ import {
   matchesFileApplication,
   resolveFileApplicationPath,
 } from "./openTarget.js";
+import { parseDesktopEntryIcon, resolveIconDataUrl } from "./applicationIcons.js";
 
 /**
  * 列出本机已安装的编辑器/应用。
@@ -57,9 +58,9 @@ async function readDesktopIconIndex(env: NodeJS.ProcessEnv): Promise<Map<string,
       if (found) break;
     }
     if (!found) continue;
-    const iconName = parseDesktopIcon(found);
+    const iconName = parseDesktopEntryIcon(found);
     if (!iconName) continue;
-    const dataUrl = await resolveIconDataUrl(iconName, dataDirs);
+    const dataUrl = await resolveIconDataUrl(iconName, { env });
     if (dataUrl) index.set(def.id, dataUrl);
   }
 
@@ -119,63 +120,4 @@ async function findDesktopEntry(
     }
   }
   return null;
-}
-
-/** 取 `[Desktop Entry]` 段里的 `Icon=` 值。 */
-function parseDesktopIcon(content: string): string | null {
-  let inDesktopEntry = false;
-  for (const rawLine of content.split("\n")) {
-    const line = rawLine.trim();
-    if (line.startsWith("[")) {
-      inDesktopEntry = line === "[Desktop Entry]";
-      continue;
-    }
-    if (!inDesktopEntry || !line.startsWith("Icon=")) continue;
-    const value = line.slice("Icon=".length).trim();
-    return value || null;
-  }
-  return null;
-}
-
-/**
- * 图标名 → data URL。
- *
- * `.desktop` 的 `Icon=` 可以是绝对路径，也可以是主题图标名。后者按 XDG 图标目录规范查找
- * `<datadir>/icons/hicolor/<size>/apps/<name>.{png,svg,xpm}`。
- */
-async function resolveIconDataUrl(
-  iconName: string,
-  dataDirs: readonly string[],
-): Promise<string | null> {
-  if (iconName.startsWith("/")) {
-    return encodeIconFile(iconName);
-  }
-
-  const sizes = ["256x256", "128x128", "64x64", "48x48", "scalable", "32x32"];
-  for (const dataDir of dataDirs) {
-    for (const size of sizes) {
-      for (const ext of ["png", "svg", "xpm"]) {
-        const candidate = join(dataDir, "icons", "hicolor", size, "apps", `${iconName}.${ext}`);
-        const dataUrl = await encodeIconFile(candidate);
-        if (dataUrl) return dataUrl;
-      }
-    }
-  }
-  return null;
-}
-
-async function encodeIconFile(path: string): Promise<string | null> {
-  try {
-    const bytes = await readFile(path);
-    // 上限保护：图标文件不该超过 1 MiB，异常大的文件不塞进 RPC 响应。
-    if (bytes.byteLength === 0 || bytes.byteLength > 1024 * 1024) return null;
-    const mime = path.endsWith(".svg")
-      ? "image/svg+xml"
-      : path.endsWith(".xpm")
-        ? "image/x-xpixmap"
-        : "image/png";
-    return `data:${mime};base64,${bytes.toString("base64")}`;
-  } catch {
-    return null;
-  }
 }

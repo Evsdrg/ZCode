@@ -1,6 +1,8 @@
 import {
   mobilePluginDiscoveryTelemetrySchema,
   sessionCreateTelemetrySchema,
+  type ApplicationIconRequest,
+  type FileApplicationTarget,
   type IPlatformService,
   type RemoteTarget,
   type WebRemoteControlContext,
@@ -30,6 +32,7 @@ export type {
   WebMcpDirectoryService,
   WebRemoteControlPlatformProxy,
 } from "#src/platform/contract.js";
+export type { WebHostNativeFileApps } from "#src/platform/contract-file-apps.js";
 export { saveBrowserFile } from "#src/platform/saveBrowserFile.js";
 
 async function resolveFeedbackUrl(): Promise<string | undefined> {
@@ -306,10 +309,19 @@ export function createWebPlatform(options?: {
         ? Promise.resolve({ success: false, error: "Not supported in web mode" })
         : (hostNativeService?.openInFileManager(path) ??
           Promise.resolve({ success: false, error: "Not supported in web mode" })),
-    // 原因：openExternalFile 也是**可选**方法（接口注释：普通 Web 平台返回 unsupported，缺席即不支持）。
-    // 提供失败桩会让 `platform.openExternalFile !== undefined` / 真值判断误以为能力存在，
-    // 使 OpenSplitButton 的「用默认应用打开」与外部链接分支走到必然失败的路径。
-    // 删除后这些分支自然回退到 openExternal（浏览器新标签）。
+    // 仅当 host-native 存在时提供（可选方法）：缺失时 UI 自然回退到浏览器新标签，
+    // 不能给恒失败桩，否则 `platform.openExternalFile !== undefined` 会被误判为能力存在。
+    ...(hostNativeService && !platformProxy
+      ? {
+          openExternalFile: (path: string) => hostNativeService.openExternalFile(path),
+          getFileApplications: (target: FileApplicationTarget) =>
+            hostNativeService.getFileApplications(target),
+          openFileWithApplication: (applicationId: string, target: FileApplicationTarget) =>
+            hostNativeService.openFileWithApplication(applicationId, target),
+          getApplicationIcon: (request: string | ApplicationIconRequest) =>
+            hostNativeService.getApplicationIcon(request),
+        }
+      : {}),
     registerOAuthState: (_payload) => {},
     onOAuthCallback: () => () => {},
     onPaymentCallback: () => () => {},
@@ -413,6 +425,11 @@ export function createWebPlatform(options?: {
           Promise.resolve({ success: false, error: "Not supported in web mode" })),
     executeDesktopCommand: () => Promise.resolve(),
     setApplicationLocale: (_locale) => Promise.resolve(),
+    // 接口注释明确允许 Web 回退到 navigator.language；桌面端由 main 读系统语言。
+    getSystemLocale: () => {
+      const language = typeof navigator !== "undefined" ? navigator.language : "";
+      return Promise.resolve(language.toLowerCase().startsWith("zh") ? "zh-CN" : "en-US");
+    },
     setTitleBarTheme: () => Promise.resolve(),
     // 自部署「另存为」：Web 端把字节交给浏览器下载（见 saveBrowserFile 的语义说明）。
     // 桌面端由 Electron main 走原生另存为对话框，两者共用同一契约。

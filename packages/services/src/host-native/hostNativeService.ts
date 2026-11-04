@@ -1,8 +1,12 @@
 import type {
+  ApplicationIconInfo,
+  ApplicationIconRequest,
   CreateTempTextAttachmentRequest,
   CreateTempTextAttachmentResult,
   DockerContainerInfo,
   EditorInfo,
+  FileApplicationInfo,
+  FileApplicationTarget,
   MaterializeWorkflowArtifactFileRequest,
   MaterializeWorkflowArtifactFileResult,
   OpenInEditorOptions,
@@ -11,8 +15,10 @@ import type {
 import type { IHostNativeService, HostNativeOpenResult } from "./contract.js";
 import { createTempTextAttachment } from "./tempTextAttachment.js";
 import { materializeWorkflowArtifactFile } from "./workflowArtifactFile.js";
-import { openInEditor, openInFileManager } from "./openTarget.js";
+import { openExternalFile, openInEditor, openInFileManager } from "./openTarget.js";
 import { getInstalledEditors } from "./editors.js";
+import { getApplicationIcon, resolveIconDataUrl } from "./applicationIcons.js";
+import { createFileApplicationService } from "./file-apps/index.js";
 import { listSSHConfigAliasesFromLocalConfig } from "../system/sshConfigAlias.js";
 import {
   isDockerAvailable as probeDockerAvailable,
@@ -24,6 +30,8 @@ export interface CreateHostNativeServiceOptions {
   /** 便于测试注入。 */
   openInFileManagerImpl?: typeof openInFileManager;
   openInEditorImpl?: typeof openInEditor;
+  openExternalFileImpl?: typeof openExternalFile;
+  getApplicationIconImpl?: typeof getApplicationIcon;
   getInstalledEditorsImpl?: typeof getInstalledEditors;
   createTempTextAttachmentImpl?: typeof createTempTextAttachment;
   materializeWorkflowArtifactFileImpl?: typeof materializeWorkflowArtifactFile;
@@ -44,6 +52,14 @@ export function createHostNativeService(
   const env = options.env ?? process.env;
   const openInFileManagerImpl = options.openInFileManagerImpl ?? openInFileManager;
   const openInEditorImpl = options.openInEditorImpl ?? openInEditor;
+  const openExternalFileImpl = options.openExternalFileImpl ?? openExternalFile;
+  const getApplicationIconImpl = options.getApplicationIconImpl ?? getApplicationIcon;
+  // 文件应用服务无持久状态，进程内复用同一实例即可（内部按调用重查系统关联）。
+  // 图标：`.desktop` 的 `Icon=` 可能是主题图标名，必须走 XDG 主题链解析；
+  // 旧实现只把绝对路径当作可读图标，会让非 hicolor 主题（如 Papirus）下的应用全部丢图标。
+  const fileApplicationService = createFileApplicationService({
+    getIcon: (_id, iconPath) => resolveIconDataUrl(iconPath, { env }),
+  });
   const getInstalledEditorsImpl = options.getInstalledEditorsImpl ?? getInstalledEditors;
   const createTempTextAttachmentImpl =
     options.createTempTextAttachmentImpl ?? createTempTextAttachment;
@@ -57,6 +73,27 @@ export function createHostNativeService(
   return {
     openInFileManager(path: string): Promise<HostNativeOpenResult> {
       return openInFileManagerImpl(path, env);
+    },
+
+    openExternalFile(path: string): Promise<HostNativeOpenResult> {
+      return openExternalFileImpl(path, env);
+    },
+
+    getFileApplications(target: FileApplicationTarget): Promise<FileApplicationInfo[]> {
+      return fileApplicationService.getFileApplications(target);
+    },
+
+    openFileWithApplication(
+      applicationId: string,
+      target: FileApplicationTarget,
+    ): Promise<HostNativeOpenResult> {
+      return fileApplicationService.openFileWithApplication(applicationId, target);
+    },
+
+    getApplicationIcon(
+      request: string | ApplicationIconRequest,
+    ): Promise<ApplicationIconInfo | null> {
+      return getApplicationIconImpl(request, { env });
     },
 
     openInEditor(
