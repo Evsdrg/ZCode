@@ -9,12 +9,12 @@
 `IPlatformService` 共 138 个成员，`createWebPlatform` 未实现 66 个。这些缺口的**性质并不相同**，
 不能一律按「浏览器做不到」处理。按物理约束分四类：
 
-| 类别 | 含义 | 例子 |
-| --- | --- | --- |
-| **A. 服务端可真实实现** | 能力所需的 OS 资源在 server 进程里就有（同一 uid、同一图形会话、同一 D-Bus） | 文件选择框、保存文件、打开文件管理器 |
-| **B. 语义不适用** | 浏览器形态下该概念本身不存在 | 窗口缩放、窗口控制按钮、托盘、多窗口 `syncWindowTabs` |
-| **C. 需要跨进程/跨端架构** | 依赖 Electron 的 renderer 私有能力或另一台设备 | `printPageToPdf`（需 `webContents.printToPDF`）、`pluginSandbox`、`browserView*` |
-| **D. 上游可变** | 与产品策略/云端有关，非部署形态决定 | 自动更新、OAuth、更新提示 |
+| 类别                       | 含义                                                                         | 例子                                                                             |
+| -------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| **A. 服务端可真实实现**    | 能力所需的 OS 资源在 server 进程里就有（同一 uid、同一图形会话、同一 D-Bus） | 文件选择框、保存文件、打开文件管理器                                             |
+| **B. 语义不适用**          | 浏览器形态下该概念本身不存在                                                 | 窗口缩放、窗口控制按钮、托盘、多窗口 `syncWindowTabs`                            |
+| **C. 需要跨进程/跨端架构** | 依赖 Electron 的 renderer 私有能力或另一台设备                               | `printPageToPdf`（需 `webContents.printToPDF`）、`pluginSandbox`、`browserView*` |
+| **D. 上游可变**            | 与产品策略/云端有关，非部署形态决定                                          | 自动更新、OAuth、更新提示                                                        |
 
 **关键事实（实测）**：`zcode-web-local.service` 的进程环境包含
 `DISPLAY=:0`、`WAYLAND_DISPLAY=wayland-0`、`XDG_CURRENT_DESKTOP=KDE`、
@@ -59,46 +59,46 @@
 
 ### 阶段 1：A 类缺口，改动集中在 `createWebPlatform` + 一个 server 侧小模块
 
-| 能力 | 现状 | 可行实现 | 代价 |
-| --- | --- | --- | --- |
-| `selectDirectory` / `selectFiles` | 恒 `null` / `[]` | **xdg-desktop-portal `FileChooser.OpenFile`**（`directory: true` 选目录、`multiple: true` 选多文件）。本机 portal 版本 4，支持这两项。已在 server 进程环境下只读验证 portal 可用。 | 中：需要处理异步 `Response` signal、parent_window、`restore_token`。**注意**：这会弹系统原生对话框，与「AI 不干扰用户」冲突，需在 AI 自动操作时避开。 |
-| `saveFile` | 缺席（`pptx-preview-viewer` 的「导出 PDF」因此不可用） | portal `FileChooser.SaveFile` 拿目标路径 + `writeFile`。 | 中：同上。 |
-| `openExternalFile` | 缺席（「用默认应用打开」回退到浏览器新标签） | `xdg-open` / `gio open`。`hostNative.openInFileManager` 已是这个实现，可直接复用。 | **低**：只需在 `createWebPlatform` 里接上。 |
-| `exportLogs` | 恒 `{success:false,"Not supported in web mode"}` | `exportLogs` 主体是纯 Node（`yazl` + `node:fs`），只有 `shell.showItemInFolder` 依赖 Electron，已有依赖注入点。搬到 server 侧即可，产物通过 `/api` 下载。 | 低-中：需要在 `http.ts` 加一个 `GET /api/logs/export` 或写进 `~/.zcode/exports` 后用 `hostNative.openInFileManager` 定位。 |
-| `printPageToPdf` | 缺席 | **不可直接搬**：Electron 的 `webContents.printToPDF` 无对应 API。可行替代是 server 侧 Playwright `page.pdf()`（已装 `playwright-core`，Chromium 可执行文件现成）。但 PPTX 预览的 DOM 在**浏览器**里，server 拿不到。若要做，需要浏览器把渲染后的 HTML 发给 server 再打印，语义会漂移。 | **高，不建议**。 |
-| `getApplicationIcon` | 缺席 | 从 `.desktop` 的 `Icon=` 读图标文件并转 data URL。 | 低。 |
-| `requestNotificationPermission` | 有（`Notification` API） | 已有，无需改。 | — |
+| 能力                              | 现状                                                   | 可行实现                                                                                                                                                                                                                                                                               | 代价                                                                                                                                                  |
+| --------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `selectDirectory` / `selectFiles` | 恒 `null` / `[]`                                       | **xdg-desktop-portal `FileChooser.OpenFile`**（`directory: true` 选目录、`multiple: true` 选多文件）。本机 portal 版本 4，支持这两项。已在 server 进程环境下只读验证 portal 可用。                                                                                                     | 中：需要处理异步 `Response` signal、parent_window、`restore_token`。**注意**：这会弹系统原生对话框，与「AI 不干扰用户」冲突，需在 AI 自动操作时避开。 |
+| `saveFile`                        | 缺席（`pptx-preview-viewer` 的「导出 PDF」因此不可用） | portal `FileChooser.SaveFile` 拿目标路径 + `writeFile`。                                                                                                                                                                                                                               | 中：同上。                                                                                                                                            |
+| `openExternalFile`                | 缺席（「用默认应用打开」回退到浏览器新标签）           | `xdg-open` / `gio open`。`hostNative.openInFileManager` 已是这个实现，可直接复用。                                                                                                                                                                                                     | **低**：只需在 `createWebPlatform` 里接上。                                                                                                           |
+| `exportLogs`                      | 恒 `{success:false,"Not supported in web mode"}`       | `exportLogs` 主体是纯 Node（`yazl` + `node:fs`），只有 `shell.showItemInFolder` 依赖 Electron，已有依赖注入点。搬到 server 侧即可，产物通过 `/api` 下载。                                                                                                                              | 低-中：需要在 `http.ts` 加一个 `GET /api/logs/export` 或写进 `~/.zcode/exports` 后用 `hostNative.openInFileManager` 定位。                            |
+| `printPageToPdf`                  | 缺席                                                   | **不可直接搬**：Electron 的 `webContents.printToPDF` 无对应 API。可行替代是 server 侧 Playwright `page.pdf()`（已装 `playwright-core`，Chromium 可执行文件现成）。但 PPTX 预览的 DOM 在**浏览器**里，server 拿不到。若要做，需要浏览器把渲染后的 HTML 发给 server 再打印，语义会漂移。 | **高，不建议**。                                                                                                                                      |
+| `getApplicationIcon`              | 缺席                                                   | 从 `.desktop` 的 `Icon=` 读图标文件并转 data URL。                                                                                                                                                                                                                                     | 低。                                                                                                                                                  |
+| `requestNotificationPermission`   | 有（`Notification` API）                               | 已有，无需改。                                                                                                                                                                                                                                                                         | —                                                                                                                                                     |
 
 ### 阶段 2：B 类，建议显式标注而非实现
 
-| 能力 | 结论 |
-| --- | --- |
-| `getDesktopZoomLevel` / `onDesktopZoomLevelChanged` | 浏览器有原生缩放（Ctrl+±），与 Electron 的 `webContents.setZoomLevel` 语义不同。**保持 absent**，让头像菜单不显示缩放入口。 |
-| `getCloseToTrayCapability` | 无托盘概念。**保持 absent**。 |
-| `syncWindowTabs` / `syncWindowUnreadCount` / `syncActiveTaskSession` | 无多窗口。当前是 no-op，符合语义。 |
-| `getDesktopWindowChromeState` / `onWindowControlsOverlay*` | 自绘标题栏专属。**保持 absent**。 |
-| `onNewTab` / `onFocusTab` / `onCloseActiveContextRequest` / `onOpenWorkspacePath` | 由浏览器自身标签页接管。当前 no-op 正确。 |
-| `activateOrSetWorkspace` | 无多窗口激活。当前 `{activated:false}` 正确。 |
+| 能力                                                                              | 结论                                                                                                                        |
+| --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `getDesktopZoomLevel` / `onDesktopZoomLevelChanged`                               | 浏览器有原生缩放（Ctrl+±），与 Electron 的 `webContents.setZoomLevel` 语义不同。**保持 absent**，让头像菜单不显示缩放入口。 |
+| `getCloseToTrayCapability`                                                        | 无托盘概念。**保持 absent**。                                                                                               |
+| `syncWindowTabs` / `syncWindowUnreadCount` / `syncActiveTaskSession`              | 无多窗口。当前是 no-op，符合语义。                                                                                          |
+| `getDesktopWindowChromeState` / `onWindowControlsOverlay*`                        | 自绘标题栏专属。**保持 absent**。                                                                                           |
+| `onNewTab` / `onFocusTab` / `onCloseActiveContextRequest` / `onOpenWorkspacePath` | 由浏览器自身标签页接管。当前 no-op 正确。                                                                                   |
+| `activateOrSetWorkspace`                                                          | 无多窗口激活。当前 `{activated:false}` 正确。                                                                               |
 
 ### 阶段 3：C 类，需要单项评估
 
-| 能力 | 结论 |
-| --- | --- |
-| `pluginSandbox` | 需要 Electron 的 `webview` + 独立 partition + 自定义 protocol。浏览器可用 **sandboxed iframe + `srcdoc`** 近似，但丢失 `partition` 隔离与 `zcode-media` 协议。**改动大、安全边界变化，不建议在没有明确需求时做。** |
+| 能力                        | 结论                                                                                                                                                                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pluginSandbox`             | 需要 Electron 的 `webview` + 独立 partition + 自定义 protocol。浏览器可用 **sandboxed iframe + `srcdoc`** 近似，但丢失 `partition` 隔离与 `zcode-media` 协议。**改动大、安全边界变化，不建议在没有明确需求时做。**       |
 | `browserView*`（22 个方法） | 这是 Electron 内嵌浏览器的 `<webview>` guest 管理。自部署已有**托管 headless 浏览器**（server 侧 Playwright），是另一套语义：agent 操作 vs 用户可视。要做「用户能看到的内嵌浏览器」需 server 侧 VNC/截图流，**不建议**。 |
-| `printPageToPdf` | 见阶段 1，不建议。 |
-| `captureWindowScreenshot` | 无窗口可截。可用 `html2canvas` 截 DOM，或 `getDisplayMedia` 截屏（需授权）。当前返回 `null`，反馈表单无图，可接受。 |
+| `printPageToPdf`            | 见阶段 1，不建议。                                                                                                                                                                                                       |
+| `captureWindowScreenshot`   | 无窗口可截。可用 `html2canvas` 截 DOM，或 `getDisplayMedia` 截屏（需授权）。当前返回 `null`，反馈表单无图，可接受。                                                                                                      |
 
 ### 阶段 4：D 类，明确不在本 fork 范围
 
-| 能力 | 结论 |
-| --- | --- |
-| 自动更新（`getUpdateState` / `downloadUpdate` / `quitAndInstallUpdate` 等 8 个） | Electron 更新器专属。自部署有独立的 `zcode-updater.service`（:3032），但那是 **Agent 二进制**更新器，与 WebUI 无关。若要做 WebUI 自更新，应在部署脚本层做，不进 `IPlatformService`。 |
-| OAuth（`registerOAuthState` / `onOAuthCallback` / `onPaymentCallback`） | Web 走标准 OAuth 回调 URL，`onOAuthCallback` 的 deep-link 语义不适用。当前 no-op 正确。 |
-| `requestSourceSettingsAttachment` / `bindRemoteWorkspaceSessionContext` | Source Server 专属。自部署走 local，不需要。 |
-| `notifyWebRemoteControlAuthStateChanged` / `onWebRemoteControlStatusChanged` | 手机远控专属（`platformProxy` 存在时才有意义）。当前 `getWebRemoteControlStatus` 已接 relay service，状态变更靠轮询/重查，够用。 |
-| `getRendererActionTraceConfig` / `reportRendererActionTraceBatch` / `reportLocalTtftBatch` / `reportRendererHeapSample` | 桌面遥测专用。自部署已有 `reportTelemetryEvent`，这些是细粒度性能采样，**可做但收益低**。 |
-| `getSystemLocale` / `onApplicationLocaleChanged` / `setApplicationLocale` | Web 用 `navigator.language` + `ZCodeIntlProvider`，当前路径正确。 |
+| 能力                                                                                                                    | 结论                                                                                                                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 自动更新（`getUpdateState` / `downloadUpdate` / `quitAndInstallUpdate` 等 8 个）                                        | Electron 更新器专属。自部署有独立的 `zcode-updater.service`（:3032），但那是 **Agent 二进制**更新器，与 WebUI 无关。若要做 WebUI 自更新，应在部署脚本层做，不进 `IPlatformService`。 |
+| OAuth（`registerOAuthState` / `onOAuthCallback` / `onPaymentCallback`）                                                 | Web 走标准 OAuth 回调 URL，`onOAuthCallback` 的 deep-link 语义不适用。当前 no-op 正确。                                                                                              |
+| `requestSourceSettingsAttachment` / `bindRemoteWorkspaceSessionContext`                                                 | Source Server 专属。自部署走 local，不需要。                                                                                                                                         |
+| `notifyWebRemoteControlAuthStateChanged` / `onWebRemoteControlStatusChanged`                                            | 手机远控专属（`platformProxy` 存在时才有意义）。当前 `getWebRemoteControlStatus` 已接 relay service，状态变更靠轮询/重查，够用。                                                     |
+| `getRendererActionTraceConfig` / `reportRendererActionTraceBatch` / `reportLocalTtftBatch` / `reportRendererHeapSample` | 桌面遥测专用。自部署已有 `reportTelemetryEvent`，这些是细粒度性能采样，**可做但收益低**。                                                                                            |
+| `getSystemLocale` / `onApplicationLocaleChanged` / `setApplicationLocale`                                               | Web 用 `navigator.language` + `ZCodeIntlProvider`，当前路径正确。                                                                                                                    |
 
 ## 状态所有者
 
@@ -119,11 +119,11 @@
 
 ## 失败语义
 
-| 场景 | 行为 |
-| --- | --- |
+| 场景                                                    | 行为                                                                                              |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | server 不在图形会话（无 `DISPLAY` / `WAYLAND_DISPLAY`） | `canOpenLocalFiles` 仍为 `true`（它是「能打开」，不是「一定能成功」），调用返回 `no_display` 错误 |
-| portal 不可用 | 文件选择能力按缺席处理（`canSelectFilePath=false`），UI 回退服务端目录浏览器 |
-| 证书设置读取失败 | 托管浏览器 fail-closed 按严格校验启动，不阻断浏览器本身 |
+| portal 不可用                                           | 文件选择能力按缺席处理（`canSelectFilePath=false`），UI 回退服务端目录浏览器                      |
+| 证书设置读取失败                                        | 托管浏览器 fail-closed 按严格校验启动，不阻断浏览器本身                                           |
 
 ## 验收场景
 
@@ -158,44 +158,44 @@
 
 以 `desktopPlatform.ts`（Electron renderer 的 `IPlatformService` 实现）为语义基线：
 
-| 集合 | 数量 |
-| --- | --- |
-| `IPlatformService` 接口方法 | 139 |
-| `desktopPlatform` 实现 | 115 |
-| `createWebPlatform` 实现 | 70 |
-| **真实缺口** | **49** |
+| 集合                        | 数量   |
+| --------------------------- | ------ |
+| `IPlatformService` 接口方法 | 139    |
+| `desktopPlatform` 实现      | 115    |
+| `createWebPlatform` 实现    | 70     |
+| **真实缺口**                | **49** |
 
 ## 缺口分类（49 个）
 
 ### A 类：底层能力已存在或可直接移植（本阶段实施）
 
-| 方法 | UI 消费点 | 底层实现 | 做法 |
-| --- | --- | --- | --- |
-| `openExternalFile` | 9 | `shell.openPath` 语义 = `xdg-open`（`openTarget.ts` 已有同款） | host-native 暴露 `openExternalFile`；web 接线 |
-| `getFileApplications` | 3 | `desktop/src/main/file-open-apps/` **零 electron 依赖**（index/native/linux/windows/mac 共 11 文件） | 移植到 `services/src/host-native/file-apps/` |
-| `openFileWithApplication` | 4 | 同上 | 同上 |
-| `getApplicationIcon` | 5 | `.desktop` 的 `Icon=` 解析（`editors.ts` 已有同类逻辑） | 新增 Linux 图标解析 |
-| `selectDirectories` | 2 | `DirectoryBrowser`（`dataBaseDir` 已用同款） | web 侧接目录浏览器（多选） |
-| `getSystemLocale` | 0 | `navigator.language` | web 侧直接实现 |
-| `onApplicationLocaleChanged` | 1 | `languagechange` 事件 | web 侧直接实现 |
+| 方法                         | UI 消费点 | 底层实现                                                                                             | 做法                                          |
+| ---------------------------- | --------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `openExternalFile`           | 9         | `shell.openPath` 语义 = `xdg-open`（`openTarget.ts` 已有同款）                                       | host-native 暴露 `openExternalFile`；web 接线 |
+| `getFileApplications`        | 3         | `desktop/src/main/file-open-apps/` **零 electron 依赖**（index/native/linux/windows/mac 共 11 文件） | 移植到 `services/src/host-native/file-apps/`  |
+| `openFileWithApplication`    | 4         | 同上                                                                                                 | 同上                                          |
+| `getApplicationIcon`         | 5         | `.desktop` 的 `Icon=` 解析（`editors.ts` 已有同类逻辑）                                              | 新增 Linux 图标解析                           |
+| `selectDirectories`          | 2         | `DirectoryBrowser`（`dataBaseDir` 已用同款）                                                         | web 侧接目录浏览器（多选）                    |
+| `getSystemLocale`            | 0         | `navigator.language`                                                                                 | web 侧直接实现                                |
+| `onApplicationLocaleChanged` | 1         | `languagechange` 事件                                                                                | web 侧直接实现                                |
 
 ### 已实施结果（本阶段）
 
-| 方法 | 状态 | 验证 |
-| --- | --- | --- |
-| `openExternalFile` | ✅ | 空路径 / 无图形会话 fail-closed；RPC 可达 |
-| `getFileApplications` | ✅ | 真实 PDF 返回 5 个关联应用（含默认标记与图标） |
-| `openFileWithApplication` | ✅ | 拒绝 remoteTarget / 非绝对路径 / 目录 / workspaceIdentity |
-| `getApplicationIcon` | ✅ | 按 `.desktop` app id 解析；主题链（Papirus）生效 |
-| `getSystemLocale` | ✅ | `navigator.language` → `zh-CN`/`en-US` |
-| `selectDirectories` | ⏸ 未做 | `DirectoryBrowser` 只支持单选，多选需改 UI 组件 |
+| 方法                      | 状态 | 验证                                                                          |
+| ------------------------- | ---- | ----------------------------------------------------------------------------- |
+| `openExternalFile`        | ✅   | 空路径 / 无图形会话 fail-closed；RPC 可达                                     |
+| `getFileApplications`     | ✅   | 真实 PDF 返回 5 个关联应用（含默认标记与图标）                                |
+| `openFileWithApplication` | ✅   | 拒绝 remoteTarget / 非绝对路径 / 目录 / workspaceIdentity                     |
+| `getApplicationIcon`      | ✅   | 按 `.desktop` app id 解析；主题链（Papirus）生效                              |
+| `getSystemLocale`         | ✅   | `navigator.language` → `zh-CN`/`en-US`                                        |
+| `selectDirectories`       | ✅   | `DirectoryBrowser` 新增 `multiSelect`；本地项目一次勾选多个目录，远端仍限单根 |
 
 **额外修复的既有缺陷**：`file-apps/linux.ts` 原先只把绝对路径当 `iconPath`，主题图标名（`vscode`、`okular`）全部丢图标；`editors.ts` 的图标查找只查 `hicolor`，非 hicolor 主题（本机 `Papirus-Dark`）下应用无图标。两者现统一到 `applicationIcons.ts` 的 XDG 主题链解析。
 
 ### B 类：有降级路径，收益低（暂不做）
 
-| 方法 | 现状 |
-| --- | --- |
+| 方法                         | 现状                                                                                           |
+| ---------------------------- | ---------------------------------------------------------------------------------------------- |
 | `createLocalMediaPreviewUrl` | Web 已有 blob 回退（`attachmentRead` 走 chunks → `URL.createObjectURL`），仅视频 seek 体验略差 |
 
 ### C 类：Electron 私有，不可实现（22 个）
@@ -215,6 +215,25 @@
 ### F 类：内嵌浏览器权限（6 个）
 
 自部署没有「用户可视的内嵌浏览器」，无消费场景。
+
+### G 类：`isDesktop` 误当能力判据（本次修复）
+
+这些能力本身与 Electron 无关，仅因门控写成 `isDesktop` 而在自部署 Web 被误关。
+
+| 能力                 | 位置                                    | 修复                                                                     |
+| -------------------- | --------------------------------------- | ------------------------------------------------------------------------ |
+| Side Pane 完整视图   | `App.tsx` `supportsSidePaneFullView`    | 改为只排除手机远控（模块零平台依赖）                                     |
+| 完整视图快捷键入口   | `ShortcutSettingsSection`               | 新增 `supportsSidePaneFullView` prop，与 `isDesktop`（原生菜单通道）解耦 |
+| 闲时任务通知         | `App.tsx` `useOffPeakTaskNotifications` | 改为只按通知开关（Web 的 `showTaskNotification` 已实现）                 |
+| PPTX 预览卡自动打开  | `App.tsx` `handleAutoOpenAssistantPptx` | 去掉 `isDesktop` 前置返回（纯前端 state）                                |
+| 项目侧栏「管理项目」 | `ProjectSidebarNode`                    | 去掉 `isDesktop` 门控（projects 分区 Web 可见）                          |
+
+### 待评估：需要新增服务端能力
+
+| 能力                    | 现状                                        | 代价                                                                                                                                                                                |
+| ----------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `exportLogs`            | Web 恒返回「Not supported in web mode」     | 中：`exportLogs.ts` 主体 1246 行纯 Node（只 1 处 `import("electron")`），但依赖 `about.ts`（含 Electron 类型）与 `@zcode/desktop` 私有 logger，需先抽到 services 并加 HTTP 下载路由 |
+| `keepAwakeWhileRunning` | 设置项被 `isDesktop` 隐藏，且服务端无消费点 | 中：需 server 侧用 `systemd-inhibit` 或 `logind` D-Bus 抑制空闲，且要处理进程生命周期                                                                                               |
 
 ## 实施清单
 

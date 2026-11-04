@@ -36,7 +36,14 @@ import { useShortcutRecording } from "@/settings/useShortcutRecording.js";
  * 单行多绑定：一个命令一行，多组键帽在键位列纵向排列；每条可替换/删除，
  * 命令级「+」追加；同命令物理等价重复在录制入口拒绝。
  */
-export function ShortcutSettingsSection({ isDesktop = false }: { isDesktop?: boolean }) {
+export function ShortcutSettingsSection({
+  isDesktop = false,
+  // 完整视图是纯前端 state，Web 也能用；与 isDesktop（决定原生菜单通道命令是否可绑）解耦。
+  supportsSidePaneFullView = isDesktop,
+}: {
+  isDesktop?: boolean;
+  supportsSidePaneFullView?: boolean;
+}) {
   const { intl } = useZCodeIntl();
   const { settings, update } = useSettings();
   const platform = usePlatform();
@@ -62,8 +69,9 @@ export function ShortcutSettingsSection({ isDesktop = false }: { isDesktop?: boo
     return SHORTCUT_COMMANDS.filter((entry) => {
       // 这些快捷键保留注册和冲突检测，但不在用户可见列表中展示。
       if (entry.id === "openOnboarding" || entry.id === "toggleInterfaceMode") return false;
-      // 完整视图只在桌面端提供，Web 没有处理器，不展示无效的改键入口。
-      if (entry.id === "toggleSidePaneFullView" && !isDesktop) return false;
+      // 完整视图无平台依赖（纯前端 state），Web 同样提供改键入口；
+      // 仅手机远控不展示——其宿主是另一个窗口，浮窗定位语义不成立。
+      if (entry.id === "toggleSidePaneFullView" && !supportsSidePaneFullView) return false;
       const matchesText =
         !keyword ||
         entry.id.toLowerCase().includes(keyword) ||
@@ -75,7 +83,7 @@ export function ShortcutSettingsSection({ isDesktop = false }: { isDesktop?: boo
         (effective[entry.id] ?? []).some((binding) => isSamePhysicalBinding(binding, keyBinding));
       return matchesText && matchesKey;
     });
-  }, [commandLabel, effective, isDesktop, keySearch.binding, query]);
+  }, [commandLabel, effective, supportsSidePaneFullView, keySearch.binding, query]);
 
   const persistBindings = useCallback(
     async (next: Record<string, string[]>) => {

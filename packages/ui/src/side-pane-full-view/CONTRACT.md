@@ -13,4 +13,4 @@ Side Pane 完整视图：面板占满窗口，对话成为第一个 tab，并在
 
 - `SessionPane` / `ConversationTimeline` / `V4WorkspaceChatArea` 通过 `useConversationPanePresentation` 读取展示形态并上报运行状态、阻塞交互与输入区高度；不在完整视图下读到默认 docked，行为不变。
 - 浮窗形态下 `ConversationTimeline` 经 `onLatestTurnSummaryChange` 上报最后一个回合（turnKey、运行状态、运行时长、最终回答，同一个 render unit），`SessionPane` 把时长交给单行输入框占位，把 turnKey / 运行状态 / 回答经 `reportFloatingStatus` 交给宿主；宿主按 owner 记录基线并推进回答气泡（`reduceFloatingAnswerBubbles`）：基线之后出现的已结束回合才弹出，不要求观察到运行中。
-- 快捷键 `toggleSidePaneFullView` 在 `packages/shared/src/shortcutCommands.ts` 命令表登记，处理器只在桌面端注册。
+- 快捷键 `toggleSidePaneFullView` 在 `packages/shared/src/shortcutCommands.ts` 命令表登记，桌面 Electron 与自部署 Web 均注册处理器（手机远控不注册）。

@@ -2121,7 +2121,10 @@ export function SettingsPage({
                               }
                             />
                           ) : activeSection === "shortcuts" ? (
-                            <ShortcutSettingsSection isDesktop={Boolean(isDesktop)} />
+                            <ShortcutSettingsSection
+                              isDesktop={Boolean(isDesktop)}
+                              supportsSidePaneFullView={!isWebRemoteControl}
+                            />
                           ) : activeSection === "modelProvider" ? (
                             <ServiceProvider services={localHostServices}>
                               {/* 模型配置属于本机全局事实源；激活远端 workspace 时也不能注入远端 Host。 */}
@@ -2292,7 +2295,7 @@ export function SettingsPage({
                               isWindowsDesktop={Boolean(isWindowsDesktop)}
                               isLinuxDesktop={Boolean(
                                 (isDesktop && !isMacDesktop && !isWindowsDesktop) ||
-                                  effectiveHostPlatform === "linux",
+                                effectiveHostPlatform === "linux",
                               )}
                               workspacePath={activeWorkspacePath}
                               workspaceIdentity={activeWorkspaceIdentity}

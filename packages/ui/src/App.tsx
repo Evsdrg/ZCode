@@ -296,11 +296,13 @@ export function App({
     platform,
     formatMessage: intl.formatMessage,
   });
-  // 闲时任务终态/等确认通知：仅桌面本地链路，main 进程按 status:taskId 去重多窗口重复。
+  // 闲时任务通知：平台无关。桌面端由 main 进程按 (status:taskId) 去重多窗口重复；
+  // Web 端 showTaskNotification 走浏览器 Notification API（web platform 已实现），
+  // 原先额外要求 isDesktop 会让自部署 Web 收不到任何闲时任务通知。
   useOffPeakTaskNotifications({
     offPeakTaskService: services.offPeakTaskService,
     platform,
-    enabled: Boolean(notificationEnabled && isDesktop),
+    enabled: Boolean(notificationEnabled),
     formatMessage: intl.formatMessage,
   });
   const lastHandledDraftSidePaneCloseRef = useRef({
@@ -557,8 +559,10 @@ export function App({
     // 却得到一个新 Browser 或 Review。现在空内容统一交给 Open tab 空态承接。
     handleToggleSidePaneCollapse();
   }, [handleToggleSidePaneCollapse]);
-  // Side Pane 完整视图只在桌面端提供（docs/ui/side-pane-full-view.md）。
-  const supportsSidePaneFullView = Boolean(isDesktop) && !webRemoteControlWorkspaceSwitcher;
+  // Side Pane 完整视图：整个 side-pane-full-view 模块无平台依赖，纯前端状态。
+  // 原先仅桌面端开启是历史门控；自部署 Web 与桌面共用同一套 WorkspaceShellLayout，
+  // 因此同样可用。仍排除手机远控——其宿主是另一个窗口，浮窗定位语义不成立。
+  const supportsSidePaneFullView = !webRemoteControlWorkspaceSwitcher;
   const sidePaneFullView = useSidePaneFullView({
     workspacePath: workspaceAbsPath,
     workspaceIdentity,
@@ -623,12 +627,14 @@ export function App({
   );
   const handleAutoOpenAssistantPptx = useCallback(
     (request: AssistantPreviewCardsAutoOpenRequest) => {
-      if (!isDesktop || webRemoteControlWorkspaceSwitcher || workspaceReadOnlyReason) {
+      // 自动打开预览卡是纯前端 state（handleOpenCodeViewers → openCodeViewerSidePanes），
+      // 无平台依赖；原 isDesktop 门控会让自部署 Web 点开 PPTX 时不弹出预览。
+      if (webRemoteControlWorkspaceSwitcher || workspaceReadOnlyReason) {
         return;
       }
       handleOpenCodeViewers(request.sources);
     },
-    [handleOpenCodeViewers, isDesktop, webRemoteControlWorkspaceSwitcher, workspaceReadOnlyReason],
+    [handleOpenCodeViewers, webRemoteControlWorkspaceSwitcher, workspaceReadOnlyReason],
   );
   const projectName = getPathLeaf(workspaceAbsPath);
   const handleOpenTaskFind = useCallback(() => {

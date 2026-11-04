@@ -96,12 +96,13 @@ export const ProjectSidebarNode = memo(
             : undefined
         }
         onManageProjects={
-          isDesktop
-            ? () => {
-                setPendingSettingsSectionIntent("projects");
-                tabStore.getState().openSettingsTab();
-              }
-            : undefined
+          // 「管理项目」只是切到设置页 projects 分区；该分区在 Web 同样可见（
+          // DESKTOP_ONLY_SETTINGS_SECTIONS 只含 remoteDevices/dataSync），
+          // 原先的 isDesktop 门控会让自部署 Web 缺这个入口。
+          () => {
+            setPendingSettingsSectionIntent("projects");
+            tabStore.getState().openSettingsTab();
+          }
         }
         additionalActions={[
           ...remoteActions(project),

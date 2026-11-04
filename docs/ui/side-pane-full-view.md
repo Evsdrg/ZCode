@@ -1,6 +1,6 @@
 # Side Pane 完整视图
 
-状态：已实现（2026-10-16），E2E 已转正（2026-10-17）：`ui-shell/side-pane-full-view.test.ts`、`conversation-session/conversation-session-side-pane-full-view.test.ts`。仅桌面 Electron；普通 Web、手机远控 `/remote` 不提供入口。代码模块：`packages/ui/src/side-pane-full-view/`（managed，见其 `CONTRACT.md`）。
+状态：已实现（2026-10-16），E2E 已转正（2026-10-17）：`ui-shell/side-pane-full-view.test.ts`、`conversation-session/conversation-session-side-pane-full-view.test.ts`。桌面 Electron 与自部署 Web 均提供；手机远控 `/remote` 不提供入口（宿主是另一个窗口，浮窗定位语义不成立）。代码模块：`packages/ui/src/side-pane-full-view/`（managed，见其 `CONTRACT.md`）。
 
 ## 目标
 
@@ -16,7 +16,7 @@
 | 关闭最后一个面板 tab                                                       | 面板按既有规则收起，同时退出完整视图                     |
 | 面板关闭时按快捷键                                                         | 打开面板并进入完整视图                                   |
 
-- 快捷键命令 id 为 `toggleSidePaneFullView`，可在设置页改键；Web 端不注册处理器，也不在设置页显示。
+- 快捷键命令 id 为 `toggleSidePaneFullView`，可在设置页改键；桌面 Electron 与自部署 Web 均注册处理器，手机远控不注册。
 - 退出完整视图不修改任何原有状态：侧栏显隐、侧栏宽度、面板宽度、终端开合都沿用进入前的值。
 
 ## 布局
@@ -79,7 +79,7 @@ slot 是面板 tab 栏下方的内容区。宿主通过 ResizeObserver 读取 sl
 └─ 拖动中的坐标、操作栏是否显示、底部输入区高度
 
 只读派生
-├─ 完整视图生效 = 桌面 && 非远控 && 面板打开 && 当前 owner 有记录
+├─ 完整视图生效 = 非远控 && 面板打开 && 当前 owner 有记录
 ├─ WorkspaceHeader 显示 = !完整视图生效
 └─ 浮窗显示 = 完整视图生效 && surface === "side-pane"
 ```
