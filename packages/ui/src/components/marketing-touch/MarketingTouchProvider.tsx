@@ -169,7 +169,10 @@ export function MarketingTouchProvider({
               try {
                 await requestMarketingNavigation(action.args, signal, () => {
                   if (action.args.page === "upgrade") {
-                    if (!desktop) throw new Error("marketing_navigation_unavailable");
+                    // 升级弹窗本身已有浏览器降级 UI（CodingPlanEmbeddedWebviewDialog 的
+                    // coding-plan-browser-fallback：前往官网购买 + 我已完成购买）。
+                    // 原先在此按 !desktop 提前抛错，等于把已有降级方案的功能挡在门外，
+                    // 导致活动里的「去升级」按钮在 Web 下必然失败。
                     const requestId = marketingNavigation.getState().request!.id;
                     if (
                       !openCodingPlanUpgrade(
