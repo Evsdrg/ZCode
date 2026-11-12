@@ -1,4 +1,5 @@
 import { remoteHostLabel } from "@/project-sidebar/RemoteHostSection.js";
+import { createUuid } from "@zcode/shared";
 import type { V4SessionDeletionPreview } from "@zcode/shared/zcode-protocol-v4";
 import { useEffect, useRef, useState } from "react";
 import type { ProjectTask } from "@/project-sidebar/contract.js";
@@ -184,7 +185,10 @@ export function useArchiveManagement() {
               { service, controller },
               task,
               approved.preview.revision,
-              crypto.randomUUID(),
+              // Bug 原因：自部署 Web 走 HTTP 属非安全上下文，crypto.randomUUID 不存在；
+              // 裸调用会在这里抛错，被外层 catch 显示成「删除尚未确认完成」，看起来像
+              // 后端拒绝。createUuid 已有 getRandomValues / Math.random 降级。
+              createUuid(),
               approved.remoteSessionId,
             );
             if (result.status !== "deleted") {

@@ -111,4 +111,15 @@ describe("非安全上下文（HTTP 自部署）下的 UUID 生成", () => {
     // 二次调用应复用同一条记录，而不是每次重建。
     expect(ensurePendingTaskDraft(scope).draftId).toBe(draft.draftId);
   });
+
+  it("归档永久删除的 operationId 在非安全上下文下能生成", async () => {
+    // 历史事故：useArchiveManagement 在确认删除后直接调 crypto.randomUUID() 生成
+    // operationId。HTTP 部署下该函数不存在，异常被外层 catch 捕获后统一显示
+    // 「删除尚未确认完成，请重试」，服务端从没收到 permanentlyDeleteArchivedTask，
+    // 用户侧表现为「点删除没反应」。
+    installInsecureContextCrypto();
+    const { createUuid } = await import("@zcode/shared");
+    expect(() => crypto.randomUUID()).toThrow();
+    expect(createUuid()).toMatch(UUID_V4_PATTERN);
+  });
 });

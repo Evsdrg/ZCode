@@ -18,6 +18,7 @@
  *   每次录音只有几条，不随音频块增长。
  */
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+import { createUuid } from "@zcode/shared";
 import { useOptionalPlatform } from "@/hooks/usePlatform.js";
 import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
@@ -220,7 +221,9 @@ export function useComposerVoiceInput(options: {
       resolveDone = resolve;
     });
     const attempt: Attempt = {
-      id: crypto.randomUUID(),
+      // Bug 原因：HTTP 部署是非安全上下文，crypto.randomUUID 不存在；语音录音 ID 必须
+      // 在无 randomUUID 的环境也能生成，否则整个语音输入入口直接抛错。
+      id: createUuid(),
       capture: null,
       started: false,
       finishing: false,
