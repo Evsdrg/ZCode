@@ -28,6 +28,7 @@ import { ShortcutBindingRow, type RecordingState } from "@/settings/ShortcutBind
 import { ShortcutSearchBar } from "@/settings/ShortcutSearchBar.js";
 import { useShortcutKeySearch } from "@/settings/useShortcutKeySearch.js";
 import { useShortcutRecording } from "@/settings/useShortcutRecording.js";
+import { isMenuChannelUnavailable } from "@/shortcuts/webMenuShortcuts.js";
 
 /**
  * 快捷键设置分区：命令表只读展示 + 键盘录入 + 冲突处理。
@@ -277,7 +278,7 @@ export function ShortcutSettingsSection({
             isOverridden={overrides?.[entry.id] !== undefined}
             isRecording={recordingCommandId === entry.id}
             recording={recording}
-            menuChannelUnavailable={entry.channel === "menu" && !isDesktop}
+            menuChannelUnavailable={isMenuChannelUnavailable(entry.id, entry.channel, isDesktop)}
             onRecord={(bindingIndex) => {
               // 行内录制与按键搜索武装态互斥：两套 window capture 监听并存会互相吞键
               keySearch.disarm();

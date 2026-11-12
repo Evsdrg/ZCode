@@ -26,6 +26,7 @@ import {
   createZCodeAgentConnectionScope,
   IBotsService,
   IProviderProvisioningTargetService,
+  IFileService,
 } from "@zcode/services";
 import {
   botProviders,
@@ -42,6 +43,11 @@ import {
 import {
   SourceServerWorkspaceIdentityChannelServer,
   type SourceServerWorkspaceIdentityMapper,
+} from "@zcode/services/node";
+import {
+  SERVER_MEDIA_PREVIEW_ROUTE,
+  parseMediaByteRange,
+  type MediaPreviewLeaseStore,
 } from "@zcode/services/node";
 import { createHostCapabilityStore } from "./hostCapability.js";
 import { startWebSocketHeartbeat } from "./webSocketHeartbeat.js";
@@ -181,6 +187,26 @@ export interface HttpServerOptions {
    * 普通浏览器没有 Electron main 的 net.fetch，直接连 zcode.z.ai 会被 Origin 白名单 403。
    */
   zcodeEndpointProxy?: ReturnType<typeof createZCodeEndpointProxy>;
+  /**
+   * 自部署：本地媒体预览的路径授权表。提供后启用 `/api/media/preview` 路由，
+   * 让 `IMediaPreviewService.prepare()` 返回 `local-url`（支持 Range），
+   * 而不是 8MB 上限的 base64 内联。缺省则不注册该路由（桌面 Host 走 Electron 协议）。
+   */
+  mediaPreviewLeaseStore?: MediaPreviewLeaseStore;
+  /**
+   * 自部署：日志导出服务。提供后启用 `/api/logs/export`：服务端打包 zip 并直接作为
+   * 下载响应回给浏览器（桌面端用 Electron shell 打开文件管理器，浏览器只能用下载）。
+   */
+  logExportService?: {
+    export(): Promise<{
+      success: boolean;
+      fileName?: string;
+      bytes?: Uint8Array;
+      format?: "zip" | "directory";
+      path?: string;
+      error?: string;
+    }>;
+  };
 }
 
 function readTrimmedEnv(name: string): string | undefined {
@@ -228,6 +254,7 @@ function createServerInfo(options: HttpServerOptions): ServerRemoteInfo {
       ...(options.virtualProjects ? { virtualProjects: true } : {}),
       processResourceTelemetry: true,
       ...(options.hostNative ? { hostNative: true as const } : {}),
+      ...(options.logExportService ? { logExport: true as const } : {}),
       remoteConversationTelemetry: true,
     },
   });
@@ -396,6 +423,107 @@ export function createHttpServer(
 
   app.get("/api/server-info", (c) => c.json(createServerInfo(options)));
   app.post("/api/rpc-host-capability", (c) => c.json(hostCapabilities.issue()));
+
+  // 自部署本地媒体预览：浏览器直接 <video>/<audio> 请求这个同源路由（带部署鉴权 Cookie）。
+  // 授权只认 mediaPreviewLeaseStore 中已登记的规范化绝对路径——URL 里的 path 不构成授权。
+  // 支持单区间 Range：音视频 seek / MP4 moov 位于 mdat 之后时的元数据探测都依赖 206。
+  if (options.mediaPreviewLeaseStore) {
+    const leaseStore = options.mediaPreviewLeaseStore;
+    app.get(SERVER_MEDIA_PREVIEW_ROUTE, async (c) => {
+      const requestedPath = new URL(c.req.url).searchParams.get("path");
+      if (!requestedPath) {
+        return c.json({ error: "Missing media path" }, 400);
+      }
+      const resolved = await leaseStore.resolve(requestedPath);
+      if (!resolved) {
+        return c.json({ error: "Media preview not authorized" }, 404);
+      }
+      const fileService = services.getOptional(IFileService);
+      if (!fileService) {
+        return c.json({ error: "File service unavailable" }, 503);
+      }
+      const size = resolved.size;
+      const range = parseMediaByteRange(c.req.header("range"), size);
+      if (range === "invalid") {
+        return c.body(null, 416, { "Content-Range": `bytes */${size}` });
+      }
+      const start = range?.start ?? 0;
+      const end = range?.end ?? Math.max(0, size - 1);
+      const length = size === 0 ? 0 : end - start + 1;
+      const headers: Record<string, string> = {
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "no-store",
+        "Content-Disposition": "inline",
+        "Content-Length": String(length),
+        // 媒体类型在 authorize 时由调用方（prepare 内已知格式）写入，避免重复推断。
+        "Content-Type": resolved.mediaType,
+      };
+      if (range) headers["Content-Range"] = `bytes ${start}-${end}/${size}`;
+      if (c.req.method === "HEAD" || length === 0) {
+        return c.body(null, range ? 206 : 200, headers);
+      }
+      // fileService.readFileRange 是服务层公开接口：不直接碰文件系统，也能兼容远端 Host。
+      // 必须分块流式返回：浏览器首次请求常是无 Range 的全量请求，一次 readFileRange 读 512MB
+      // 会直接摋爆 server 内存；按 1MB 块边读边写，背压由流控接管。
+      const chunkBytes = 1024 * 1024;
+      let offset = start;
+      const stream = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          if (offset > end) {
+            controller.close();
+            return;
+          }
+          const requestedLength = Math.min(chunkBytes, end - offset + 1);
+          try {
+            const chunk = await fileService.readFileRange({
+              path: resolved.canonicalPath,
+              offset,
+              length: requestedLength,
+            });
+            if (chunk.length === 0) {
+              controller.close();
+              return;
+            }
+            // 拷贝到独立 buffer：readFileRange 返回 Uint8Array<ArrayBufferLike>，
+            // 且底层可能复用池，直接入流会在下一块覆盖时读到脏数据。
+            controller.enqueue(new Uint8Array(chunk));
+            offset += chunk.length;
+          } catch (error) {
+            controller.error(error);
+          }
+        },
+      });
+      return c.body(stream, range ? 206 : 200, headers);
+    });
+  }
+
+  // 自部署日志导出：与桌面端同一套收集 / 脱敏 / 打包逻辑，但产物以附件下载返回。
+  // 目录回退（zip 写入失败）无法作为单文件下载，返回 500 让调用方看到真实原因，
+  // 而不是给浏览器一个看似成功的空响应。
+  if (options.logExportService) {
+    const logExportService = options.logExportService;
+    app.get("/api/logs/export", async (c) => {
+      const result = await logExportService.export();
+      if (!result.success) {
+        return c.json({ error: result.error ?? "Log export failed" }, 500);
+      }
+      if (result.format !== "zip" || !result.bytes) {
+        return c.json(
+          {
+            error: "Log export produced a directory instead of a zip archive",
+            ...(result.path ? { path: result.path } : {}),
+          },
+          500,
+        );
+      }
+      return c.body(new Uint8Array(result.bytes), 200, {
+        "Cache-Control": "no-store",
+        "Content-Disposition": `attachment; filename="${result.fileName ?? "zcode-logs.zip"}"`,
+        "Content-Length": String(result.bytes.byteLength),
+        "Content-Type": "application/zip",
+      });
+    });
+  }
 
   // 浏览器侧的固定路径反代（OAuth token 交换 / help 配置）。
   // 自部署 Web 没有 Electron main 的 net.fetch：浏览器直连 zcode.z.ai 会被 Origin 白名单

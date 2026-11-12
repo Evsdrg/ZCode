@@ -43,6 +43,7 @@ import {
 } from "./onboarding/localUsageEvidence.js";
 import {
   buildLocalMediaPreviewUrl,
+  getMediaPreviewFormat,
   type DynamicWorkflowMode,
   type ProviderProvisioningSourceTrigger,
 } from "@zcode/shared";
@@ -79,6 +80,25 @@ export {
   type ProcessResourceSampler,
 } from "./process/processResourceSampler.js";
 export { createMediaPreviewService } from "./media-preview/mediaPreview.js";
+export {
+  createLogExportService,
+  removeLogExportArtifact,
+} from "./log-export/logExportService.js";
+export type {
+  LogExportResult,
+  LogExportService,
+} from "./log-export/logExportService.js";
+export {
+  exportLogs as exportLogsArchive,
+  createFeedbackLogArchiveFromExportLogs,
+} from "./log-export/exportLogs.js";
+export { createMediaPreviewLeaseStore } from "./media-preview/mediaPreviewLeaseStore.js";
+export type { MediaPreviewLeaseStore } from "./media-preview/mediaPreviewLeaseStore.js";
+export {
+  SERVER_MEDIA_PREVIEW_ROUTE,
+  buildServerMediaPreviewUrl,
+} from "./media-preview/mediaPreviewUrl.js";
+export { parseMediaByteRange } from "./media-preview/mediaPreviewRange.js";
 export { createContentBundleCache } from "#src/cloud-content/contentBundleCache.js";
 export type { ContentBundle } from "#src/cloud-content/contentBundleCache.js";
 export type { CreateFileServiceOptions } from "./file/fileService.js";
@@ -479,6 +499,8 @@ import { IFeedbackService } from "./feedback/feedback.js";
 import { IPromptAttachmentTransferService } from "./prompt-attachment-transfer/promptAttachmentTransfer.js";
 import { createFileService } from "./file/fileService.js";
 import { createMediaPreviewService } from "./media-preview/mediaPreview.js";
+import type { MediaPreviewLeaseStore } from "./media-preview/mediaPreviewLeaseStore.js";
+import { buildServerMediaPreviewUrl } from "./media-preview/mediaPreviewUrl.js";
 import type { WorkspaceFileSearchFilter } from "./file/workspaceFileMentionFilter.js";
 import { createGitService } from "./git/gitService.js";
 import { GitCommitMessageGenerator } from "./git/gitCommitMessageGenerator.js";
@@ -1303,6 +1325,12 @@ export function createLocalServices(options: {
   resolveClientLanguage?: () => string | undefined;
   /** Desktop Host 请求 Main 登记 Agent 已授权的精确本地视频路径。 */
   authorizeLocalMediaPreviewPath?: (path: string) => Promise<string>;
+  /**
+   * 自部署形态：没有 Electron 的 zcode-media 协议，改用本进程的 HTTP 路由提供
+   * `local-url` 预览（支持 Range，因此 >8MB 音视频不再回退到 base64 内联）。
+   * 与 `authorizeLocalMediaPreviewPath` 二选一，同时提供时以本项为准。
+   */
+  mediaPreviewLeaseStore?: MediaPreviewLeaseStore;
   /**
    * 动态工作流用户选择变化后的转发口（docs/dynamic-workflow/launch.md「The user's choice」）：
    * Desktop Host 把本机设置里的选择推给本窗口所有在线的 desktop-attached remote Host。
@@ -2907,8 +2935,27 @@ export function createLocalServices(options: {
   });
   const mediaPreviewService = createMediaPreviewService({
     fileService,
-    authorizeLocalMediaPreviewPath: options?.authorizeLocalMediaPreviewPath,
-    createLocalMediaPreviewUrl: buildLocalMediaPreviewUrl,
+    // 两套宿主只能各拿一条 local-url 通道：
+    // - Desktop Host：Electron main 的 zcode-media 协议负责登记 + Range 读取；
+    // - 自部署 server：没有自定义协议，改由本进程 HTTP 路由提供（同源、带鉴权 Cookie）。
+    // 误用 zcode-media:// 会让浏览器把未注册 scheme 当无效 URL，预览直接空白。
+    ...(options?.mediaPreviewLeaseStore
+      ? {
+          authorizeLocalMediaPreviewPath: async (path: string) => {
+            // 媒体类型由 prepare 内部已知格式（getMediaPreviewFormat），这里按同一函数重算，
+            // 保证 HTTP 响应的 Content-Type 与实际格式一致。
+            const format = getMediaPreviewFormat(path);
+            if (!format) {
+              throw new Error(`Unsupported media preview format: ${path}`);
+            }
+            return options.mediaPreviewLeaseStore!.authorize(path, format.mediaType);
+          },
+          createLocalMediaPreviewUrl: buildServerMediaPreviewUrl,
+        }
+      : {
+          authorizeLocalMediaPreviewPath: options?.authorizeLocalMediaPreviewPath,
+          createLocalMediaPreviewUrl: buildLocalMediaPreviewUrl,
+        }),
   });
   const conversationShareClient = new ConversationShareHttpClient({
     // 分享运行时始终走真实 API；测试/Mock 场景应在 service 单测或 Web fixture 中显式注入，

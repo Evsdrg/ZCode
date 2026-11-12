@@ -11,6 +11,7 @@ import {
   type KeyboardShortcutPlatformInfo,
 } from "../lib/keyboardShortcuts.js";
 import { resolveEffectiveShortcutBindings } from "./bindings.js";
+import { isWebConfigurableMenuCommand } from "./webMenuShortcuts.js";
 
 /**
  * 保留键黑名单：浏览器/编辑原生行为、刷新与开发工具、功能键整段、
@@ -171,10 +172,15 @@ export function checkShortcutBindingConflict(
     for (const binding of effective[entry.id] ?? []) {
       const candidateKey = canonicalBindingKey(binding, isApple);
       if (newKey !== null && candidateKey === newKey) {
-        // Web 端 menu 通道命令不可配置，但其默认键仍被根级回退监听
-        // （useRootPlatformEffects 固定响应 Cmd/Ctrl+N、O）消费——按保留键拒绝，
-        // 不提供抢绑入口，否则抢绑后同键双动作。
-        if (options?.menuChannelReserved && entry.channel === "menu") {
+        // Web 端不可配置的 menu 通道命令（closeActiveContext / zoomIn / zoomOut / resetZoom）
+        // 默认键仍被宿主窗口语义占用，也没提供抢绑入口——按保留键拒绝，避免抢绑后同键双动作。
+        // newTask / openWorkspace 在 Web 已改为可配置且回退监听读生效表，不再适用该保留规则，
+        // 按普通占用走（允许二次确认抢绑）。
+        if (
+          options?.menuChannelReserved &&
+          entry.channel === "menu" &&
+          !isWebConfigurableMenuCommand(entry.id, entry.channel)
+        ) {
           return { kind: "reserved", binding: newBinding };
         }
         return { kind: "occupied", ownerCommandId: entry.id, binding: newBinding };

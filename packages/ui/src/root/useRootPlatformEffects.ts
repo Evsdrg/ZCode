@@ -12,8 +12,8 @@ import { useTabStore } from "@/store/TabStoreProvider.js";
 import { logger } from "@/logger.js";
 import { resolveImportedComposerConfig } from "@/v4/composer/newTaskDraft.js";
 import { dismissToast, toast, updateToast } from "@/components/ui/toast.js";
-import { matchesPrimaryShortcut } from "@/lib/keyboardShortcuts.js";
-import { isShortcutRecordingActive } from "@/shortcuts/bindings.js";
+import { isShortcutRecordingActive, matchesShortcutBinding } from "@/shortcuts/bindings.js";
+import { useEffectiveShortcutBindings } from "@/shortcuts/useShortcutBindings.js";
 import { isRendererReloadNavigation } from "@/lib/rendererNavigation.js";
 import {
   useWebRemoteControlWorkspaceSync,
@@ -98,6 +98,9 @@ export function useRootPlatformEffects({
 }) {
   const didBootstrapInitialWorkspaceRef = useRef(false);
   const baseServices = useOptionalBaseWorkspaceServices();
+  // Web 端 menu 通道的两条可配置命令（newTask / openWorkspace）下方回退监听按生效表匹配，
+  // 因此设置页改键后行为立即跟随；其余 menu 命令在 Web 仍由设置页置灰、不由本监听消费。
+  const effectiveShortcutBindings = useEffectiveShortcutBindings();
   const pendingShareImportRef = useRef<ShareImportIntent | null>(null);
   const [shareImportRevision, setShareImportRevision] = useState(0);
   const composerClientNamespace = useComposerClientNamespace();
@@ -592,37 +595,47 @@ export function useRootPlatformEffects({
       return;
     }
 
+    function matchesConfigurableMenuShortcut(
+      event: KeyboardEvent,
+      commandId: "newTask" | "openWorkspace",
+    ): boolean {
+      const bindings = effectiveShortcutBindings[commandId];
+      if (!bindings || bindings.length === 0) {
+        return false;
+      }
+      return bindings.some((binding) => matchesShortcutBinding(event, binding));
+    }
+
     function handleWindowKeydown(event: KeyboardEvent) {
       // 录制态键盘归录制器独占。本监听先于录制监听注册（同 capture 阶段），
       // 不短路的话录制期按 Cmd/Ctrl+N、O 预览会真实触发新建任务/打开工作区。
       if (isShortcutRecordingActive()) {
         return;
       }
-      const isNewTaskShortcut = matchesPrimaryShortcut(event, "n");
-      const isOpenWorkspaceShortcut = matchesPrimaryShortcut(event, "o");
+      const isNewTaskShortcut = matchesConfigurableMenuShortcut(event, "newTask");
+      const isOpenWorkspaceShortcut = matchesConfigurableMenuShortcut(event, "openWorkspace");
 
       if (!isNewTaskShortcut && !isOpenWorkspaceShortcut) {
         return;
       }
 
-      // Web 端没有宿主菜单，补一层 best-effort 键盘监听，按平台主修饰键落到同一套根级动作。
-      // 耦合说明：这里固定使用默认键位（Ctrl/Cmd+N、+O），与「menu 通道命令在 Web 端不可配置」
-      // （设置页置灰）配套——若未来放开 Web 端 menu 通道改键，
-      // 此处必须改为读快捷键生效表，否则用户改键后 Web 行为会分裂。
+      // Web 端没有宿主菜单，补一层键盘监听，按快捷键生效表落到同一套根级动作。
+      // 这两个命令在设置页可改键（见 shortcuts/webMenuShortcuts.ts 白名单），
+      // 因此这里必须读生效表而不是硬编码默认键位，否则用户改键后 Web 行为会分裂。
       event.preventDefault();
       if (isOpenWorkspaceShortcut) {
         openWorkspace();
         return;
       }
 
-      startNewTaskFromActiveWorkspace("web CmdOrCtrl+N");
+      startNewTaskFromActiveWorkspace("web newTask shortcut");
     }
 
     window.addEventListener("keydown", handleWindowKeydown, true);
     return () => {
       window.removeEventListener("keydown", handleWindowKeydown, true);
     };
-  }, [isDesktop, openWorkspace, startNewTaskFromActiveWorkspace]);
+  }, [isDesktop, openWorkspace, startNewTaskFromActiveWorkspace, effectiveShortcutBindings]);
 
   useEffect(() => {
     if (!isDesktop) {

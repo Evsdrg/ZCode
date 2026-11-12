@@ -245,6 +245,8 @@ interface WebBootstrapResult {
   hostPlatform?: string;
   /** 宿主是否注册了 host-native 平台服务（server-info.capabilities.hostNative）。 */
   hostNative?: boolean;
+  /** 宿主是否提供日志导出接口（server-info.capabilities.logExport）。 */
+  logExport?: boolean;
 }
 
 type WebRemoteControlWorkspaceListUpdateListener = (
@@ -476,6 +478,7 @@ async function resolveWebBootstrap(): Promise<WebBootstrapResult> {
         ? { hostPlatform: serverInfo.hostPlatform }
         : {}),
       ...(serverInfo.capabilities?.hostNative === true ? { hostNative: true } : {}),
+      ...(serverInfo.capabilities?.logExport === true ? { logExport: true } : {}),
     };
   } catch {
     return { wsUrl };
@@ -1911,6 +1914,7 @@ async function bootstrapWebApp() {
       ...(services.hostNativeAvailable && services.hostNativeService
         ? { hostNativeService: services.hostNativeService }
         : {}),
+      ...(bootstrap.logExport === true ? { logExport: true } : {}),
     });
     document.title = "ZCode - Web + Server";
 

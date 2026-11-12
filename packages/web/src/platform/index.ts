@@ -24,6 +24,7 @@ import type {
   WebRemoteControlPlatformProxy,
 } from "#src/platform/contract.js";
 import { saveBrowserFile } from "#src/platform/saveBrowserFile.js";
+import { exportLogsInBrowser } from "#src/platform/exportLogs.js";
 
 export type {
   RelayStatusSource,
@@ -114,6 +115,11 @@ export function createWebPlatform(options?: {
    * 失败桩/缺席语义。
    */
   hostNativeService?: WebHostNativeService;
+  /**
+   * 自部署 server 提供日志导出接口（`/api/logs/export`）。
+   * 桌面端不传——它走 Electron IPC，使用自己 main 进程的实现。
+   */
+  logExport?: boolean;
 }): IPlatformService {
   const platformProxy = options?.externalWebRemoteControlProxy;
   const relayStatusSource = options?.relayStatusSource;
@@ -392,7 +398,12 @@ export function createWebPlatform(options?: {
     onOpenWorkspace: () => () => {},
     onWindowFullscreenChanged: () => () => {},
     onTaskNotificationClick: () => () => {},
-    exportLogs: () => Promise.resolve({ success: false, error: "Not supported in web mode" }),
+    // 自部署 server 提供日志导出接口时走真实下载；否则保持原拒绝语义。
+    // `exportLogs` 在 IPlatformService 里是必需方法（不像 importChromeBrowserData 那种可选方法），
+    // 因此不能用「缺席即不支持」表达能力——由 logExport 开关分流实现。
+    exportLogs: options?.logExport
+      ? () => exportLogsInBrowser()
+      : () => Promise.resolve({ success: false, error: "Not supported in web mode" }),
     captureWindowScreenshot: () => Promise.resolve(null),
     // 原因：importChromeBrowserData 是 IPlatformService 的**可选**方法，按接口约定「缺席即不支持」。
     // 之前这里提供了恒返回 chrome_import_not_supported 的失败桩，使 UI 的

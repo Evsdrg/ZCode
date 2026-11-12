@@ -2,6 +2,8 @@ import {
   AutomationRepo,
   AutomationScheduler,
   createLocalServices,
+  createMediaPreviewLeaseStore,
+  createLogExportService,
   createServiceLogger,
   createSettingServiceWithMigrations,
   createTopicResourcePeers,
@@ -73,6 +75,12 @@ async function main(): Promise<void> {
   let dispatchRuntime: ReturnType<typeof createServerAutomationDispatchRuntime> | undefined;
 
   const serverId = resolveHttpServerId();
+  // 本地媒体预览的路径授权表：createLocalServices 与 HTTP 路由必须共用同一实例，
+  // 否则 prepare 登记的路径在路由侧查不到（表现为预览 404）。
+  const mediaPreviewLeaseStore = createMediaPreviewLeaseStore();
+  // 日志导出：服务端打包 zip，浏览器侧以附件下载。桌面端仍走 Electron 的
+  // shell.showItemInFolder，两条路径互不重叠。
+  const logExportService = createLogExportService();
   // 先串行预热迁移：AutomationRepo / OffPeakTaskRepo / TaskIndexRepo 各自懒加载时，会分别用独立
   // 连接对同一个 tasks-index.sqlite 跑迁移（含备份，持写锁数秒）；若被 AutomationScheduler 与其它
   // service 同时触发，后到者会撞 busy_timeout 报 `database is locked`，启动失败。上游
@@ -85,6 +93,10 @@ async function main(): Promise<void> {
   // remote:server:<id>，导致任务/项目归到远端 host、发消息报 project.host-offline）。
   // fork 需要的服务开关照常透传。
   const services = createLocalServices({
+    // 自部署没有 Electron 的 zcode-media 协议：注入 lease store 后，IMediaPreviewService
+    // 走 local-url 分支并由本进程的 /api/media/preview 提供 Range 读取，
+    // 不再因 8MB inline 上限拒绝大音视频。
+    mediaPreviewLeaseStore,
     topicResourceRelayChannel: (request) => topicResourcePeers.getChannel(request),
     settingService,
     setWorkspaceProjection,
@@ -139,6 +151,8 @@ async function main(): Promise<void> {
 
   const server = createHttpServer(services, port, {
     serverId,
+    mediaPreviewLeaseStore,
+    logExportService,
     virtualProjects: true,
     topicResourcePeers,
     ...(host ? { host } : {}),

@@ -1201,13 +1201,41 @@ modules:
     roots:
       - packages/desktop/src/main/browser-local-preview
     managed: true
-    requires: [shared]
+    requires: [ shared ]
     publicEntrypoints:
       - packages/desktop/src/main/browser-local-preview/index.ts
       - packages/desktop/src/main/browser-local-preview/contract.ts
     layers:
       adapters: .
     owner: desktop
+  # media-preview：由 architecture:adopt 登记
+  - id: media-preview
+    roots:
+      - packages/services/src/media-preview
+    managed: true
+    requires:
+      - services
+      - shared
+    publicEntrypoints:
+      - packages/services/src/media-preview/index.ts
+      - packages/services/src/media-preview/contract.ts
+    layers:
+      adapters: .
+    owner: conversation
+  # log-export：由 architecture:adopt 登记
+  - id: log-export
+    roots:
+      - packages/services/src/log-export
+    managed: true
+    requires:
+      - services
+      - shared
+    publicEntrypoints:
+      - packages/services/src/log-export/index.ts
+      - packages/services/src/log-export/contract.ts
+    layers:
+      adapters: .
+    owner: conversation
 
 global:
   # 临时时间戳（2026-09-10）：unmanaged-new-file 只约束此日期之后首次入库的文件。
@@ -1419,6 +1447,18 @@ exceptions:
       - packages/ui/src/settings/ShortcutSearchBar.tsx
       - packages/ui/src/settings/ShortcutSettingsSection.tsx
     reason: Existing upstream shortcut components and keycap primitive edited for shared controls, responsive layout and save admission; adopting the entire settings directory requires a separate boundary refactor.
+
+  # shortcut-settings-web-configurable-menu：由 architecture:adopt 登记
+  - id: shortcut-settings-web-configurable-menu
+    rule: unmanaged-new-file
+    paths:
+      - packages/ui/src/shortcuts/webMenuShortcuts.ts
+      - packages/ui/src/shortcuts/conflicts.ts
+    reason: Web 端把 newTask/openWorkspace 两个 menu 通道命令改为真正可配置（回退监听读生效表、冲突检查放行这两个 id），新增的 webMenuShortcuts.ts 是纯函数白名单，由 ShortcutSettingsSection 与 useRootPlatformEffects 共同消费；接管整个 ui/shortcuts 目录不在本次范围内。
+  - id: marketing-touch-upgrade-gate-edit
+    rule: unmanaged-new-file
+    paths: [ packages/ui/src/components/marketing-touch/MarketingTouchProvider.tsx ]
+    reason: 仅移除 upgrade 导航上的 desktop 门控，让浏览器已存在的 CodingPlanEmbeddedWebviewDialog 降级 UI（前往官网购买 / 我已完成购买）可达；组件其余 desktop 用途（prepareMarketingHero 的 bundle 素材）保持不变。
   - id: sidebar-workflow-tooltip-existing-ui-edit
     rule: unmanaged-new-file
     paths: [ packages/ui/src/components/workflow-run-line/WorkflowRunRail.tsx ]
