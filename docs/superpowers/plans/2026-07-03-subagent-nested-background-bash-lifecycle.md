@@ -102,7 +102,7 @@
   - core runtime policy tests。
 - Modify: `apps/zcode-cli/packages/core/tests/subagent-background.test.ts`
   - subagent child runtime wiring tests，如现有 harness 合适。
-- Modify or add: `packages/desktop/test/e2e/conversation-session/conversation-session-background.test.ts`
+- Modify or add: `packages/desktop/test/e2e/conversation-session/background/conversation-session-background.test.ts`
   - 只有 manual review 通过后再纳入正式 spec 或现有 BG spec。
 
 ---
@@ -110,13 +110,11 @@
 ## Phase 0: Spec and Matrix First
 
 **Files:**
-
 - Modify: `docs/conversation-session-case-catalog.md`
 - Modify: `docs/testing/conversation-session-background-e2e-coverage-matrix.md`
 - Modify: `docs/testing/conversation-session-e2e-coverage-matrix.md`
 
 **Interfaces:**
-
 - Consumes: 当前 BG06 deferred 文档。
 - Produces: 新 BG06 accepted semantic contract，供后续 tests 和实现使用。
 
@@ -167,7 +165,6 @@ Expected:
 ## Phase 1: Runtime-local Sealed Notification Policy
 
 **Files:**
-
 - Modify: `apps/zcode-cli/packages/core/src/runtime/agent-runtime.ts`
 - Modify: `apps/zcode-cli/packages/core/src/runtime/internal.ts`
 - Modify: `apps/zcode-cli/packages/core/src/runtime/methods/background-notifications.ts`
@@ -178,7 +175,6 @@ Expected:
 - Test: `apps/zcode-cli/packages/core/tests/runtime-tool-loop.test.ts`
 
 **Interfaces:**
-
 - Produces:
   - `AgentRuntime.sealBackgroundTaskNotifications(input: { reason: "subagent_terminal" | "subagent_cancelled"; traceContext?: TraceContext }): void`
   - `ToolExecutorOptions.shouldEnqueueBackgroundTaskNotification?: (input: BackgroundTaskNotificationPolicyInput) => boolean`
@@ -443,13 +439,11 @@ Expected:
 ## Phase 2: Seal Child Runtime When Subagent Turn Ends
 
 **Files:**
-
 - Modify: `apps/zcode-cli/packages/core/src/runtime/methods/subagent.ts`
 - Test: `apps/zcode-cli/packages/core/tests/subagent-background.test.ts`
 - Test: `apps/zcode-cli/packages/core/tests/runtime-tool-loop.test.ts`
 
 **Interfaces:**
-
 - Consumes: `AgentRuntime.sealBackgroundTaskNotifications(...)` from Phase 1.
 - Produces: child runtime is sealed after the initial subagent turn returns or throws.
 
@@ -529,7 +523,6 @@ Expected:
 ## Phase 3: Subagent-scope Background Bash Max Runtime
 
 **Files:**
-
 - Modify: `apps/zcode-cli/packages/core/src/runtime/types.ts`
 - Modify: `apps/zcode-cli/packages/core/src/runtime/agent-runtime.ts`
 - Modify: `apps/zcode-cli/packages/core/src/runtime/methods/subagent.ts`
@@ -539,7 +532,6 @@ Expected:
 - Test: `apps/zcode-cli/packages/core/tests/runtime-tool-loop.test.ts`
 
 **Interfaces:**
-
 - Produces:
   - `AgentRuntimeConfig.subagents?.backgroundBashMaxMs?: number`
   - `ToolExecutorDeps.subagentBackgroundBashMaxMs?: number`
@@ -743,7 +735,6 @@ Expected:
 ## Phase 4: Cancel Running Child Background Bash on Subagent Cancellation
 
 **Files:**
-
 - Modify: `apps/zcode-cli/packages/core/src/runtime/methods/background.ts`
 - Modify: `apps/zcode-cli/packages/core/src/runtime/methods/index.ts`
 - Modify: `apps/zcode-cli/packages/core/src/runtime/internal.ts`
@@ -752,7 +743,6 @@ Expected:
 - Test: `apps/zcode-cli/packages/core/tests/runtime-tool-loop.test.ts`
 
 **Interfaces:**
-
 - Produces:
   - `AgentRuntime.cancelRunningRuntimeBackgroundTasks(input: { reason: "subagent_cancelled"; traceContext?: TraceContext }): Promise<void>`
 - Consumes:
@@ -831,7 +821,9 @@ export async function cancelRunningRuntimeBackgroundTasks(
   const traceContext = input.traceContext ?? this.rootTraceContext;
   const tasks = Object.values(this.runtimeTaskRegistry.all()).filter(
     (task) =>
-      task.type === "local_bash" && task.isBackgrounded === true && task.status === "running",
+      task.type === "local_bash" &&
+      task.isBackgrounded === true &&
+      task.status === "running",
   );
 
   for (const task of tasks) {
@@ -892,15 +884,13 @@ Expected:
 ## Phase 5: BG06 E2E Manual Review and Promotion
 
 **Files:**
-
-- Modify: `packages/desktop/test/e2e/conversation-session/conversation-session-background.test.ts`
+- Modify: `packages/desktop/test/e2e/conversation-session/background/conversation-session-background.test.ts`
 - Modify: `packages/desktop/test/e2e/fixtures/upstream/conversation-session/conversation-session-background.json`
 - Modify: `packages/desktop/test/e2e/fixtures/cases/conversation-session/conversation-session-background.json`
 - Modify after promotion: `docs/testing/conversation-session-background-e2e-coverage-matrix.md`
 - Modify after promotion: `docs/testing/conversation-session-e2e-coverage-matrix.md`
 
 **Interfaces:**
-
 - Consumes: core runtime behavior from Phases 1-4.
 - Produces: replayable BG06 parent-surface proof.
 
@@ -934,7 +924,7 @@ Run:
 ```bash
 python -m json.tool packages/desktop/test/e2e/fixtures/upstream/conversation-session/conversation-session-background.json >/dev/null
 python -m json.tool packages/desktop/test/e2e/fixtures/cases/conversation-session/conversation-session-background.json >/dev/null
-pnpm --filter @zcode/desktop e2e:fixture:check -- --spec ./test/e2e/conversation-session/conversation-session-background.test.ts
+pnpm --filter @zcode/desktop e2e:fixture:check -- --spec ./test/e2e/conversation-session/background/conversation-session-background.test.ts
 ```
 
 Expected:
@@ -964,12 +954,12 @@ Case-specific responses were added only to the existing background case-local fi
 Run:
 
 ```bash
-pnpm --filter @zcode/desktop e2e:fixture:check -- --spec ./test/e2e/conversation-session/conversation-session-background.test.ts
+pnpm --filter @zcode/desktop e2e:fixture:check -- --spec ./test/e2e/conversation-session/background/conversation-session-background.test.ts
 
 E2E_PROVIDER_REPLAY_FIXTURE_PATH=packages/desktop/test/e2e/fixtures/upstream/common.json,packages/desktop/test/e2e/fixtures/upstream/conversation-session/conversation-session-background.json \
-  pnpm --filter @zcode/desktop exec wdio run wdio.conf.ts --spec './test/e2e/conversation-session/conversation-session-background.test.ts'
+  pnpm --filter @zcode/desktop exec wdio run wdio.conf.ts --spec './test/e2e/conversation-session/background/conversation-session-background.test.ts'
 
-pnpm --filter @zcode/desktop exec wdio run wdio.conf.ts --spec './test/e2e/conversation-session/conversation-session-background.test.ts'
+pnpm --filter @zcode/desktop exec wdio run wdio.conf.ts --spec './test/e2e/conversation-session/background/conversation-session-background.test.ts'
 ```
 
 Expected:
@@ -988,7 +978,6 @@ Expected:
 ## Phase 6: Regression Verification
 
 **Files:**
-
 - No new implementation files.
 - Update docs only if verification uncovers an intentional scope note.
 
@@ -1009,7 +998,7 @@ Expected:
 Run:
 
 ```bash
-pnpm --filter @zcode/desktop e2e:fixture:check -- --spec ./test/e2e/conversation-session/conversation-session-background.test.ts
+pnpm --filter @zcode/desktop e2e:fixture:check -- --spec ./test/e2e/conversation-session/background/conversation-session-background.test.ts
 ```
 
 Expected:

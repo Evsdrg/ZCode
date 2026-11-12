@@ -1,7 +1,7 @@
 {
   "version": 1,
   "caseName": "conversation-session-tool-cross-product",
-  "spec": "./test/e2e/conversation-session/conversation-session-tool-cross-product.test.ts",
+  "spec": "./test/e2e/conversation-session/tools/conversation-session-tool-cross-product.test.ts",
   "fixtures": [
     {
       "id": "upstream-tool-cross-product-read-call",
@@ -16,13 +16,8 @@
         "method": "POST",
         "pathIncludes": "/messages",
         "lastUserMessageIncludes": ["E2E_TOOL_CROSS_PRODUCT_READ"],
-        "lastUserMessageExcludes": ["E2E_TOOL_CROSS_PRODUCT_READ_SESSION_CONTEXT"],
         "bodyIncludes": ["E2E_TOOL_CROSS_PRODUCT_READ"],
-        "bodyExcludes": [
-          "E2E_TOOL_CROSS_PRODUCT_READ_SESSION_CONTEXT",
-          "Generate a concise title",
-          "CRITICAL: Respond with TEXT ONLY"
-        ]
+        "bodyExcludes": ["Generate a concise title", "CRITICAL: Respond with TEXT ONLY"]
       },
       "response": {
         "statusCode": 200,
@@ -381,35 +376,6 @@
                 ]
               }
             ]
-          }
-        }
-      }
-    },
-    {
-      "id": "upstream-tool-cross-product-read-session-context-call",
-      "metadata": {
-        "kind": "main",
-        "source": "synthetic",
-        "timingPolicy": "tool-use",
-        "syntheticReason": "固定触发 ReadSessionContext 的可预期失败路径，覆盖会话读取工具历史。"
-      },
-      "description": "Conversation tool cross product: ReadSessionContext tool_use.",
-      "match": {
-        "method": "POST",
-        "pathIncludes": "/messages",
-        "lastUserMessageIncludes": ["E2E_TOOL_CROSS_PRODUCT_READ_SESSION_CONTEXT"],
-        "bodyIncludes": ["E2E_TOOL_CROSS_PRODUCT_READ_SESSION_CONTEXT"],
-        "bodyExcludes": ["Generate a concise title", "CRITICAL: Respond with TEXT ONLY"]
-      },
-      "response": {
-        "statusCode": 200,
-        "toolUse": {
-          "id": "toolu_e2e_tool_cross_product_read_session_context",
-          "name": "ReadSessionContext",
-          "input": {
-            "sessionId": "sess_e2e_missing_tool_cross_product",
-            "query": "E2E_TOOL_RESULT_READ_SESSION_CONTEXT",
-            "strategy": "relevant"
           }
         }
       }

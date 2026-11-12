@@ -27,8 +27,10 @@ See the [maintenance guide](docs/maintenance/selfhost-fork.md) for classificatio
 
 ## Updates
 
-- **2026-11-03**: Updated to ZCode v3.17.2.
+- **2026-11-11**: Updated to ZCode v3.18.0.
+- 2026-11-03: Updated to ZCode v3.17.2.
 - 2026-10-30: Updated to ZCode v3.17.1.
+- 2026-10-29: Updated to ZCode v3.17.0.
 - 2026-10-19: Updated to ZCode v3.16.2.
 - 2026-10-16: Updated to ZCode v3.16.1.
 - 2026-10-16: Updated to ZCode v3.15.4.

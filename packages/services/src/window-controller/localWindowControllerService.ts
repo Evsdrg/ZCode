@@ -16,6 +16,7 @@ import {
   type WindowHostControllerFrame,
   type WindowHostTaskUnreadSignal,
   type WindowHostControllerTaskListItem,
+  type WindowHostTasksRemovedSignal,
 } from "./windowController.js";
 
 /**
@@ -41,6 +42,7 @@ export function createLocalWindowControllerService(options: {
   const taskService = options.taskService;
   const frameEmitter = new Emitter<WindowHostControllerFrame>();
   const unreadSignalEmitter = new Emitter<WindowHostTaskUnreadSignal>();
+  const tasksRemovedEmitter = new Emitter<WindowHostTasksRemovedSignal>();
   const logEpoch = `local-${randomUUID()}`;
   const tasksIndexSubscriptionIds = new Set<string>();
   /** 已建立 workspace 事件订阅的 scope（去重键 = workspaceKey）。 */
@@ -104,6 +106,34 @@ export function createLocalWindowControllerService(options: {
       };
     },
 
+    // 永久删除（3.18 新增）：先预览受影响会话，用户确认后带 revision/operationId 提交。
+    // 自部署即本机 Host，直接转交同一任务服务，并在成功后广播 removed 信号让所有端清理缓存。
+    async previewArchivedTaskDeletion({ address }) {
+      return taskService.previewArchivedTaskDeletion({
+        taskId: address.taskId,
+        workspacePath: address.workspacePath,
+        ...(address.workspaceIdentity ? { workspaceIdentity: address.workspaceIdentity } : {}),
+      });
+    },
+    async permanentlyDeleteArchivedTask({ address, revision, operationId }) {
+      const result = await taskService.permanentlyDeleteArchivedTask({
+        taskId: address.taskId,
+        workspacePath: address.workspacePath,
+        ...(address.workspaceIdentity ? { workspaceIdentity: address.workspaceIdentity } : {}),
+        revision,
+        operationId,
+      });
+      if (result.status === "deleted") {
+        tasksRemovedEmitter.fire({
+          workspacePath: address.workspacePath,
+          ...(address.workspaceIdentity ? { workspaceIdentity: address.workspaceIdentity } : {}),
+          taskIds: result.sessionIds,
+          permanentlyDeleted: true,
+        });
+        notifyTasksIndexChanged();
+      }
+      return result;
+    },
     // 以下写入面在自部署 UI 不被调用（侧栏 pin/archive/delete 直连 zcodeTaskService）。
     // 归档删除按契约转交 task service；其余保留显式 unsupported，避免静默吞掉未预期调用。
     async deleteArchivedTask() {
@@ -196,6 +226,11 @@ export function createLocalWindowControllerService(options: {
     // 未读计数由 UI 侧按列表刷新推导，不订阅该信号。
     onDynamicTaskUnreadSignal(): Event<WindowHostTaskUnreadSignal> {
       return unreadSignalEmitter.event;
+    },
+    // 永久删除信号：自部署没有跨端补发凭据（桌面 Host 才需要处理手机晚订阅），
+    // 事件只在提交成功的当下发出，订阅者按 workspace 自行过滤。
+    onDynamicTasksRemovedSignal(): Event<WindowHostTasksRemovedSignal> {
+      return tasksRemovedEmitter.event;
     },
   };
 }

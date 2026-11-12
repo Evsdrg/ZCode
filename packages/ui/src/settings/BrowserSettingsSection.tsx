@@ -22,8 +22,10 @@ import { invalidateDeferredDraftSessionForSkillChange } from "@/lib/zcodeDraftSk
 import { logger } from "@/logger.js";
 import { startUserAction } from "@/lib/userActionTelemetry.js";
 import { SettingsGroupCard, SettingsRow } from "@/settings/SettingsPageParts.js";
+import { FileTreeHtmlOpenSetting } from "@/settings/FileTreeHtmlOpenSetting.js";
 import { usePluginManagementStore } from "@/store/pluginManagementStore.js";
 import { useSkillStore } from "@/store/skillStore.js";
+import { clearBrowserRecentVisits } from "@/store/browserRecentVisitsStore.js";
 import { formatImportSummary } from "./browserImportSummary.js";
 
 const OFFICIAL_BROWSER_USE_PLUGIN_ID = "browser-use@zcode-plugins-official";
@@ -212,6 +214,7 @@ export function BrowserSettingsSection({
       });
       try {
         const result = await platform.clearEmbeddedBrowserData(mode);
+        if (result.success && mode === "all") clearBrowserRecentVisits();
         trace.complete({ resultSource: "platform_result" });
         toast(
           intl.formatMessage({
@@ -246,6 +249,7 @@ export function BrowserSettingsSection({
       <section className="space-y-3">
         <SettingsGroupCard>
           <SettingsRow
+            searchId="settings.browser.control.title"
             label={intl.formatMessage({ id: "settings.browser.control.title" })}
             description={intl.formatMessage({
               id: "settings.browser.control.description",
@@ -271,6 +275,7 @@ export function BrowserSettingsSection({
               Windows App-Bound 导入链路暂未开放，先隐藏入口但保留底层实现和清理能力。*/}
           {!isWindowsDesktop && importAvailable ? (
             <SettingsRow
+              searchId="settings.browser.import.title"
               label={intl.formatMessage({ id: "settings.browser.import.title" })}
               description={intl.formatMessage({
                 id: "settings.browser.import.description",
@@ -297,6 +302,18 @@ export function BrowserSettingsSection({
         </SettingsGroupCard>
       </section>
 
+      {/* 文件树 HTML 打开方式只在桌面端有内置浏览器时有意义。 */}
+      {isDesktop ? (
+        <section className="space-y-3">
+          <div className="text-ui-base font-medium text-foreground-subtle">
+            {intl.formatMessage({ id: "settings.browser.open.section" })}
+          </div>
+          <SettingsGroupCard>
+            <FileTreeHtmlOpenSetting />
+          </SettingsGroupCard>
+        </section>
+      ) : null}
+
       {/* 证书策略：桌面端由 Electron main 装到 Session；自部署由 server 在每个 Playwright
           Context 上设 ignoreHTTPSErrors，两边都真实生效，因此按能力（而非是否 Electron）展示。 */}
       {showCertificateSettings ? (
@@ -306,6 +323,7 @@ export function BrowserSettingsSection({
           </div>
           <SettingsGroupCard>
             <SettingsRow
+              searchId="settings.embeddedBrowserAllowInsecureCertificates"
               label={intl.formatMessage({
                 id: "settings.embeddedBrowserAllowInsecureCertificates",
               })}
@@ -341,6 +359,7 @@ export function BrowserSettingsSection({
         ) : null}
         <SettingsGroupCard>
           <SettingsRow
+            searchId="settings.browser.clearCache.title"
             label={intl.formatMessage({
               id: "settings.browser.clearCache.title",
             })}
@@ -361,6 +380,7 @@ export function BrowserSettingsSection({
             }
           />
           <SettingsRow
+            searchId="settings.browser.clearAll.title"
             label={intl.formatMessage({
               id: "settings.browser.clearAll.title",
             })}

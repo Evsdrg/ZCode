@@ -161,8 +161,13 @@ HIDDEN / IDLE ------------------------------> CHECKING ------------------------+
      | status: 有有效 FIVE_HOUR opportunity                                    v
      +------------------------------------------------------------------> AVAILABLE
      ^                                                            |
-     | opportunity: false / 3301 + next_try_at                    | 页面按钮打开弹窗；弹窗内点击重置
+     | opportunity: false / 3301 + next_try_at                    | 页面按钮打开弹窗；弹窗内点击某类型「重置」
      | （冷却期只轮询 status，不再 POST opportunity）              v
+     |                                                      CONFIRMING(type)  ← 弹框内确认页，不发请求
+     |                                                            |
+     |                       取消 / 返回 / Esc / 关闭弹框 / 目标失效 -> 回列表（仍是 AVAILABLE，不核销）
+     |                                                            | 进入确认页 500ms 后点击「重置」
+     |                                                            v
      |                                                      LOCAL_PROCESSING
      |                                                            |
      |                                     use 失败（保留 key）    | use used=true
@@ -189,7 +194,7 @@ COMPLETED 与机会余额正交（同一份 status 快照同时给出两类信�
 COMPLETED(余下 0 张) ── 标题旁「已重置」；弹框行成功反馈后收起
 COMPLETED(余下 N 张) ── 标题旁「重置」；弹框行保留并展示 N 张与下一张倒计时
       │
-      └─ 弹框内再次点击重置 ─> LOCAL_PROCESSING ─> /use ─> status 新 used_at ─> COMPLETED(余下 N-1 张)
+      └─ 弹框内再次点击重置 ─> CONFIRMING ─> 确认 ─> LOCAL_PROCESSING ─> /use ─> status 新 used_at ─> COMPLETED(余下 N-1 张)
          （不必等下一轮轮询让位回 AVAILABLE，也不必重开弹框）
 ```
 
@@ -197,7 +202,12 @@ COMPLETED(余下 N 张) ── 标题旁「重置」；弹框行保留并展示 
 
 - AVAILABLE 来自服务端未过期的 `available_five_hour_resets` / `available_week_resets`，各自取最早有效 `expire_at` 作为倒计时；五小时与周额度互不影响。
 - `has_unread_history` 是五小时与周共享的单一游标，但 `latest_{five_hour,week}_reset_history` 相互独立。某一类型只有在其 `used_at` 是两类中最新时才“拥有”该未读标记并进入完成态：`ownsUnread = has_unread_history && latestUsedAt != null && (otherUsedAt == null || latestUsedAt >= otherUsedAt)`。这样一次周重置翻起共享标记时，不会把过期的五小时历史误判为刚完成（反之亦然）。
-- 页面额度标题旁按钮只打开统一重置弹窗；它不进入 LOCAL_PROCESSING，也不直接调用 `/use`。LOCAL_PROCESSING 只由弹窗内对应类型的「重置」按钮触发，弹窗按钮展示 loading/禁用。
+- 页面额度标题旁按钮只打开统一重置弹窗；它不进入 LOCAL_PROCESSING，也不直接调用 `/use`。LOCAL_PROCESSING 只由弹窗内确认页的「重置」按钮触发，弹窗按钮展示 loading/禁用。
+- 弹框内二次确认（五小时与周额度同一流程）。Bugfix：核销不可撤回，曾经点一下行内「重置」就直接 `/use`，误触白白消耗机会。
+  - 点行内某类型「重置」只切到该类型的确认页（`CONFIRMING(type)`），不发请求。确认页替换列表，标题为「重置 5 小时额度？」/「重置本周额度？」，展示该类型当前剩余 → 100%，并写明将用掉最早到期那次机会的到期日（服务端 `/use` 总是核销最早到期的一张）。
+  - 确认页「取消」、左上「返回」、Esc 都只退回列表，不核销；Esc 在确认页不关闭整个弹框。关闭弹框同样不核销，重开时回到列表。
+  - 确认页「重置」与行内「重置」位置相近：进入确认页的 500ms 内忽略确认点击，防止连点穿透成核销。该时刻只在点行内「重置」进入确认页时记录。
+  - 确认目标失效：确认期间该类型机会过期、被别处核销（`isResetItemUsable` 为假），或被其它入口发起核销进入 processing，确认页立即退回列表并清掉确认类型，由列表行展示进行中状态，不保留可点却被忽略的确认按钮。本页自己的确认先清确认类型再进入 processing，不受此规则影响。此后同类型机会再次出现也保持列表，用户必须重新点行内「重置」进入确认页，并重新走 500ms 防连点。Bugfix：旧实现只把确认目标派生为空、确认类型残留，机会重新出现时自动跳回旧确认页且沿用旧进入时刻，一点就核销。
 - 额度标题旁操作按「是否仍可核销」取态：该类型仍有可核销机会时展示可点击「重置」（打开弹窗）；否则 COMPLETED 展示「已重置」与服务端完成时间。自动/运营完成且同类型仍有余下机会时，面板内没有「已重置」锚点，补播撒花跳过、arm 保留到完成态让位后被清理，完成反馈由 Composer 触发器 Tooltip 承担。
 - 手动重置从 LOCAL_PROCESSING 进入 COMPLETED 后，按钮先展示 600ms 成功勾选并播放一次烟花，再切换为“已重置”；不展示“正在重置”或“已重置” Tooltip。
 - 手动核销轨迹按 service + scope 在多个 UI 入口间共享。任一入口点击重置后，其他入口观察到同一个新 `used_at` 时也必须识别为手动完成，不能把输入框误触发成自动/运营重置提示。
@@ -404,52 +414,55 @@ Dialog 中点击重置
 
 ## 验收用例
 
-| ID        | 场景                                                                                          | 预期                                                                                                                                                                               |
-| --------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| QR-INT-01 | Personal status 返回 1 个 FIVE_HOUR opportunity                                               | 三个入口共享显示 1 次机会和到期倒计时                                                                                                                                              |
-| QR-INT-02 | Team status 查询                                                                              | 请求包含 TEAM、organization、project，状态按完整 source key 隔离                                                                                                                   |
-| QR-INT-03 | 未订阅套餐                                                                                    | 空机会、空历史，不显示重置入口                                                                                                                                                     |
-| QR-INT-04 | 点击重置                                                                                      | 按钮 processing；不显示 Tooltip；请求体含 FIVE_HOUR 和新幂等 key                                                                                                                   |
-| QR-INT-05 | use 依赖失败后重试                                                                            | 回到可点击状态；重试复用原幂等 key，不撒花                                                                                                                                         |
-| QR-INT-06 | use 成功                                                                                      | 强制刷新 status + entitlement；使用服务端 used_at 完成；按钮显示 600ms 成功勾选并撒花，再显示“已重置”；不显示完成 Tooltip                                                          |
-| QR-INT-07 | 自动/运营重置                                                                                 | 轮询发现新 used_at，触发器先合成约 1 秒“正在重置”再切换为常驻“已重置”；hover 触发器后收起提示并从面板内同手动位置补播一次撒花                                                      |
-| QR-INT-08 | has_unread_history                                                                            | 完成状态写入后调用 history/read                                                                                                                                                    |
-| QR-INT-09 | 多入口同时挂载                                                                                | 相同 scope 的 status 请求合并，不出现 3~4 倍请求                                                                                                                                   |
-| QR-INT-10 | 机会过期                                                                                      | 本地倒计时到期后入口隐藏，轮询随后校正                                                                                                                                             |
-| QR-INT-11 | 手机 `/remote`                                                                                | 复用 shared host service；不创建新 runtime，不影响 replayable 恢复                                                                                                                 |
-| QR-INT-12 | 中英文/双主题/reduced motion                                                                  | 文案、颜色、交互和动效符合 DESIGN.md                                                                                                                                               |
-| QR-INT-13 | 自动重置的 `used_at` 早于轮询发现 5 分钟                                                      | 首次发现后从 `observed_at` 起算合成“正在重置”→常驻“已重置”；hover 时间仍是服务端 `used_at`；重复 status 不重放合成阶段或补播撒花                                                   |
-| QR-INT-14 | HTTP 403 envelope 返回 `code=3101`                                                            | 客户端错误为 `coding_plan_reset_api_error:3101`，不按 `msg` 分支                                                                                                                   |
-| QR-INT-15 | status 无机会、无新历史                                                                       | 调用 opportunity；`granted=false`/3301 保持隐藏，不弹 toast                                                                                                                        |
-| QR-INT-16 | opportunity `granted=true`                                                                    | 立即强制刷新 status，并用返回的有效 FIVE_HOUR opportunity 展示入口                                                                                                                 |
-| QR-INT-17 | 四个入口同时挂载同一 scope                                                                    | 同一 auth session + service + scope 只启动一个 5 分钟轮询；首次只发送一次 status/opportunity                                                                                       |
-| QR-INT-18 | status 已有单类机会或刚发现 completed history                                                 | 单类机会不阻塞到期后的 scope 判断；本轮刚完成时跳过 opportunity                                                                                                                    |
-| QR-INT-19 | opportunity 3301 返回未来 `next_try_at`                                                       | 保持入口隐藏且不弹 toast；Coordinator 到期前只轮询 status，到期后的首次可见轮询使用新幂等 key 判断                                                                                 |
-| QR-INT-20 | 设置页/Usage 页手动重置后 Composer 轮询到新历史                                               | 所有入口按 service + scope 识别为手动完成；Composer 不显示自动重置 Tooltip，也不从触发器撒花                                                                                       |
-| QR-INT-21 | 同窗口另一入口手动核销进行中或刚完成时点击重置                                                | 强制对账代替第二次 `/use`；不重复核销、不额外消耗机会；新机会发放后的点击照常放行                                                                                                  |
-| QR-INT-22 | 设置页先发现自动完成，Composer 在同一登录会话后挂载                                           | 保留 `observed_at`，Composer 正常播放该次“正在重置→已重置”和撒花，不把共享 Store 误判为旧登录历史                                                                                  |
-| QR-INT-23 | 退出后重新登录，status 仍返回相同 `used_at`                                                   | `auth_session_seq` 已变化，旧完成态静音；随后出现不同 `used_at` 时正常播放                                                                                                         |
-| QR-INT-24 | 有效机会总数为 1                                                                              | 三个入口继续展示单机会倒计时；不打开多机会弹框                                                                                                                                     |
-| QR-INT-25 | 有效机会总数大于 1                                                                            | 三个合并入口显示可点击“获得 N 次重置额度”且不显示倒计时；设置 Usage 页与 Composer HoverCard 的五小时/周额度标题旁同时保留对应“重置”按钮，可直接核销或点击合并入口打开弹框          |
-| QR-INT-26 | 多机会弹框数据                                                                                | 标题不汇总次数；同一类型持有多张机会时该行展示“N 次”药丸与“最快”倒计时，单张不展示药丸；只列出有真实额度与有效机会的 FIVE_HOUR/WEEK（含剩余 100%），剩余用量与进度条使用当前 quota |
-| QR-INT-27 | 弹框内点击某类型重置                                                                          | 只调用对应类型 reset；服务端 used_at 确认后显示成功反馈、撒花并收起该项，不触发 Composer 自动重置 Tooltip                                                                          |
-| QR-INT-28 | Composer HoverCard 中打开多机会弹框                                                           | HoverCard 在 Dialog 打开期间不卸载；弹框可正常交互，关闭后收起 HoverCard                                                                                                           |
-| QR-INT-29 | 手机 Web 打开多机会弹框                                                                       | 宽度不超过视口减 32px，额度卡纵向排列，重置列表可滚动且无横向溢出                                                                                                                  |
-| QR-INT-30 | reservation 等待期间 Composer 卸载、切 source 或候选变化                                      | 不写 played、不广播、不展示；token reservation 被 release（或由 host 注销/TTL 回收），其他仍有效窗口可继续争抢并完成展示                                                           |
-| QR-INT-31 | acquire 返回 busy、尚未收到 played 广播                                                       | 保留 `observed_at` 与候选，不把 busy 当作已播放；临时 reservation 可重试，永久 claim 只等待真实 played/本地 played 游标抑制                                                        |
-| QR-INT-32 | HoverCard 关闭后重新打开                                                                      | 复用原 Coordinator 调度时间；可以立即校正 status，但未到 `next_try_at` 不重复调用 opportunity                                                                                      |
-| QR-INT-33 | opportunity 网络/依赖错误后恢复                                                               | 固定 5 分钟后重试，复用失败请求的幂等 key；明确业务响应后下一轮生成新 key                                                                                                          |
-| QR-INT-34 | opportunity 返回 429                                                                          | 10 分钟内不再请求 opportunity；status 轮询不受影响                                                                                                                                 |
-| QR-INT-35 | 退出后重新登录相同 provider/scope                                                             | `auth_session_seq` 隔离旧 Coordinator，新会话立即执行自己的首次校正                                                                                                                |
-| QR-INT-36 | opportunity 鉴权、业务拒绝或协议错误                                                          | 10 分钟内不再请求 opportunity；冷却后使用新幂等 key，status 轮询不受影响                                                                                                           |
-| QR-INT-37 | 旧入口刷新未完成时 HoverCard 卸载并重挂载                                                     | 新入口立即复用共享 in-flight/cache 完成自己的状态投影，不等待下一次 5 分钟 tick，也不新增 opportunity 请求                                                                         |
-| QR-INT-38 | 核销一张后额度剩余 100%，同类型仍有余下机会                                                   | 三个入口继续展示该类型入口与剩余张数（含只剩 1 张的情况），「重置」按钮保持可点击；机会耗尽或全部过期后才隐藏                                                                      |
-| QR-INT-39 | 同类型多张机会，弹框内核销一张且不关闭弹框                                                    | 该行立即展示余下张数与下一张倒计时（不出现「0 分 0 秒」），标题旁为可点击「重置」、徽标计入余下张数；再次点击真实发送 `/use` 并完成核销，机会耗尽后该行收起                        |
-| QR-INT-40 | 从 COMPLETED(余下 N 张) 再次核销，`/use` 后 status 仍返回上一张的 `used_at`（含 unread 未清） | 保持 processing、不播放成功反馈；读到新 `used_at` 后才完成并按新快照展示余下张数；4 次对账都未见新 `used_at` 时走失败恢复，不静默成功                                              |
+| ID        | 场景                                                     | 预期                                                                                                                                                                                |
+| --------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| QR-INT-01 | Personal status 返回 1 个 FIVE_HOUR opportunity          | 三个入口共享显示 1 次机会和到期倒计时                                                                                                                                               |
+| QR-INT-02 | Team status 查询                                         | 请求包含 TEAM、organization、project，状态按完整 source key 隔离                                                                                                                    |
+| QR-INT-03 | 未订阅套餐                                               | 空机会、空历史，不显示重置入口                                                                                                                                                      |
+| QR-INT-04 | 点击重置                                                 | 按钮 processing；不显示 Tooltip；请求体含 FIVE_HOUR 和新幂等 key                                                                                                                    |
+| QR-INT-05 | use 依赖失败后重试                                       | 回到可点击状态；重试复用原幂等 key，不撒花                                                                                                                                          |
+| QR-INT-06 | use 成功                                                 | 强制刷新 status + entitlement；使用服务端 used_at 完成；按钮显示 600ms 成功勾选并撒花，再显示“已重置”；不显示完成 Tooltip                                                           |
+| QR-INT-07 | 自动/运营重置                                            | 轮询发现新 used_at，触发器先合成约 1 秒“正在重置”再切换为常驻“已重置”；hover 触发器后收起提示并从面板内同手动位置补播一次撒花                                                       |
+| QR-INT-08 | has_unread_history                                       | 完成状态写入后调用 history/read                                                                                                                                                     |
+| QR-INT-09 | 多入口同时挂载                                           | 相同 scope 的 status 请求合并，不出现 3~4 倍请求                                                                                                                                    |
+| QR-INT-10 | 机会过期                                                 | 本地倒计时到期后入口隐藏，轮询随后校正                                                                                                                                              |
+| QR-INT-11 | 手机 `/remote`                                           | 复用 shared host service；不创建新 runtime，不影响 replayable 恢复                                                                                                                  |
+| QR-INT-12 | 中英文/双主题/reduced motion                             | 文案、颜色、交互和动效符合 DESIGN.md                                                                                                                                                |
+| QR-INT-13 | 自动重置的 `used_at` 早于轮询发现 5 分钟                  | 首次发现后从 `observed_at` 起算合成“正在重置”→常驻“已重置”；hover 时间仍是服务端 `used_at`；重复 status 不重放合成阶段或补播撒花                                                    |
+| QR-INT-14 | HTTP 403 envelope 返回 `code=3101`                       | 客户端错误为 `coding_plan_reset_api_error:3101`，不按 `msg` 分支                                                                                                                    |
+| QR-INT-15 | status 无机会、无新历史                                  | 调用 opportunity；`granted=false`/3301 保持隐藏，不弹 toast                                                                                                                         |
+| QR-INT-16 | opportunity `granted=true`                               | 立即强制刷新 status，并用返回的有效 FIVE_HOUR opportunity 展示入口                                                                                                                  |
+| QR-INT-17 | 四个入口同时挂载同一 scope                               | 同一 auth session + service + scope 只启动一个 5 分钟轮询；首次只发送一次 status/opportunity                                                                                         |
+| QR-INT-18 | status 已有单类机会或刚发现 completed history            | 单类机会不阻塞到期后的 scope 判断；本轮刚完成时跳过 opportunity                                                                                                                     |
+| QR-INT-19 | opportunity 3301 返回未来 `next_try_at`                  | 保持入口隐藏且不弹 toast；Coordinator 到期前只轮询 status，到期后的首次可见轮询使用新幂等 key 判断                                                                                  |
+| QR-INT-20 | 设置页/Usage 页手动重置后 Composer 轮询到新历史          | 所有入口按 service + scope 识别为手动完成；Composer 不显示自动重置 Tooltip，也不从触发器撒花                                                                                        |
+| QR-INT-21 | 同窗口另一入口手动核销进行中或刚完成时点击重置           | 强制对账代替第二次 `/use`；不重复核销、不额外消耗机会；新机会发放后的点击照常放行                                                                                                   |
+| QR-INT-22 | 设置页先发现自动完成，Composer 在同一登录会话后挂载      | 保留 `observed_at`，Composer 正常播放该次“正在重置→已重置”和撒花，不把共享 Store 误判为旧登录历史                                                                                   |
+| QR-INT-23 | 退出后重新登录，status 仍返回相同 `used_at`              | `auth_session_seq` 已变化，旧完成态静音；随后出现不同 `used_at` 时正常播放                                                                                                          |
+| QR-INT-24 | 有效机会总数为 1                                         | 三个入口继续展示单机会倒计时；不打开多机会弹框                                                                                                                                      |
+| QR-INT-25 | 有效机会总数大于 1                                       | 三个合并入口显示可点击“获得 N 次重置额度”且不显示倒计时；设置 Usage 页与 Composer HoverCard 的五小时/周额度标题旁同时保留对应“重置”按钮，可直接核销或点击合并入口打开弹框           |
+| QR-INT-26 | 多机会弹框数据                                           | 标题不汇总次数；同一类型持有多张机会时该行展示“N 次”药丸与“最快”倒计时，单张不展示药丸；只列出有真实额度与有效机会的 FIVE_HOUR/WEEK（含剩余 100%），剩余用量与进度条使用当前 quota  |
+| QR-INT-27 | 弹框内点击某类型重置                                     | 先进入确认页、不发请求；取消/返回/Esc 不核销；进入后 500ms 内确认点击被忽略；确认后只调用对应类型 reset，used_at 确认后成功反馈、撒花并收起该项，不触发 Composer 自动重置 Tooltip |
+| QR-INT-28 | Composer HoverCard 中打开多机会弹框                      | HoverCard 在 Dialog 打开期间不卸载；弹框可正常交互，关闭后收起 HoverCard                                                                                                            |
+| QR-INT-29 | 手机 Web 打开多机会弹框                                  | 宽度不超过视口减 32px，额度卡纵向排列，重置列表可滚动且无横向溢出                                                                                                                   |
+| QR-INT-30 | reservation 等待期间 Composer 卸载、切 source 或候选变化 | 不写 played、不广播、不展示；token reservation 被 release（或由 host 注销/TTL 回收），其他仍有效窗口可继续争抢并完成展示                                                            |
+| QR-INT-31 | acquire 返回 busy、尚未收到 played 广播                  | 保留 `observed_at` 与候选，不把 busy 当作已播放；临时 reservation 可重试，永久 claim 只等待真实 played/本地 played 游标抑制                                                         |
+| QR-INT-32 | HoverCard 关闭后重新打开                                 | 复用原 Coordinator 调度时间；可以立即校正 status，但未到 `next_try_at` 不重复调用 opportunity                                                                                       |
+| QR-INT-33 | opportunity 网络/依赖错误后恢复                          | 固定 5 分钟后重试，复用失败请求的幂等 key；明确业务响应后下一轮生成新 key                                                                                                           |
+| QR-INT-34 | opportunity 返回 429                                     | 10 分钟内不再请求 opportunity；status 轮询不受影响                                                                                                                                  |
+| QR-INT-35 | 退出后重新登录相同 provider/scope                        | `auth_session_seq` 隔离旧 Coordinator，新会话立即执行自己的首次校正                                                                                                                 |
+| QR-INT-36 | opportunity 鉴权、业务拒绝或协议错误                     | 10 分钟内不再请求 opportunity；冷却后使用新幂等 key，status 轮询不受影响                                                                                                            |
+| QR-INT-37 | 旧入口刷新未完成时 HoverCard 卸载并重挂载                | 新入口立即复用共享 in-flight/cache 完成自己的状态投影，不等待下一次 5 分钟 tick，也不新增 opportunity 请求                                                                           |
+| QR-INT-38 | 核销一张后额度剩余 100%，同类型仍有余下机会              | 三个入口继续展示该类型入口与剩余张数（含只剩 1 张的情况），「重置」按钮保持可点击；机会耗尽或全部过期后才隐藏                                                                        |
+| QR-INT-39 | 同类型多张机会，弹框内核销一张且不关闭弹框               | 该行立即展示余下张数与下一张倒计时（不出现「0 分 0 秒」），标题旁为可点击「重置」、徽标计入余下张数；再次点击真实发送 `/use` 并完成核销，机会耗尽后该行收起                         |
+| QR-INT-40 | 从 COMPLETED(余下 N 张) 再次核销，`/use` 后 status 仍返回上一张的 `used_at`（含 unread 未清） | 保持 processing、不播放成功反馈；读到新 `used_at` 后才完成并按新快照展示余下张数；4 次对账都未见新 `used_at` 时走失败恢复，不静默成功 |
+| QR-INT-41 | 确认页中该类型机会失效，之后又重新出现                   | 失效即退回列表；机会恢复后仍停在列表、不发 `/use`；须重新点行内「重置」进入确认页并重走 500ms 防连点（E2E：QR-E2E-16）                                                              |
 
 验证记录（2026-09-28，QR-INT-39）：lib / hook / 弹框 / 标题旁操作新增单测与既有相关单测共 18 个文件 429 项通过。macOS Electron 跑完 `coding-plan-team-usage.test.ts` 全文件 26 项通过、无跳过、无重试（含新增 QR-E2E-14，以及读取弹框状态 helper 调整后的 QR-E2E-03），运行记录 `desktop-e2e-20260928035551264-p84306-4690b59ecaa7b158`。typecheck（含 e2e tsconfig）、lint（0 错误；62 个既有警告不在本次改动行）、`architecture:check --changed` 通过；Windows/Linux 与手机实机未运行。
 
 验证记录（2026-09-30，QR-INT-40）：lib 新增滞后快照用例、hook 新增「读数滞后 2 次（unread 未清 / 已清）」与「4 次对账都滞后走失败恢复」用例，修复前 4 项失败、修复后 lib + hook 共 45 项通过；重置相关 12 个 UI 测试文件 156 项通过。macOS Electron 新增 QR-E2E-15（mock `/use` 结果延迟 600ms 才在 status 可见）：修复前失败，五小时行停在「1 小时 59 分后过期 / 重置」可点击；修复后 `coding-plan-team-usage.test.ts` 全文件 27 项通过、无跳过、无重试，运行记录 `desktop-e2e-20260930-032927-012`。typecheck、lint（0 错误）、`architecture:check --changed` 通过；Windows/Linux 与手机实机未运行。
+
+验证记录（2026-10-29，QR-INT-27 / QR-INT-41）：新增 QR-E2E-16（mock `weekToggle` 切换 WEEK 机会可见性，经 visibilitychange 触发 status 重拉）：修复前失败，WEEK 恢复后弹框自动跳回周额度确认页；修复后 macOS Electron 跑 QR-E2E-03/14/15/16 共 4 项通过，运行记录 `desktop-e2e-20261029123054115-p68343-102636a77ba4028c`。Windows/Linux 与手机实机未运行。
 
 ## 联调风险
 

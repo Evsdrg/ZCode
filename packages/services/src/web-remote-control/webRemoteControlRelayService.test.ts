@@ -25,6 +25,13 @@ function createMemoryCredentialService(seed?: Record<string, string>): ICredenti
     async delete(key) {
       store.delete(key);
     },
+    // 自部署测试替身不涉及加密容器：inspectStore 永远报告健康，recoverStore 不应被调用。
+    async inspectStore() {
+      return { status: "healthy" as const };
+    },
+    async recoverStore() {
+      throw new Error("recoverStore is not used in tests");
+    },
   };
 }
 

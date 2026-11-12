@@ -14,6 +14,7 @@ export function WorkspaceSettingsLayer({
   windowsWindowControlsRightPaddingPx,
   captionWorkspacePath,
   onBack,
+  onOpenTask,
   onCreateTask,
   onOpenWorkspace,
   onOpenRemoteWorkspace,
@@ -42,6 +43,7 @@ export function WorkspaceSettingsLayer({
             windowsWindowControlsRightPaddingPx={windowsWindowControlsRightPaddingPx}
             captionWorkspacePath={captionWorkspacePath}
             onBack={onBack}
+            onOpenTask={onOpenTask}
             onCreateTask={onCreateTask}
             onOpenWorkspace={onOpenWorkspace}
             onOpenRemoteWorkspace={onOpenRemoteWorkspace}
@@ -61,6 +63,7 @@ export function WorkspaceSettingsLayer({
           windowsWindowControlsRightPaddingPx={windowsWindowControlsRightPaddingPx}
           captionWorkspacePath={captionWorkspacePath}
           onBack={onBack}
+          onOpenTask={onOpenTask}
           onCreateTask={onCreateTask}
           onOpenWorkspace={onOpenWorkspace}
           onOpenRemoteWorkspace={onOpenRemoteWorkspace}

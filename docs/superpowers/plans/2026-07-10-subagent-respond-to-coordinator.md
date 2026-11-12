@@ -117,20 +117,20 @@ Provider-visible payload：
 
 ### New files
 
-| File                                                                                                                         | Responsibility                                                                  |
-| ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `docs/subagent-respond-to-coordinator.md`                                                                                    | 产品语义、状态边界、非目标和验收标准的 source-of-truth spec                     |
-| `apps/zcode-cli/packages/contracts/src/tools/respond-to-coordinator.ts`                                                      | tool input/runtime output schema 和常量                                         |
-| `apps/zcode-cli/packages/contracts/src/interfaces/coordinator-response.port.ts`                                              | child tool 到父 runtime 的窄端口                                                |
-| `apps/zcode-cli/packages/core/src/tool/handlers/respond-to-coordinator.ts`                                                   | provider-visible tool metadata、handler 和 model result formatting              |
-| `apps/zcode-cli/packages/core/src/subagent/coordinator-response.ts`                                                          | 绑定 authoritative child identity，并把结构化回复提交给 parent enqueue callback |
-| `apps/zcode-cli/packages/core/src/runtime/methods/subagent-messages.ts`                                                      | parent command enqueue、XML formatting、persistence                             |
-| `apps/zcode-cli/packages/core/src/runtime/methods/runtime-command-active-loop.ts`                                            | active loop 对允许 command 类型的统一 intake                                    |
-| `apps/zcode-cli/packages/contracts/tests/respond-to-coordinator.test.ts`                                                     | schema 边界测试                                                                 |
-| `apps/zcode-cli/packages/core/tests/runtime-tool-allowlist.test.ts`                                                          | Explore/custom child 最终 built-in allowlist 投影测试                           |
-| `packages/desktop/test/e2e/conversation-session/conversation-session-subagent-respond-to-coordinator.test.ts`                | 独立 formal BG25 replay spec，使用正常 context window                           |
-| `packages/desktop/test/e2e/fixtures/upstream/conversation-session/conversation-session-subagent-respond-to-coordinator.json` | BG25 case-local provider replay fixture                                         |
-| `packages/desktop/test/e2e/fixtures/cases/conversation-session/conversation-session-subagent-respond-to-coordinator.json`    | BG25 replay manifest                                                            |
+| File                                                                                                                                | Responsibility                                                                  |
+| ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `docs/subagent-respond-to-coordinator.md`                                                                                           | 产品语义、状态边界、非目标和验收标准的 source-of-truth spec                     |
+| `apps/zcode-cli/packages/contracts/src/tools/respond-to-coordinator.ts`                                                             | tool input/runtime output schema 和常量                                         |
+| `apps/zcode-cli/packages/contracts/src/interfaces/coordinator-response.port.ts`                                                     | child tool 到父 runtime 的窄端口                                                |
+| `apps/zcode-cli/packages/core/src/tool/handlers/respond-to-coordinator.ts`                                                          | provider-visible tool metadata、handler 和 model result formatting              |
+| `apps/zcode-cli/packages/core/src/subagent/coordinator-response.ts`                                                                 | 绑定 authoritative child identity，并把结构化回复提交给 parent enqueue callback |
+| `apps/zcode-cli/packages/core/src/runtime/methods/subagent-messages.ts`                                                             | parent command enqueue、XML formatting、persistence                             |
+| `apps/zcode-cli/packages/core/src/runtime/methods/runtime-command-active-loop.ts`                                                   | active loop 对允许 command 类型的统一 intake                                    |
+| `apps/zcode-cli/packages/contracts/tests/respond-to-coordinator.test.ts`                                                            | schema 边界测试                                                                 |
+| `apps/zcode-cli/packages/core/tests/runtime-tool-allowlist.test.ts`                                                                 | Explore/custom child 最终 built-in allowlist 投影测试                           |
+| `packages/desktop/test/e2e/conversation-session/subagents/conversation-session-subagent-respond-to-coordinator.test.ts`                       | 独立 formal BG25 replay spec，使用正常 context window                         |
+| `packages/desktop/test/e2e/fixtures/upstream/conversation-session/conversation-session-subagent-respond-to-coordinator.json`        | BG25 case-local provider replay fixture                                         |
+| `packages/desktop/test/e2e/fixtures/cases/conversation-session/conversation-session-subagent-respond-to-coordinator.json`           | BG25 replay manifest                                                            |
 
 ### Modified files
 
@@ -140,7 +140,7 @@ Provider-visible payload：
 | `docs/conversation-session-case-catalog.md`                                    | 新增 BG25 accepted case                                                           |
 | `docs/testing/conversation-session-background-e2e-coverage-matrix.md`          | 增加 response channel 维度和 planned/covered 状态                                 |
 | `docs/testing/conversation-session-e2e-coverage-matrix.md`                     | 登记 BG25                                                                         |
-| 历史差异审计文档（已删除）                                                     | 标记为 ZCode narrow extension，不误报为完整 Agent Teams 能力                      |
+| 历史差异审计文档（已删除）                                        | 标记为 ZCode narrow extension，不误报为完整 Agent Teams 能力                      |
 | `apps/zcode-cli/packages/contracts/src/tools/index.ts`                         | 导出 tool contract                                                                |
 | `apps/zcode-cli/packages/contracts/src/index.ts`                               | 导出 coordinator port                                                             |
 | `apps/zcode-cli/packages/contracts/src/interfaces/session-store.port.ts`       | 增加 `subagent_message` synthetic source                                          |
@@ -301,7 +301,7 @@ assistant step 中继续发出下一项工作工具调用。
 ```
 
 ```markdown
-| `BGR` | `packages/desktop/test/e2e/conversation-session/conversation-session-subagent-respond-to-coordinator.test.ts` |
+| `BGR` | `packages/desktop/test/e2e/conversation-session/subagents/conversation-session-subagent-respond-to-coordinator.test.ts` |
 
 | BG25 | planned | BGR、RT | BGR 验证 SendMessage -> RespondToCoordinator + continued child tool -> parent model-only `<subagent-message>` -> child completion；RT 覆盖 active/idle command intake、FIFO ordering 和单模型请求并发 |
 ```
@@ -1618,7 +1618,7 @@ git commit -m "feat(cli): preserve subagent response history"
 
 **Files:**
 
-- Create: `packages/desktop/test/e2e/conversation-session/conversation-session-subagent-respond-to-coordinator.test.ts`
+- Create: `packages/desktop/test/e2e/conversation-session/subagents/conversation-session-subagent-respond-to-coordinator.test.ts`
 - Create: `packages/desktop/test/e2e/fixtures/upstream/conversation-session/conversation-session-subagent-respond-to-coordinator.json`
 - Create: `packages/desktop/test/e2e/fixtures/cases/conversation-session/conversation-session-subagent-respond-to-coordinator.json`
 - Modify: `docs/testing/conversation-session-background-e2e-coverage-matrix.md`
@@ -1690,7 +1690,7 @@ manifest 的 `spec` 必须直接指向 formal BG25 spec，不得指向 `manual-r
 - [ ] **Step 3：运行 fixture checker**
 
 ```bash
-pnpm --filter @zcode/desktop e2e:fixture:check -- --spec ./test/e2e/conversation-session/conversation-session-subagent-respond-to-coordinator.test.ts
+pnpm --filter @zcode/desktop e2e:fixture:check -- --spec ./test/e2e/conversation-session/subagents/conversation-session-subagent-respond-to-coordinator.test.ts
 ```
 
 Expected: exit code `0`，所有 synthetic request 均有 `syntheticReason`。
@@ -1698,7 +1698,7 @@ Expected: exit code `0`，所有 synthetic request 均有 `syntheticReason`。
 - [ ] **Step 4：运行 isolated replay**
 
 ```bash
-E2E_PROVIDER_REPLAY_FIXTURE_PATH=packages/desktop/test/e2e/fixtures/upstream/common.json,packages/desktop/test/e2e/fixtures/upstream/conversation-session/conversation-session-subagent-respond-to-coordinator.json pnpm --filter @zcode/desktop exec wdio run wdio.conf.ts --spec './test/e2e/conversation-session/conversation-session-subagent-respond-to-coordinator.test.ts'
+E2E_PROVIDER_REPLAY_FIXTURE_PATH=packages/desktop/test/e2e/fixtures/upstream/common.json,packages/desktop/test/e2e/fixtures/upstream/conversation-session/conversation-session-subagent-respond-to-coordinator.json pnpm --filter @zcode/desktop exec wdio run wdio.conf.ts --spec './test/e2e/conversation-session/subagents/conversation-session-subagent-respond-to-coordinator.test.ts'
 ```
 
 Expected: PASS，证明不依赖 legacy shared fixture；运行生成的 CLI config 不包含 `240/80`
@@ -1707,7 +1707,7 @@ auto-compact override，provider capture 不包含 compact summary request，UI 
 - [ ] **Step 5：运行 default replay**
 
 ```bash
-pnpm --filter @zcode/desktop exec wdio run wdio.conf.ts --spec './test/e2e/conversation-session/conversation-session-subagent-respond-to-coordinator.test.ts'
+pnpm --filter @zcode/desktop exec wdio run wdio.conf.ts --spec './test/e2e/conversation-session/subagents/conversation-session-subagent-respond-to-coordinator.test.ts'
 ```
 
 Expected: PASS。
@@ -1732,7 +1732,7 @@ Expected: 两条命令 exit code `0`。
 - [ ] **Step 8：运行单 spec 断网 Docker proof**
 
 ```bash
-E2E_SPEC=./test/e2e/conversation-session/conversation-session-subagent-respond-to-coordinator.test.ts pnpm run test:e2e:container
+E2E_SPEC=./test/e2e/conversation-session/subagents/conversation-session-subagent-respond-to-coordinator.test.ts pnpm run test:e2e:container
 ```
 
 Expected: PASS，并记录实际 artifact 目录 `packages/desktop/.e2e-artifacts/<run-id>`。只有这一步通过后才能做 admission。
@@ -1740,7 +1740,7 @@ Expected: PASS，并记录实际 artifact 目录 `packages/desktop/.e2e-artifact
 - [ ] **Step 9：执行 Docker admission 并复跑 verified suite**
 
 ```bash
-pnpm --filter @zcode/desktop e2e:docker:admit -- --spec ./test/e2e/conversation-session/conversation-session-subagent-respond-to-coordinator.test.ts --verified --artifact packages/desktop/.e2e-artifacts/<run-id> --apply
+pnpm --filter @zcode/desktop e2e:docker:admit -- --spec ./test/e2e/conversation-session/subagents/conversation-session-subagent-respond-to-coordinator.test.ts --verified --artifact packages/desktop/.e2e-artifacts/<run-id> --apply
 pnpm run test:e2e:container:conversation
 ```
 
@@ -1749,7 +1749,7 @@ Expected: admission 只修改 `scripts/test-desktop-e2e-container.sh` 和 `docs/
 - [ ] **Step 10：提交 Phase 6**
 
 ```bash
-git add packages/desktop/test/e2e/conversation-session/conversation-session-subagent-respond-to-coordinator.test.ts packages/desktop/test/e2e/fixtures/upstream/conversation-session/conversation-session-subagent-respond-to-coordinator.json packages/desktop/test/e2e/fixtures/cases/conversation-session/conversation-session-subagent-respond-to-coordinator.json docs/testing/conversation-session-background-e2e-coverage-matrix.md docs/testing/conversation-session-e2e-coverage-matrix.md
+git add packages/desktop/test/e2e/conversation-session/subagents/conversation-session-subagent-respond-to-coordinator.test.ts packages/desktop/test/e2e/fixtures/upstream/conversation-session/conversation-session-subagent-respond-to-coordinator.json packages/desktop/test/e2e/fixtures/cases/conversation-session/conversation-session-subagent-respond-to-coordinator.json docs/testing/conversation-session-background-e2e-coverage-matrix.md docs/testing/conversation-session-e2e-coverage-matrix.md
 # 仅当 Step 12 admission 已完成且这两个文件的 diff 只属于 BG25 时执行：
 git add scripts/test-desktop-e2e-container.sh docs/testing/conversation-session-docker-automation-plan.md
 git diff --cached --name-only

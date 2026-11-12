@@ -1,6 +1,6 @@
 # Side Pane 完整视图
 
-状态：已实现（2026-10-16），E2E 已转正（2026-10-17）：`ui-shell/side-pane-full-view.test.ts`、`conversation-session/conversation-session-side-pane-full-view.test.ts`。桌面 Electron 与自部署 Web 均提供；手机远控 `/remote` 不提供入口（宿主是另一个窗口，浮窗定位语义不成立）。代码模块：`packages/ui/src/side-pane-full-view/`（managed，见其 `CONTRACT.md`）。
+状态：已实现（2026-10-16），E2E 已转正（2026-10-17）：`ui-shell/panels/side-pane-full-view.test.ts`、`conversation-session/branching/conversation-session-side-pane-full-view.test.ts`。仅桌面 Electron；普通 Web、手机远控 `/remote` 不提供入口。代码模块：`packages/ui/src/side-pane-full-view/`（managed，见其 `CONTRACT.md`）。
 
 ## 目标
 
@@ -16,7 +16,7 @@
 | 关闭最后一个面板 tab                                                       | 面板按既有规则收起，同时退出完整视图                     |
 | 面板关闭时按快捷键                                                         | 打开面板并进入完整视图                                   |
 
-- 快捷键命令 id 为 `toggleSidePaneFullView`，可在设置页改键；桌面 Electron 与自部署 Web 均注册处理器，手机远控不注册。
+- 快捷键命令 id 为 `toggleSidePaneFullView`，可在设置页改键；Web 端不注册处理器，也不在设置页显示。
 - 退出完整视图不修改任何原有状态：侧栏显隐、侧栏宽度、面板宽度、终端开合都沿用进入前的值。
 
 ## 布局
@@ -35,6 +35,7 @@
 - `WorkspaceHeader` 不显示，面板 tab 栏取代它成为内容区顶栏；Windows/Linux 的窗口按钮仍在面板右上角。
 - 对话 tab 固定在第一位：聊天图标 + 当前任务标题（草稿显示「新任务」），不能关闭、不能拖动排序，没有「⋯」菜单（任务菜单仍在退出完整视图后的标题栏）。tab 栏是窗口拖拽区（`app-region: drag`），对话 tab 必须显式标为 `no-drag`，否则真实鼠标点击会被当成拖动窗口。
 - 点对话 tab：对话在面板内容区全宽显示（含底部终端）。点任意面板 tab：显示该 tab，同时出现浮动输入窗口。
+- 对话 tab 与面板 tab 之间切换时，宿主位置与尺寸在绘制前直接到位，输入框和回答气泡不得从整页尺寸收缩或跨屏移动。浮窗内部的展开、收起、聚焦操作栏与拖动松手后的吸附仍保留局部过渡；最小化与恢复沿用既有缩放淡入。单实例与草稿保持规则不变。
 - 面板外框在完整视图中是 `absolute inset-0 z-0`：只建立自己的层叠上下文，不抬高层级。插件 UI 页面不在面板 DOM 里，而是挂在 `body` 末尾的 fixed 停靠层（`[data-sandbox-page-parking]`，无 z-index）并按 tab 占位元素的坐标摆放；外框若用正的 z-index，会把不透明背景画在插件页面上面。对话内容都在宿主（`fixed z-30`）里，浮窗仍在插件页面之上。
 - 面板展开后的空标签集合由 `useAppPanels` 补建「新标签页」tab（见 `docs/ui/side-pane-tabs.md`），完整视图沿用；补建前的瞬间内容区显示同一个启动页，tab 栏只有对话 tab 与「+」。
 
@@ -79,7 +80,7 @@ slot 是面板 tab 栏下方的内容区。宿主通过 ResizeObserver 读取 sl
 └─ 拖动中的坐标、操作栏是否显示、底部输入区高度
 
 只读派生
-├─ 完整视图生效 = 非远控 && 面板打开 && 当前 owner 有记录
+├─ 完整视图生效 = 桌面 && 非远控 && 面板打开 && 当前 owner 有记录
 ├─ WorkspaceHeader 显示 = !完整视图生效
 └─ 浮窗显示 = 完整视图生效 && surface === "side-pane"
 ```
