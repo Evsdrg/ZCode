@@ -507,10 +507,11 @@ export async function exportLogs(
     const writeDirectory = dependencies.writeLogArchiveDirectory ?? writeLogArchiveDirectory;
     const showItemInFolder =
       dependencies.showItemInFolder ??
-      (async (path: string) => {
-        const { shell } = await import("electron");
-        shell.showItemInFolder(path);
-      });
+      // 默认空操作：本文件已下沉到 services，不能再动态 import("electron")——
+      // 服务端 bundle 是 ESM，一旦真的加载到 npm electron/index.js 会在其中执行
+      // require("child_process")，直接抛 `Dynamic require of "child_process" is not supported`。
+      // 桌面 Host 必须显式注入 Electron shell.showItemInFolder；自部署不注入即不打开文件管理器。
+      (async (_path: string) => {});
     const getStageRootDir = dependencies.getExportLogStageDir ?? getDefaultExportLogStageDir;
     const getOutputRootDir = dependencies.getExportLogDir ?? getDefaultExportLogDir;
 
