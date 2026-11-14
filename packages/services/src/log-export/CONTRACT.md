@@ -24,5 +24,8 @@
   `Content-Disposition: attachment` 的 zip，失败时返回 JSON 错误（避免浏览器把错误体存成
   坏掉的 zip）。
 - 浏览器侧在 `packages/web/src/platform/exportLogs.ts`，先 fetch 再转 blob 下载。
+- 诊断归档复用 `cli-memory-diagnostics` 的公开入口
+  `packages/services/src/feedback/feedbackLogArchive.ts`；该文件从 3.18.1 起归属此模块，
+  `module.ts` 与 `architecture-policy.yaml` 同步声明依赖，不复制其采样或脱敏逻辑。
 - `showItemInFolder` 是可注入依赖，默认空操作：桌面 Host 注入 Electron shell，自部署不注入。
 - `setLogExportLogger` 只供测试替换 sink，生产代码不调用。

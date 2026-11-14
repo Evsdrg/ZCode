@@ -4,7 +4,8 @@
  */
 export const logExportModule = {
   id: "log-export",
-  requires: ["services", "shared"],
+  // cli-memory-diagnostics：复用其 feedbackLogArchive 生成诊断归档（3.18.1 起该文件归入该模块）。
+  requires: ["services", "shared", "cli-memory-diagnostics"],
   provides: ["log-export"],
   publicEntrypoints: ["index.ts", "contract.ts"],
 } as const;
