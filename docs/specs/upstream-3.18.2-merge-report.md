@@ -11,10 +11,10 @@
 
 只有两个文本冲突，均为双方独立追加内容：
 
-| 文件 | 处理 |
-| --- | --- |
-| `.gitignore` | 保留 fork 的 Rust helper/socket 忽略项与上游的 NSIS 生成目录忽略项 |
-| `architecture-policy.yaml` | 保留 fork 四个受管模块与上游 `cli-memory-diagnostics` 模块 |
+| 文件                       | 处理                                                               |
+| -------------------------- | ------------------------------------------------------------------ |
+| `.gitignore`               | 保留 fork 的 Rust helper/socket 忽略项与上游的 NSIS 生成目录忽略项 |
+| `architecture-policy.yaml` | 保留 fork 四个受管模块与上游 `cli-memory-diagnostics` 模块         |
 
 上游将 `packages/services/src/feedback/feedbackLogArchive.ts` 纳入
 `cli-memory-diagnostics` 的公开入口。fork 的 `log-export` 已有对该文件的依赖，
@@ -46,30 +46,30 @@
 
 Node `24.14.0`，pnpm `10.33.2`。
 
-| 检查 | 结果 |
-| --- | --- |
-| `pnpm typecheck` | exit 0 |
-| `pnpm lint` | exit 0，553 warnings / 0 errors |
-| `pnpm architecture:check --changed` | 0 violations |
-| `pnpm test:selfhost` | 63 文件通过、3 跳过；447 用例通过、4 跳过 |
-| `pnpm test:engineering` | 167 文件通过、2 跳过；1031 用例通过、10 跳过 |
-| `pnpm check:e2e-remote-targets` | exit 0 |
-| `pnpm docs:stale-phrases:check` | exit 0 |
-| `pnpm db:schema:check` | exit 0 |
-| `pnpm test:architecture` | exit 0 |
-| server / web 构建 | 均成功；server 无顶层 `from "@zcode/services/node"` |
-| `git diff --check`（暂存与未暂存） | 通过 |
+| 检查                                | 结果                                                |
+| ----------------------------------- | --------------------------------------------------- |
+| `pnpm typecheck`                    | exit 0                                              |
+| `pnpm lint`                         | exit 0，553 warnings / 0 errors                     |
+| `pnpm architecture:check --changed` | 0 violations                                        |
+| `pnpm test:selfhost`                | 63 文件通过、3 跳过；447 用例通过、4 跳过           |
+| `pnpm test:engineering`             | 167 文件通过、2 跳过；1031 用例通过、10 跳过        |
+| `pnpm check:e2e-remote-targets`     | exit 0                                              |
+| `pnpm docs:stale-phrases:check`     | exit 0                                              |
+| `pnpm db:schema:check`              | exit 0                                              |
+| `pnpm test:architecture`            | exit 0                                              |
+| server / web 构建                   | 均成功；server 无顶层 `from "@zcode/services/node"` |
+| `git diff --check`（暂存与未暂存）  | 通过                                                |
 
 ### React Hooks 专项核对
 
 用仅启用 Hooks 两条规则、无 ignorePatterns 的独立配置扫描本次变更的 29 个 UI 源文件，
 包括根 lint 排除的 `components/ai-elements/reasoning.tsx`。使用同一 Oxlint 1.60.0 对照：
 
-| 树 | 文件数 | Hooks 诊断数 |
-| --- | ---: | ---: |
-| fork 基线 `5f726673` | 28 | 37 |
-| 上游 `fec97590` | 29 | 35 |
-| 合并工作树 | 29 | 35 |
+| 树                   | 文件数 | Hooks 诊断数 |
+| -------------------- | -----: | -----------: |
+| fork 基线 `5f726673` |     28 |           37 |
+| 上游 `fec97590`      |     29 |           35 |
+| 合并工作树           |     29 |           35 |
 
 按文件、规则、消息及重复次数比较：合并相对两棵基线都没有新增诊断。
 人工复核新闭包输入：`startPlanFamilyDomain` 已进入导航 memo 依赖；
