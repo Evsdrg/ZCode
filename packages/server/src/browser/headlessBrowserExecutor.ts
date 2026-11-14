@@ -218,8 +218,23 @@ export function createHeadlessBrowserExecutor(
       }
       case "screenshot": {
         const tab = await session.ensureTab(command.tabId);
+        // 区域截图：clip 使用视口 CSS px，scale:1 保证与注入坐标同系（对齐 desktop
+        // browserCommandPageHandlers 的 Page.captureScreenshot 语义）。旧实现直接丢弃 clip，
+        // 请求 100x60 却返回整屏 1280x720，调用方按裁剪尺寸做后续定位必然错位。
         const buffer = await tab.page.screenshot({
           ...(command.fullPage ? { fullPage: true } : {}),
+          ...(command.clip
+            ? {
+                clip: {
+                  x: command.clip.x,
+                  y: command.clip.y,
+                  width: command.clip.width,
+                  height: command.clip.height,
+                },
+                // clip 与 fullPage 互斥：clip 已显式指定区域，不能再让 Playwright 扩到整页。
+                fullPage: false,
+              }
+            : {}),
           type: "png",
         });
         return withMeta({
@@ -362,17 +377,61 @@ export function createHeadlessBrowserExecutor(
         return withMeta({ ok: true });
       case "capabilities":
       case "browserVisibilitySet":
-      case "browserViewportReset":
       case "turnEnded":
         return withMeta({ ok: true });
       case "browserVisibilityGet":
         return withMeta({ ok: true, value: true });
       case "browserViewportSet": {
-        session.setViewport({
-          width: Math.round(command.width),
-          height: Math.round(command.height),
-        });
+        await session.setViewport(
+          { width: Math.round(command.width), height: Math.round(command.height) },
+          command.tabId,
+        );
         return withMeta({ ok: true });
+      }
+      case "browserViewportReset": {
+        await session.resetViewport(command.tabId);
+        return withMeta({ ok: true });
+      }
+      // finalize/markDeliverable/markHandoff 只记录 tab 生命周期状态。托管后端没有
+      // Electron 那种「把 tab 交还用户窗口」的语义，所以不关闭任何 tab（与 desktop
+      // finalizeTabs 注释一致：keep 是状态标记集合，不是清理白名单）。
+      case "finalize": {
+        const tab = await session.ensureTab(command.tabId);
+        session.setLifecycle(tab.id, command.deliverable === false ? "active" : "deliverable");
+        return withMeta({ ok: true, tab: summarizeTab(session, tab.id) });
+      }
+      case "markDeliverable": {
+        const tab = await session.ensureTab(command.tabId);
+        session.setLifecycle(tab.id, "deliverable");
+        return withMeta({ ok: true, tab: summarizeTab(session, tab.id) });
+      }
+      case "markHandoff": {
+        const tab = await session.ensureTab(command.tabId);
+        session.setLifecycle(tab.id, "handoff");
+        return withMeta({ ok: true, tab: summarizeTab(session, tab.id) });
+      }
+      case "finalizeTabs": {
+        // 未知 tabId 必须报错，否则模型以为自己的标签被确认，实际是拼错 id。
+        const unknown = command.keep
+          .map((item) => item.tabId)
+          .filter((tabId) => !session.hasTab(tabId));
+        if (unknown.length > 0) {
+          return fail("backend_unavailable", `cannot finalize unknown tab(s): ${unknown.join(", ")}`);
+        }
+        for (const item of command.keep) session.setLifecycle(item.tabId, item.status);
+        return withMeta({ ok: true });
+      }
+      case "claimTab": {
+        // 托管后端没有「用户 tab」池：listUserTabs 恒返回空，因此 claim 只能识别已有受控 tab。
+        // 回显 tab 摘要，让 SDK 的 browser.user.claimTab() 拿到可继续操作的 tab 对象。
+        if (!session.hasTab(command.tabId)) {
+          return fail(
+            "backend_unavailable",
+            `user browser tab '${command.tabId}' is unavailable or already claimed`,
+          );
+        }
+        const tab = session.activateTab(command.tabId);
+        return withMeta({ ok: true, tab: summarizeTab(session, tab.id) });
       }
       default:
         return fail("capability_unsupported", `Unsupported browser command: ${command.method}`);

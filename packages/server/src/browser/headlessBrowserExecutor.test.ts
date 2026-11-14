@@ -349,4 +349,138 @@ describe("headlessBrowserExecutor", () => {
     expect(name.ok).toBe(true);
     await executor.shutdown();
   });
+
+  // 回归：官方 SDK 的 browser.tabs.finalize() 会发 finalizeTabs，此前落到 dispatch default
+  // 返回 capability_unsupported，使 SDK 抛错；闭源 node-repl-host 对 finalizeTabs 成功还会置
+  // sessionEnded。保持 ok 且不关闭任何 tab（desktop 语义：keep 是状态标记，不是清理白名单）。
+  it("finalizeTabs 标记生命周期且不关闭 tab；未知 tabId 报错", async () => {
+    const fake = createFakePlaywright();
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
+    const first = (await executor.execute(cmd({ method: "newTab" }))).tab!.tabId;
+    const second = (await executor.execute(cmd({ method: "newTab" }))).tab!.tabId;
+
+    const finalized = await executor.execute(
+      cmd({
+        method: "finalizeTabs",
+        keep: [
+          { tabId: first, status: "deliverable" },
+          { tabId: second, status: "handoff" },
+        ],
+      }),
+    );
+    expect(finalized.ok).toBe(true);
+    const tabs = (await executor.execute(cmd({ method: "list" }))).tabs!;
+    expect(tabs.map((tab) => tab.tabId).sort()).toEqual([first, second].sort());
+    expect(tabs.find((tab) => tab.tabId === first)?.lifecycle).toBe("deliverable");
+    expect(tabs.find((tab) => tab.tabId === second)?.lifecycle).toBe("handoff");
+
+    const unknown = await executor.execute(
+      cmd({ method: "finalizeTabs", keep: [{ tabId: "tab-does-not-exist", status: "handoff" }] }),
+    );
+    expect(unknown.ok).toBe(false);
+    expect(unknown.error?.code).toBe("backend_unavailable");
+    expect(unknown.error?.message).toContain("tab-does-not-exist");
+    await executor.shutdown();
+  });
+
+  it("finalize/markDeliverable/markHandoff/claimTab 均可调用并回报 tab", async () => {
+    const fake = createFakePlaywright();
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
+    const tabId = (await executor.execute(cmd({ method: "newTab" }))).tab!.tabId;
+
+    for (const command of [
+      { method: "markDeliverable", tabId } as BrowserCommand,
+      { method: "markHandoff", tabId } as BrowserCommand,
+      { method: "finalize", tabId } as BrowserCommand,
+    ]) {
+      const result = await executor.execute(cmd(command));
+      expect(result.ok, JSON.stringify(result.error)).toBe(true);
+      expect(result.tab?.tabId).toBe(tabId);
+    }
+    const claimed = await executor.execute(cmd({ method: "claimTab", tabId }));
+    expect(claimed.ok).toBe(true);
+    expect(claimed.tab?.tabId).toBe(tabId);
+
+    const missing = await executor.execute(cmd({ method: "claimTab", tabId: "tab-missing" }));
+    expect(missing.ok).toBe(false);
+    expect(missing.error?.code).toBe("backend_unavailable");
+    await executor.shutdown();
+  });
+
+  // 回归：clip 被丢弃时请求 100x60 会返回整屏，调用方按裁剪尺寸定位必然错位。
+  it("screenshot 透传 clip 到 Playwright，且不与 fullPage 同时生效", async () => {
+    const fake = createFakePlaywright();
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
+    const tabId = (await executor.execute(cmd({ method: "newTab" }))).tab!.tabId;
+
+    const clipped = await executor.execute(
+      cmd({ method: "screenshot", tabId, clip: { x: 8, y: 9, width: 100, height: 60 } }),
+    );
+    expect(clipped.ok).toBe(true);
+    expect(fake.screenshot).toHaveBeenLastCalledWith({
+      clip: { x: 8, y: 9, width: 100, height: 60 },
+      fullPage: false,
+      type: "png",
+    });
+
+    await executor.execute(cmd({ method: "screenshot", tabId }));
+    expect(fake.screenshot).toHaveBeenLastCalledWith({ type: "png" });
+    await executor.shutdown();
+  });
+
+  // 回归：旧实现遍历所有 tab 修改 viewport，设 tab A 会把 tab B 一起改掉；
+  // reset 只返回 ok 但不恢复。
+  it("browserViewportSet 只改目标 tab，browserViewportReset 真实恢复", async () => {
+    const fake = createFakePlaywright();
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
+    const first = (await executor.execute(cmd({ method: "newTab" }))).tab!.tabId;
+    const second = (await executor.execute(cmd({ method: "newTab" }))).tab!.tabId;
+
+    const resized = await executor.execute(
+      cmd({ method: "browserViewportSet", tabId: first, width: 390, height: 844 }),
+    );
+    expect(resized.ok).toBe(true);
+    const afterSet = (await executor.execute(cmd({ method: "list" }))).tabs!;
+    expect(afterSet.find((tab) => tab.tabId === first)?.viewport).toEqual({
+      width: 390,
+      height: 844,
+    });
+    expect(afterSet.find((tab) => tab.tabId === second)?.viewport).toEqual({
+      width: 1280,
+      height: 720,
+    });
+
+    const reset = await executor.execute(cmd({ method: "browserViewportReset", tabId: first }));
+    expect(reset.ok).toBe(true);
+    const afterReset = (await executor.execute(cmd({ method: "list" }))).tabs!;
+    expect(afterReset.find((tab) => tab.tabId === first)?.viewport).toEqual({
+      width: 1280,
+      height: 720,
+    });
+    expect(fake.setViewportSize).toHaveBeenLastCalledWith({ width: 1280, height: 720 });
+    await executor.shutdown();
+  });
+
+  // 回归：elementScreenshot 此前没有分支，SDK 调用直接抛 Unsupported playwright action。
+  it("playwright elementScreenshot 返回图像并清理高亮层", async () => {
+    const fake = createFakePlaywright();
+    const executor = createHeadlessBrowserExecutor({ ...fake.runtimeOptions });
+    const tabId = (await executor.execute(cmd({ method: "newTab" }))).tab!.tabId;
+
+    const result = await executor.execute(
+      cmd({ method: "playwright", tabId, action: { name: "elementScreenshot", x: 10, y: 20 } }),
+    );
+    expect(result.ok, JSON.stringify(result.error)).toBe(true);
+    expect(result.image?.mimeType).toBe("image/png");
+    expect(result.image?.base64).toBe(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    );
+    // 先画后撤：两次 evaluate（add / remove），保证高亮层不残留在页面上。
+    const overlayCalls = fake.page.evaluate.mock.calls.filter((call) =>
+      String(call[0]).includes("__zcode-element-screenshot-overlay"),
+    );
+    expect(overlayCalls).toHaveLength(2);
+    expect(overlayCalls[1]?.[1]).toMatchObject({ x: 10, y: 20, remove: true });
+    await executor.shutdown();
+  });
 });

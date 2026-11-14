@@ -18,6 +18,10 @@ const DEFAULT_MAX_ELEMENTS = 200;
 interface ManagedTab {
   id: string;
   page: Page;
+  /** 该 tab 自己的 viewport。browserViewportSet 只影响目标 tab，不波及其他 tab。 */
+  viewport?: BrowserViewportSize;
+  /** finalize/markDeliverable/markHandoff 标记；托管后端不做 tab 生命周期回收，仅如实回报。 */
+  lifecycle?: "active" | "deliverable" | "handoff";
 }
 
 /**
@@ -154,6 +158,7 @@ export class HeadlessBrowserSession {
     const tab: ManagedTab = {
       id: `tab-${this.#tabs.size + 1}-${Math.random().toString(36).slice(2, 8)}`,
       page,
+      viewport: { ...DEFAULT_VIEWPORT },
     };
     this.#tabs.set(tab.id, tab);
     if (!this.#activeTabId) this.#activeTabId = tab.id;
@@ -186,6 +191,7 @@ export class HeadlessBrowserSession {
     const page = await this.#context.newPage();
     await page.setViewportSize(this.#viewport);
     const tab = this.registerPage(page);
+    tab.viewport = { ...this.#viewport };
     this.#activeTabId = tab.id;
     return tab;
   }
@@ -248,8 +254,9 @@ export class HeadlessBrowserSession {
       tabId: tab.id,
       url: tab.page.url(),
       title: "",
-      viewport: this.#viewport,
+      viewport: tab.viewport ?? this.#viewport,
       active: tab.id === this.#activeTabId,
+      ...(tab.lifecycle ? { lifecycle: tab.lifecycle } : {}),
     }));
   }
 
@@ -266,20 +273,46 @@ export class HeadlessBrowserSession {
         tabId: tab.id,
         url: tab.page.url(),
         title,
-        viewport: this.#viewport,
+        viewport: tab.viewport ?? this.#viewport,
         active: tab.id === this.#activeTabId,
+        ...(tab.lifecycle ? { lifecycle: tab.lifecycle } : {}),
       });
     }
     return out;
   }
 
-  setViewport(size: BrowserViewportSize): void {
-    this.#viewport = size;
-    for (const tab of this.#tabs.values()) void tab.page.setViewportSize(size).catch(() => {});
+  /**
+   * 只改目标 tab 的 viewport。desktop 语义：browserViewportSet 作用于 resolveTab 得到的单个
+   * tab（browserGuestManager.setTabViewport），绝不波及其他 tab；旧实现遍历全部 tab 修改，
+   * 会让同一会话里另一个 tab 的尺寸一起被改掉。
+   */
+  async setViewport(size: BrowserViewportSize, tabId?: string): Promise<void> {
+    const tab = await this.ensureTab(tabId);
+    tab.viewport = { width: size.width, height: size.height };
+    await tab.page.setViewportSize(tab.viewport);
   }
 
+  /** 恢复目标 tab 到会话默认 viewport。reset 必须真实生效，不能只返回 ok。 */
+  async resetViewport(tabId?: string): Promise<void> {
+    const tab = await this.ensureTab(tabId);
+    tab.viewport = { ...DEFAULT_VIEWPORT };
+    await tab.page.setViewportSize(tab.viewport);
+  }
+
+  /** 会话级默认 viewport：只用于新建 tab 的初始尺寸。 */
   get viewport(): BrowserViewportSize {
     return this.#viewport;
+  }
+
+  /** 记录 finalize/markDeliverable/markHandoff 的状态；托管后端不据此关闭 tab。 */
+  setLifecycle(tabId: string, lifecycle: "active" | "deliverable" | "handoff"): void {
+    const tab = this.#tabs.get(tabId);
+    if (tab) tab.lifecycle = lifecycle;
+  }
+
+  hasTab(tabId: string): boolean {
+    const tab = this.#tabs.get(tabId);
+    return Boolean(tab && !tab.page.isClosed());
   }
 
   activeTab(): ManagedTab | undefined {

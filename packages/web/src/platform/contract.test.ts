@@ -14,6 +14,8 @@ describe("web platform boundary", () => {
     // 可选方法不实现就不要写桩：UI 的存在性判定必须拿到 undefined。
     expect(platform.importChromeBrowserData).toBeUndefined();
     expect(platform.openExternalFile).toBeUndefined();
+    // 日志导出与 host-native 无关，只由 server 的 logExport 能力决定；未声明时入口不渲染。
+    expect(platform.canExportLogs).toBeUndefined();
   });
 
   it("注入 hostNativeService 后按能力声明，且注入项之间互不牵连", () => {
@@ -49,6 +51,19 @@ describe("web platform boundary", () => {
       managedBrowserMaintenance: { clearAllData: async () => ({ success: true }) },
     });
     expect(platform.canConfigureManagedBrowserCertificates).toBe(true);
+  });
+
+  // 回归：日志导出的 server 路由（`/api/logs/export`）与 Web 平台实现都存在，但帮助菜单
+  // 的入口曾整块包在 isDesktop 里，Web 用户永远看不到。现在由 canExportLogs 显式声明。
+  it("server 声明 logExport 时才宣告 canExportLogs，并与其它能力互不牵连", () => {
+    const withLogExport = createWebPlatform({ logExport: true });
+    expect(withLogExport.canExportLogs).toBe(true);
+    // 日志导出不需要 host-native，也不能反过来影响本机文件能力。
+    expect(withLogExport.canOpenLocalFiles).toBe(false);
+    expect(withLogExport.exportLogs).toBeTypeOf("function");
+
+    const withoutLogExport = createWebPlatform();
+    expect(withoutLogExport.canExportLogs).toBeUndefined();
   });
 
   it("个性化指令能力与托管浏览器、host-native 互不牵连", () => {

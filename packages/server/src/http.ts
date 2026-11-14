@@ -206,6 +206,12 @@ export interface HttpServerOptions {
       path?: string;
       error?: string;
     }>;
+    /**
+     * 响应发送后清理服务端产物。桌面端导出后会用文件管理器定位文件、文件留给用户；
+     * 自部署的 zip 已经作为下载字节回了浏览器，服务端副本无人使用，不清理会在
+     * `~/.zcode/export-log/` 里无限累积（单次 140MB+）。
+     */
+    cleanup?(path: string): Promise<void>;
   };
 }
 
@@ -508,6 +514,10 @@ export function createHttpServer(
         return c.json({ error: result.error ?? "Log export failed" }, 500);
       }
       if (result.format !== "zip" || !result.bytes) {
+        // 目录回退无法下载，且产物无用户可见去处；一并清掉，避免留在 export-log 里。
+        if (result.path && logExportService.cleanup) {
+          await logExportService.cleanup(result.path).catch(() => {});
+        }
         return c.json(
           {
             error: "Log export produced a directory instead of a zip archive",
@@ -516,12 +526,18 @@ export function createHttpServer(
           500,
         );
       }
-      return c.body(new Uint8Array(result.bytes), 200, {
+      // bytes 已全部读入内存，响应不依赖磁盘文件；先取响应再清服务端副本。
+      // 清理失败不影响已构造的响应（下载已成功），只记日志。
+      const response = c.body(new Uint8Array(result.bytes), 200, {
         "Cache-Control": "no-store",
         "Content-Disposition": `attachment; filename="${result.fileName ?? "zcode-logs.zip"}"`,
         "Content-Length": String(result.bytes.byteLength),
         "Content-Type": "application/zip",
       });
+      if (result.path && logExportService.cleanup) {
+        await logExportService.cleanup(result.path).catch(() => {});
+      }
+      return response;
     });
   }
 

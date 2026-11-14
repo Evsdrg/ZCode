@@ -14,6 +14,7 @@
  * 同样的 3 天时间窗、同样的敏感字段脱敏规则、zip 失败时回退目录导出。
  */
 import { readFile, rm } from "node:fs/promises";
+import { dirname } from "node:path";
 import { createFeedbackLogArchiveFromExportLogs, exportLogs } from "./exportLogs.js";
 import { getAppConfigDir } from "#src/paths.js";
 
@@ -32,6 +33,8 @@ export interface LogExportResult {
 
 export interface LogExportService {
   export(): Promise<LogExportResult>;
+  /** 删除单次导出产物（zip 或目录回退的整个输出目录）。 */
+  cleanup(path: string): Promise<void>;
   createFeedbackArchive(): Promise<{ path: string; size: number }>;
 }
 
@@ -61,6 +64,11 @@ export function createLogExportService(): LogExportService {
           error: error instanceof Error ? error.message : String(error),
         };
       }
+    },
+    async cleanup(path: string) {
+      // 导出产物总是落在 `mkdtemp(join(outputRootDir, ...))` 建出的独立目录里，
+      // 删除整个父目录，避免只删 zip 时留下空目录（目录回退时则需要删整棵）。
+      await rm(dirname(path), { recursive: true, force: true });
     },
     async createFeedbackArchive() {
       // 与桌面端 desktopHostProcess 的同名路径一致：把应用数据目录交给反馈归档器。

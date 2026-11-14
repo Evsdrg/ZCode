@@ -834,6 +834,14 @@ export interface IPlatformService {
   canEditUserInstructions?: boolean;
 
   /**
+   * 是否可导出诊断日志（打包日志目录并交给用户）。
+   * 桌面端由 Electron main 打包并用系统文件管理器定位；自部署 Web 由 server 打包 zip
+   * 后作为浏览器下载（`/api/logs/export`），两者都真实可用，故共用同一个设置入口。
+   * 手机远控不声明——日志在远端主机上，下载到手机上无意义。
+   */
+  canExportLogs?: boolean;
+
+  /**
    * 插件 UI 沙箱平台端口。只有桌面端实现；
    * web / 手机远控为 undefined，plugin-ui 据此回退到普通 MCP 工具卡片。
    */

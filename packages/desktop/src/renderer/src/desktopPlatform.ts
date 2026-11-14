@@ -32,6 +32,8 @@ export function createDesktopPlatform(options: {
     canOpenLocalFiles: true,
     // 桌面端：个性化指令写本机 ~/.zcode/AGENTS.md。
     canEditUserInstructions: true,
+    // 桌面端：Electron main 打包日志并用系统文件管理器定位。
+    canExportLogs: true,
     // 桌面端：证书策略由 Electron main 在启动时装到内置浏览器 Session。
     canConfigureManagedBrowserCertificates: true,
     pluginSandbox: createDesktopPluginSandboxPlatform(),

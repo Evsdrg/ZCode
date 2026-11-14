@@ -140,16 +140,20 @@ export function WorkspaceHelpMenuButton({
           <LightbulbIcon className="size-4" />
           {intl.formatMessage({ id: "workspaceHeader.help.productRequest" })}
         </DropdownMenuItem>
+        {/* 导出逻辑的能力判定不能看 isDesktop：自部署 Web 的 server 已真实实现日志打包，
+            经 `/api/logs/export` 回给浏览器下载（见 packages/web/src/platform/exportLogs.ts）。
+            用 canExportLogs 显式声明，桌面端与自部署都可用，手机远控不声明则不渲染。 */}
+        {platform.canExportLogs || isDesktop ? <DropdownMenuSeparator /> : null}
+        {platform.canExportLogs ? (
+          <DropdownMenuItem onSelect={helpMenuActions.exportLogs}>
+            <DownloadIcon className="size-4" />
+            {intl.formatMessage({ id: "titleBar.menu.help.exportLogs" })}
+          </DropdownMenuItem>
+        ) : null}
         {/* Windows/Linux 没有原生菜单栏，自绘标题栏箭头菜单也已下线，
             资源管理器只能从这里进；Web 端没有该窗口，不渲染。 */}
         {isDesktop ? (
           <>
-            <DropdownMenuSeparator />
-            {/* 独立导出入口曾被移除；复用原菜单动作，保持打包、系统定位与提示一致。 */}
-            <DropdownMenuItem onSelect={helpMenuActions.exportLogs}>
-              <DownloadIcon className="size-4" />
-              {intl.formatMessage({ id: "titleBar.menu.help.exportLogs" })}
-            </DropdownMenuItem>
             <DropdownMenuItem onSelect={handleCopyDeviceMid}>
               <CopyIcon className="size-4" />
               {intl.formatMessage({ id: "workspaceHeader.help.copyDeviceMid" })}

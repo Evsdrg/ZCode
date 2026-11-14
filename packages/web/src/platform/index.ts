@@ -150,6 +150,9 @@ export function createWebPlatform(options?: {
     // 由 server 真实实现并注册到 RPC，写入的就是 server 所在机器的 `~/.zcode/AGENTS.md`，
     // 与桌面端语义一致。手机远控不声明——其 base services 可能归属远程 Source。
     canEditUserInstructions: true,
+    // 自部署：server 打包日志并通过 `/api/logs/export` 回给浏览器下载。仅在 server 真的注册了
+    // logExportService（server-info.capabilities.logExport）时声明，否则入口不该出现。
+    ...(options?.logExport ? { canExportLogs: true } : {}),
     // Web 端无法打开系统目录选择框
     selectDirectory: () => Promise.resolve(null),
     // Web 端无法打开系统文件选择框

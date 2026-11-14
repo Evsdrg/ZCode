@@ -203,6 +203,30 @@ export async function runDragPath(
   }
 }
 
+/**
+ * elementScreenshot 的元素高亮层。与 desktop browserPlaywrightExecutor.overlayRuntime 同语义：
+ * 在命中点所有元素上画红框 + 中心点，截完整个视口后移除。
+ * 用字符串注入，server 侧 tsconfig 无 DOM lib。
+ */
+const ELEMENT_OVERLAY_SCRIPT = `(options) => {
+  const id = "__zcode-element-screenshot-overlay";
+  document.getElementById(id)?.remove();
+  if (options.remove) return;
+  const root = document.createElement("div");
+  root.id = id;
+  root.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647";
+  for (const element of document.elementsFromPoint(options.x, options.y)) {
+    const rect = element.getBoundingClientRect();
+    const box = document.createElement("div");
+    box.style.cssText = "position:absolute;left:" + rect.x + "px;top:" + rect.y + "px;width:" + rect.width + "px;height:" + rect.height + "px;border:2px solid #ff2d55;box-sizing:border-box";
+    root.append(box);
+  }
+  const point = document.createElement("div");
+  point.style.cssText = "position:absolute;left:" + (options.x - 4) + "px;top:" + (options.y - 4) + "px;width:8px;height:8px;border-radius:50%;background:#ff2d55";
+  root.append(point);
+  document.documentElement.append(root);
+}`;
+
 export async function handlePlaywrightAction(
   session: HeadlessBrowserSession,
   tab: ManagedTabRef,
@@ -212,6 +236,23 @@ export async function handlePlaywrightAction(
   if (!action) return {};
   const page = tab.page;
   switch (action.name) {
+    case "elementScreenshot": {
+      // 官方 SDK 的 elementScreenshot(options) 必传 x/y（validateCoordinates 强校验），
+      // 语义是「高亮该点元素后截当前视口」，不是裁元素矩形；对齐 desktop 实现。
+      const x = Number(action.x);
+      const y = Number(action.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        throw new Error("elementScreenshot requires numeric x and y coordinates");
+      }
+      await page.evaluate(ELEMENT_OVERLAY_SCRIPT, { x, y });
+      try {
+        const buffer = await page.screenshot({ type: "png" });
+        return { image: { base64: buffer.toString("base64"), mimeType: "image/png" } };
+      } finally {
+        // 高亮层必须无论成败都移除，否则会残留在页面上被后续截图拍到。
+        await page.evaluate(ELEMENT_OVERLAY_SCRIPT, { x, y, remove: true }).catch(() => {});
+      }
+    }
     case "domSnapshot":
       // 对齐 CLI 托管后端：facade 的 domSnapshot(): Promise<string> 读取 value，
       // 内容是 Playwright 的 AI/ARIA 树（YAML 文本），是定位的唯一真相。

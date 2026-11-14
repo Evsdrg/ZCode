@@ -15,6 +15,7 @@
     "packages/server/test/staticAssetCompression.test.ts",
     "packages/server/test/zcodeEndpointProxy.test.ts",
     "packages/services/src/host-native/applicationIcons.test.ts",
+    "packages/services/src/log-export/logExportService.test.ts",
     "packages/services/src/host-native/contract.test.ts",
     "packages/services/src/host-native/openTarget.test.ts",
     "packages/services/src/media-preview/mediaPreviewLeaseStore.test.ts",
